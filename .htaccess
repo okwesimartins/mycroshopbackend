@@ -1,0 +1,9 @@
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteBase /
+RewriteRule ^server/(.*)?$ http://127.0.0.1:3000/$1 [P,L]
+<Files 403.shtml>
+order allow,deny
+allow from all
+</Files>
