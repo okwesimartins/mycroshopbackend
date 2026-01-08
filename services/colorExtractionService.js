@@ -1,7 +1,15 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const axios = require('axios');
-const sharp = require('sharp');
+
+// Sharp is optional - only used for image format conversion
+// If not available, we'll skip conversion (Gemini can handle most formats)
+let sharp = null;
+try {
+  sharp = require('sharp');
+} catch (error) {
+  console.warn('Sharp not available - image format conversion will be skipped. Install with: npm install sharp');
+}
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -33,9 +41,20 @@ async function extractColorsFromLogo(logoImage) {
     }
 
     // Convert to PNG if needed (Gemini works best with PNG/JPEG)
+    // Only convert if sharp is available, otherwise use original format
     if (mimeType !== 'image/png' && mimeType !== 'image/jpeg') {
-      imageBuffer = await sharp(imageBuffer).png().toBuffer();
-      mimeType = 'image/png';
+      if (sharp) {
+        try {
+          imageBuffer = await sharp(imageBuffer).png().toBuffer();
+          mimeType = 'image/png';
+        } catch (error) {
+          console.warn('Failed to convert image format with sharp, using original format:', error.message);
+          // Continue with original format - Gemini can often handle it
+        }
+      } else {
+        console.warn('Sharp not available - using original image format. Gemini may still process it.');
+        // Continue with original format - Gemini can handle many formats
+      }
     }
 
     // Use Gemini 1.5 Pro Vision for image analysis
