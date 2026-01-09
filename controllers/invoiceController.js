@@ -595,7 +595,7 @@ async function createInvoice(req, res) {
     console.error('Error creating invoice:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create invoice'
+      message: error.message
     });
   }
 }
