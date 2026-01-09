@@ -334,6 +334,28 @@ async function getInvoiceById(req, res) {
  * Create invoice (store-specific)
  */
 async function createInvoice(req, res) {
+  // Validate database and models are available
+  if (!req.db) {
+    return res.status(500).json({
+      success: false,
+      message: 'Database connection not available'
+    });
+  }
+
+  if (!req.db.models) {
+    return res.status(500).json({
+      success: false,
+      message: 'Database models not initialized'
+    });
+  }
+
+  if (!req.db.models.Invoice) {
+    return res.status(500).json({
+      success: false,
+      message: 'Invoice model not found. Please ensure models are properly initialized.'
+    });
+  }
+
   const transaction = await req.db.transaction();
   
   try {
@@ -593,9 +615,18 @@ async function createInvoice(req, res) {
   } catch (error) {
     await transaction.rollback();
     console.error('Error creating invoice:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      dbAvailable: !!req.db,
+      modelsAvailable: !!req.db?.models,
+      invoiceModelAvailable: !!req.db?.models?.Invoice,
+      availableModels: req.db?.models ? Object.keys(req.db.models) : 'none'
+    });
     res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Failed to create invoice',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }
