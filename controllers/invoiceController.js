@@ -61,7 +61,8 @@ async function getAllInvoices(req, res) {
           include: [
             {
               model: req.db.models.Product,
-              attributes: ['id', 'name', 'sku']
+              required: false,
+              attributes: ['id', 'name', 'sku', 'description', 'price', 'category']
             }
           ]
         }
@@ -574,7 +575,10 @@ async function getInvoiceById(req, res) {
           model: req.db.models.InvoiceItem,
           include: [
             {
-              model: req.db.models.Product
+              model: req.db.models.Product,
+              required: false,
+              // Explicitly specify attributes - exclude store_id which doesn't exist in products table
+              attributes: ['id', 'name', 'sku', 'description', 'price', 'category', 'image_url']
             }
           ]
         }
@@ -787,7 +791,11 @@ async function createInvoice(req, res) {
             include: [
               {
                 model: req.db.models.ProductBundleItem,
-                include: [{ model: req.db.models.Product }]
+                include: [{ 
+                  model: req.db.models.Product,
+                  required: false,
+                  attributes: ['id', 'name', 'sku', 'description', 'price', 'category']
+                }]
               }
             ]
           });
@@ -929,6 +937,8 @@ async function createInvoice(req, res) {
       });
 
       // Get invoice items (within transaction)
+      // For free users, product_id is always null (manual items only), so Product include will be null anyway
+      // Specify explicit Product attributes to avoid selecting non-existent columns like store_id
       const itemsForTemplates = await req.db.models.InvoiceItem.findAll({
         where: {
           invoice_id: invoice.id,
@@ -937,7 +947,9 @@ async function createInvoice(req, res) {
         include: [
           {
             model: req.db.models.Product,
-            required: false
+            required: false,
+            // Explicitly specify attributes - exclude store_id which doesn't exist in products table
+            attributes: ['id', 'name', 'sku', 'description', 'price', 'category', 'image_url']
           }
         ],
         order: [['id', 'ASC']],
@@ -1071,7 +1083,9 @@ async function createInvoice(req, res) {
         include: [
           {
             model: req.db.models.Product,
-            required: false
+            required: false,
+            // Explicitly specify attributes - exclude store_id which doesn't exist in products table
+            attributes: ['id', 'name', 'sku', 'description', 'price', 'category', 'image_url']
           }
         ],
         order: [['id', 'ASC']]
@@ -1318,7 +1332,10 @@ async function updateInvoice(req, res) {
           model: req.db.models.InvoiceItem,
           include: [
             {
-              model: req.db.models.Product
+              model: req.db.models.Product,
+              required: false,
+              // Explicitly specify attributes - exclude store_id which doesn't exist in products table
+              attributes: ['id', 'name', 'sku', 'description', 'price', 'category', 'image_url']
             }
           ]
         }
