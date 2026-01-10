@@ -510,9 +510,13 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           templateId: template.id,
           templateName: template.name
         });
-        // RE-THROW error - invoice should NOT be created if any template fails
-        // This ensures all templates must have valid previews/PDFs before invoice is created
-        throw new Error(`Failed to generate preview/PDF for template ${template.id}: ${templateError.message}`);
+        // RE-THROW error with full context - invoice should NOT be created if any template fails
+        // Include original error details for debugging
+        const enhancedError = new Error(`Failed to generate preview/PDF for template ${template.id}: ${templateError.message}`);
+        enhancedError.originalError = templateError;
+        enhancedError.templateId = template.id;
+        enhancedError.stack = templateError.stack;
+        throw enhancedError;
       }
     }
 
@@ -564,59 +568,19 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       itemsCount: invoice?.InvoiceItems?.length || 0
     });
     
-    // Even on error, try to create simple default templates
-    console.log('Attempting to create basic templates as fallback...');
-    try {
-      const defaultBrandColors = {
-        primary: '#0F172A',
-        secondary: '#64748B',
-        accent: '#4F46E5',
-        text: '#0F172A',
-        background: '#F9FAFB',
-        border: '#E5E7EB',
-        table_header: '#111827',
-        table_row_alt: '#F3F4F6'
-      };
-      
-      // Create basic default templates manually (avoid calling generateTemplateOptions again)
-      const basicTemplates = [
-        {
-          id: 'template_1',
-          name: 'Modern Minimalist',
-          description: 'Clean and simple design',
-          tokens: defaultBrandColors,
-          decorations: [],
-          layout: [
-            { block: 'Header', variant: 'minimal', show_logo: true, show_business_info: true },
-            { block: 'CustomerInfo', variant: 'left', show_label: true },
-            { block: 'ItemsTable', variant: 'minimal', show_borders: false, stripe_rows: true },
-            { block: 'Totals', variant: 'right', show_borders: false },
-            { block: 'Payment', variant: 'minimal', show_account_number: true },
-            { block: 'Footer', variant: 'centered', show_terms: false }
-          ],
-          spacing: { section_gap: '32px', item_gap: '12px', padding: '32px' },
-          generated_at: new Date().toISOString()
-        }
-      ];
-      
-      console.log(`Returning ${basicTemplates.length} basic template as fallback`);
-      return {
-        templates: basicTemplates,
-        previews: [],
-        _error: error.message,
-        _fallback: true,
-        _note: 'Template generation failed - returning basic template'
-      };
-    } catch (fallbackError) {
-      console.error('Even basic template creation failed:', fallbackError);
-      // Last resort: return empty (don't fail the whole request)
-      return {
-        templates: [],
-        previews: [],
-        _error: error.message,
-        _fallbackError: fallbackError.message
-      };
-    }
+    // Re-throw error with full details - invoice should NOT be created if templates/previews fail
+    // Include the actual error message and stack for debugging
+    const detailedError = new Error(`Template/preview generation failed: ${error.message}`);
+    detailedError.originalError = error;
+    detailedError.stack = error.stack;
+    detailedError.details = {
+      errorMessage: error.message,
+      errorType: error.name,
+      errorStack: error.stack?.split('\n').slice(0, 10).join('\n'),
+      invoiceId: invoice?.id,
+      invoiceItemsCount: invoice?.InvoiceItems?.length || 0
+    };
+    throw detailedError;
   }
 }
 
@@ -1147,15 +1111,40 @@ async function createInvoice(req, res) {
       if (!templateData.previews || !Array.isArray(templateData.previews) || templateData.previews.length === 0) {
         await transaction.rollback();
         console.error('❌ Preview/PDF generation failed: No previews generated');
+        console.error('Template data received:', {
+          hasTemplates: !!(templateData.templates && templateData.templates.length > 0),
+          templatesCount: templateData.templates?.length || 0,
+          hasPreviews: !!(templateData.previews && templateData.previews.length > 0),
+          previewsCount: templateData.previews?.length || 0,
+          hasError: !!templateData._error,
+          errorMessage: templateData._error,
+          isFallback: templateData._fallback
+        });
+        
+        // If there's an error message in templateData, use it (fallback scenario)
+        const actualError = templateData._error || 'Preview/PDF generation failed - all templates failed. This usually indicates a Puppeteer/PDF generation issue. Check server logs for details.';
+        
         return res.status(500).json({
           success: false,
           message: 'Failed to create invoice: Preview/PDF generation failed - no previews generated',
-          error: 'Preview/PDF generation failed - all templates failed',
+          error: actualError,
+          errorType: 'PreviewGenerationFailed',
           debug: {
             templatesCount: templateData.templates?.length || 0,
             previewsCount: templateData.previews?.length || 0,
             invoiceId: invoice.id,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            isFallback: templateData._fallback || false,
+            originalError: templateData._error || 'Unknown error - check server logs',
+            fallbackError: templateData._fallbackError || undefined,
+            note: templateData._note || undefined,
+            possibleCauses: [
+              'Puppeteer/Chrome not installed or misconfigured',
+              'Missing system dependencies for PDF generation',
+              'File system permission issues',
+              'Insufficient memory/resources',
+              'Path normalization failed'
+            ]
           }
         });
       }
@@ -1211,20 +1200,47 @@ async function createInvoice(req, res) {
       console.error('Error details:', {
         message: templateError.message,
         name: templateError.name,
-        stack: templateError.stack?.split('\n').slice(0, 10).join('\n')
+        stack: templateError.stack?.split('\n').slice(0, 10).join('\n'),
+        originalError: templateError.originalError?.message,
+        templateId: templateError.templateId,
+        details: templateError.details
       });
+      
+      // Extract the actual error message - could be nested through multiple layers
+      let actualError = templateError.message;
+      let actualStack = templateError.stack;
+      let rootError = templateError;
+      
+      // Unwrap nested errors to get to the root cause
+      while (rootError.originalError) {
+        rootError = rootError.originalError;
+        actualError = rootError.message || actualError;
+        actualStack = rootError.stack || actualStack;
+      }
+      
+      // Build comprehensive error details for debugging
+      const errorDetails = {
+        errorMessage: actualError,
+        errorType: rootError.name || templateError.name,
+        errorStack: actualStack?.split('\n').slice(0, 20).join('\n'),
+        templateId: templateError.templateId,
+        invoiceId: invoice.id,
+        invoiceItemsCount: completeInvoiceForTemplates?.InvoiceItems?.length || 0,
+        hasApiKey: !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== ''),
+        timestamp: new Date().toISOString()
+      };
+      
+      // If templateError has additional details, merge them
+      if (templateError.details) {
+        Object.assign(errorDetails, templateError.details);
+      }
       
       return res.status(500).json({
         success: false,
-        message: 'Failed to create invoice: Template generation failed',
-        error: templateError.message,
-        errorType: templateError.name,
-        debug: {
-          invoiceItemsCount: completeInvoiceForTemplates?.InvoiceItems?.length || 0,
-          hasApiKey: !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== ''),
-          invoiceId: invoice.id,
-          timestamp: new Date().toISOString()
-        }
+        message: 'Failed to create invoice: Template/preview generation failed',
+        error: actualError,
+        errorType: rootError.name || templateError.name,
+        debug: errorDetails
       });
     }
     

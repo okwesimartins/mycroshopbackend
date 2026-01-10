@@ -83,8 +83,35 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
     return { pdfPath, previewPath };
   } catch (error) {
     console.error('[PDF Service] ❌ Error generating PDF/preview:', error.message);
-    console.error('[PDF Service] Error stack:', error.stack?.split('\n').slice(0, 5).join('\n'));
-    throw error;
+    console.error('[PDF Service] Error name:', error.name);
+    console.error('[PDF Service] Error stack:', error.stack?.split('\n').slice(0, 10).join('\n'));
+    
+    // Enhance error message with context
+    let enhancedMessage = error.message;
+    
+    // Check for common Puppeteer errors and provide helpful messages
+    if (error.message.includes('Failed to launch the browser process')) {
+      enhancedMessage = `Puppeteer failed to launch browser: ${error.message}. This usually means Chrome/Chromium is not installed or missing dependencies. On Linux, you may need to install: sudo apt-get install -y chromium-browser`;
+    } else if (error.message.includes('Browser closed unexpectedly')) {
+      enhancedMessage = `Browser closed unexpectedly: ${error.message}. This may be due to insufficient memory or permissions.`;
+    } else if (error.message.includes('ENOENT') || error.message.includes('no such file')) {
+      enhancedMessage = `File system error: ${error.message}. Check if directories exist and are writable. PDF dir: ${pdfDir}, Preview dir: ${previewDir}`;
+    } else if (error.message.includes('EACCES') || error.message.includes('permission denied')) {
+      enhancedMessage = `Permission denied: ${error.message}. Check write permissions for directories: ${pdfDir}, ${previewDir}`;
+    }
+    
+    // Create enhanced error with all context
+    const enhancedError = new Error(enhancedMessage);
+    enhancedError.originalError = error;
+    enhancedError.pdfPath = pdfPath;
+    enhancedError.previewPath = previewPath;
+    enhancedError.pdfDir = pdfDir;
+    enhancedError.previewDir = previewDir;
+    enhancedError.pdfDirExists = fs.existsSync(pdfDir);
+    enhancedError.previewDirExists = fs.existsSync(previewDir);
+    enhancedError.stack = error.stack;
+    
+    throw enhancedError;
   } finally {
     if (browser) {
       await browser.close();
