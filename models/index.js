@@ -13,67 +13,180 @@ function initializeModels(sequelize) {
     console.log('Starting model initialization...');
     console.log('Sequelize instance type:', typeof sequelize);
     console.log('Sequelize has define method:', typeof sequelize.define === 'function');
+    console.log('Existing models on sequelize:', sequelize.models ? Object.keys(sequelize.models).length : 0);
+    
+    // Check if models are already defined - if so, return existing models
+    // But we need to be careful - if models exist but are corrupted, we need to clear them
+    if (sequelize.models && Object.keys(sequelize.models).length > 0) {
+      console.log('Models already exist on sequelize instance.');
+      console.log('Existing models count:', Object.keys(sequelize.models).length);
+      console.log('Existing models:', Object.keys(sequelize.models));
+      
+      // Verify Invoice exists in existing models and is valid
+      if (sequelize.models.Invoice && typeof sequelize.models.Invoice === 'object') {
+        console.log('Invoice model found in existing models. Returning existing models.');
+        return sequelize.models;
+      } else {
+        console.warn('WARNING: Models exist but Invoice is missing or invalid. Clearing and reinitializing.');
+        // Clear all models before reinitializing to avoid conflicts
+        try {
+          // Clear models object
+          Object.keys(sequelize.models).forEach(modelName => {
+            try {
+              delete sequelize.models[modelName];
+            } catch (e) {
+              console.warn(`Could not delete model ${modelName}:`, e.message);
+            }
+          });
+          sequelize.models = {};
+        } catch (clearError) {
+          console.error('Error clearing models:', clearError.message);
+          // If we can't clear, create a fresh models object
+          sequelize.models = {};
+        }
+      }
+    }
 
     // Store Model (must be defined before Product)
     console.log('Defining Store model...');
-    const Store = sequelize.define('Store', {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true
-      },
-      tenant_id: {
-        type: DataTypes.INTEGER,
-        allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
-        comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
-      },
-      name: {
-        type: DataTypes.STRING(255),
-        allowNull: false
-      },
-      store_type: {
-        type: DataTypes.ENUM('retail_store', 'warehouse', 'popup_store', 'online_only'),
-        allowNull: false
-      },
-      address: {
-        type: DataTypes.TEXT,
-        allowNull: true
-      },
-      city: {
-        type: DataTypes.STRING(100),
-        allowNull: true
-      },
-      state: {
-        type: DataTypes.STRING(100),
-        allowNull: true
-      },
-      country: {
-        type: DataTypes.STRING(100),
-        defaultValue: 'Nigeria'
-      },
-      phone: {
-        type: DataTypes.STRING(50),
-        allowNull: true
-      },
-      email: {
-        type: DataTypes.STRING(255),
-        allowNull: true
-      },
-      description: {
-        type: DataTypes.TEXT,
-        allowNull: true
-      },
-      is_active: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true
+    
+    // Define Store model - Sequelize will handle removal of existing model if needed
+    // But we'll wrap it in try-catch to handle the removal error gracefully
+    let Store;
+    try {
+      Store = sequelize.define('Store', {
+        id: {
+          type: DataTypes.INTEGER,
+          primaryKey: true,
+          autoIncrement: true
+        },
+        tenant_id: {
+          type: DataTypes.INTEGER,
+          allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
+          comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+        },
+        name: {
+          type: DataTypes.STRING(255),
+          allowNull: false
+        },
+        store_type: {
+          type: DataTypes.ENUM('retail_store', 'warehouse', 'popup_store', 'online_only'),
+          allowNull: false
+        },
+        address: {
+          type: DataTypes.TEXT,
+          allowNull: true
+        },
+        city: {
+          type: DataTypes.STRING(100),
+          allowNull: true
+        },
+        state: {
+          type: DataTypes.STRING(100),
+          allowNull: true
+        },
+        country: {
+          type: DataTypes.STRING(100),
+          defaultValue: 'Nigeria'
+        },
+        phone: {
+          type: DataTypes.STRING(50),
+          allowNull: true
+        },
+        email: {
+          type: DataTypes.STRING(255),
+          allowNull: true
+        },
+        description: {
+          type: DataTypes.TEXT,
+          allowNull: true
+        },
+        is_active: {
+          type: DataTypes.BOOLEAN,
+          defaultValue: true
+        }
+      }, {
+        tableName: 'stores',
+        timestamps: true,
+        createdAt: 'created_at',
+        updatedAt: 'updated_at'
+      });
+      console.log('Store model defined:', !!Store);
+    } catch (storeError) {
+      console.error('Error defining Store model:', storeError.message);
+      // If error is about removing existing model, try to clear it first
+      if (storeError.message.includes('removeModel') || storeError.message.includes('undefined') || storeError.message.includes('null')) {
+        console.log('Attempting to recover by clearing Store model...');
+        try {
+          if (sequelize.models && sequelize.models.Store) {
+            delete sequelize.models.Store;
+          }
+          // Try again with fresh definition
+          Store = sequelize.define('Store', {
+            id: {
+              type: DataTypes.INTEGER,
+              primaryKey: true,
+              autoIncrement: true
+            },
+            tenant_id: {
+              type: DataTypes.INTEGER,
+              allowNull: true
+            },
+            name: {
+              type: DataTypes.STRING(255),
+              allowNull: false
+            },
+            store_type: {
+              type: DataTypes.ENUM('retail_store', 'warehouse', 'popup_store', 'online_only'),
+              allowNull: false
+            },
+            address: {
+              type: DataTypes.TEXT,
+              allowNull: true
+            },
+            city: {
+              type: DataTypes.STRING(100),
+              allowNull: true
+            },
+            state: {
+              type: DataTypes.STRING(100),
+              allowNull: true
+            },
+            country: {
+              type: DataTypes.STRING(100),
+              defaultValue: 'Nigeria'
+            },
+            phone: {
+              type: DataTypes.STRING(50),
+              allowNull: true
+            },
+            email: {
+              type: DataTypes.STRING(255),
+              allowNull: true
+            },
+            description: {
+              type: DataTypes.TEXT,
+              allowNull: true
+            },
+            is_active: {
+              type: DataTypes.BOOLEAN,
+              defaultValue: true
+            }
+          }, {
+            tableName: 'stores',
+            timestamps: true,
+            createdAt: 'created_at',
+            updatedAt: 'updated_at'
+          });
+          console.log('Store model recovered successfully');
+        } catch (recoverError) {
+          console.error('Failed to recover Store model:', recoverError.message);
+          throw new Error(`Failed to define Store model after recovery attempt: ${storeError.message}. Recovery error: ${recoverError.message}`);
+        }
+      } else {
+        throw storeError;
       }
-    }, {
-      tableName: 'stores',
-      timestamps: true,
-      createdAt: 'created_at',
-      updatedAt: 'updated_at'
-    });
-    console.log('Store model defined:', !!Store);
+    }
 
     // Product Model (store-specific)
     console.log('Defining Product model...');
