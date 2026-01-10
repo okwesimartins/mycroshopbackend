@@ -97,6 +97,15 @@ async function getAllInvoices(req, res) {
  */
 async function generateTemplatesForInvoice(invoice, tenantId, req) {
   try {
+    console.log('\n🔍 generateTemplatesForInvoice called with:');
+    console.log('  - Invoice ID:', invoice?.id);
+    console.log('  - Invoice type:', typeof invoice);
+    console.log('  - Has InvoiceItems:', !!(invoice && invoice.InvoiceItems));
+    console.log('  - InvoiceItems type:', typeof invoice?.InvoiceItems);
+    console.log('  - InvoiceItems is array:', Array.isArray(invoice?.InvoiceItems));
+    console.log('  - InvoiceItems count:', invoice?.InvoiceItems?.length || 0);
+    console.log('  - Invoice keys:', invoice ? Object.keys(invoice).filter(k => !k.startsWith('_')).slice(0, 15) : 'none');
+    
     let tenant = null;
     try {
       tenant = await getTenantById(tenantId);
@@ -107,7 +116,24 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
     // Safely extract store and customer - they might be null if foreign keys are null
     const store = (invoice && invoice.Store) ? invoice.Store : {};
     const customer = (invoice && invoice.Customer) ? invoice.Customer : {};
-    const items = (invoice && invoice.InvoiceItems) ? invoice.InvoiceItems : [];
+    
+    // CRITICAL: Extract items - handle both camelCase and snake_case, and both Sequelize and plain objects
+    let items = [];
+    if (invoice && invoice.InvoiceItems) {
+      items = Array.isArray(invoice.InvoiceItems) ? invoice.InvoiceItems : [];
+    } else if (invoice && invoice.invoice_items) {
+      items = Array.isArray(invoice.invoice_items) ? invoice.invoice_items : [];
+    } else if (invoice && invoice.items) {
+      items = Array.isArray(invoice.items) ? invoice.items : [];
+    }
+    
+    console.log('  - Extracted items count:', items.length);
+    if (items.length === 0) {
+      console.warn('  ⚠️ WARNING: No items found in invoice object!');
+      console.warn('  Invoice.InvoiceItems:', invoice?.InvoiceItems);
+      console.warn('  Invoice.invoice_items:', invoice?.invoice_items);
+      console.warn('  Invoice.items:', invoice?.items);
+    }
 
     const invoiceDataForAi = {
       business_name: (store && store.name) || (tenant && tenant.name) || 'Business Name',
@@ -363,17 +389,50 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
 
     console.log(`\n📊 Template rendering complete: ${results.length}/${templates.length} templates successfully processed`);
     
+    // Always return templates - even if PDF/preview generation failed for some
+    // Frontend can use the template data to render previews client-side if needed
+    const templatesWithPreviews = results.map((r) => ({
+      ...r.template,
+      _hasPreview: true
+    }));
+    
+    // Add templates that failed rendering (if any)
+    const failedTemplateIds = results.map(r => r.template.id);
+    const failedTemplates = templates.filter(t => !failedTemplateIds.includes(t.id));
+    
     if (results.length === 0) {
       console.warn('⚠️ WARNING: No templates were successfully rendered! All templates failed.');
+      console.warn('This means PDF/preview generation failed for all templates.');
+      console.warn('Returning templates without PDFs/previews - frontend can render them client-side...');
+    } else if (failedTemplates.length > 0) {
+      console.warn(`⚠️ WARNING: ${failedTemplates.length} templates failed PDF/preview generation, but returning them anyway`);
     }
 
     return {
-      templates: results.map((r) => r.template),
-      previews: results.map((r) => ({
+      templates: templates.map(t => ({
+        ...t,
+        generated_at: t.generated_at || new Date().toISOString()
+      })),
+      previews: results.length > 0 ? results.map((r) => ({
         template_id: r.template.id,
         preview_url: r.preview_url,
         pdf_url: r.pdf_url
-      }))
+      })) : templates.map(t => ({
+        template_id: t.id || `template_${templates.indexOf(t) + 1}`,
+        preview_url: null,
+        pdf_url: null,
+        _note: 'Preview generation pending'
+      })),
+      ...(results.length < templates.length ? {
+        _info: {
+          successful: results.length,
+          total: templates.length,
+          failed: templates.length - results.length,
+          message: results.length === 0 
+            ? 'All preview generation failed - templates returned without previews. Frontend can render them client-side.'
+            : 'Some templates failed preview generation but are still returned.'
+        }
+      } : {})
     };
   } catch (error) {
     console.error('\n❌ CRITICAL ERROR in generateTemplatesForInvoice:', error);
@@ -385,11 +444,60 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       hasItems: !!(invoice?.InvoiceItems && invoice.InvoiceItems.length > 0),
       itemsCount: invoice?.InvoiceItems?.length || 0
     });
-    // Return empty templates on error (don't fail the whole request)
-    return {
-      templates: [],
-      previews: []
-    };
+    
+    // Even on error, try to create simple default templates
+    console.log('Attempting to create basic templates as fallback...');
+    try {
+      const defaultBrandColors = {
+        primary: '#0F172A',
+        secondary: '#64748B',
+        accent: '#4F46E5',
+        text: '#0F172A',
+        background: '#F9FAFB',
+        border: '#E5E7EB',
+        table_header: '#111827',
+        table_row_alt: '#F3F4F6'
+      };
+      
+      // Create basic default templates manually (avoid calling generateTemplateOptions again)
+      const basicTemplates = [
+        {
+          id: 'template_1',
+          name: 'Modern Minimalist',
+          description: 'Clean and simple design',
+          tokens: defaultBrandColors,
+          decorations: [],
+          layout: [
+            { block: 'Header', variant: 'minimal', show_logo: true, show_business_info: true },
+            { block: 'CustomerInfo', variant: 'left', show_label: true },
+            { block: 'ItemsTable', variant: 'minimal', show_borders: false, stripe_rows: true },
+            { block: 'Totals', variant: 'right', show_borders: false },
+            { block: 'Payment', variant: 'minimal', show_account_number: true },
+            { block: 'Footer', variant: 'centered', show_terms: false }
+          ],
+          spacing: { section_gap: '32px', item_gap: '12px', padding: '32px' },
+          generated_at: new Date().toISOString()
+        }
+      ];
+      
+      console.log(`Returning ${basicTemplates.length} basic template as fallback`);
+      return {
+        templates: basicTemplates,
+        previews: [],
+        _error: error.message,
+        _fallback: true,
+        _note: 'Template generation failed - returning basic template'
+      };
+    } catch (fallbackError) {
+      console.error('Even basic template creation failed:', fallbackError);
+      // Last resort: return empty (don't fail the whole request)
+      return {
+        templates: [],
+        previews: [],
+        _error: error.message,
+        _fallbackError: fallbackError.message
+      };
+    }
   }
 }
 
@@ -788,31 +896,162 @@ async function createInvoice(req, res) {
       createdInvoiceItems.push(createdItem);
     }
 
-    await transaction.commit();
-    console.log(`Invoice created successfully with ${createdInvoiceItems.length} invoice items`);
-
-    // Fetch complete invoice with relations after transaction commit
-    // For free users, we need to fetch InvoiceItems separately with tenant_id filter
-    // For enterprise users, we can use includes normally
-    let completeInvoice = null;
+    // CRITICAL: Generate templates BEFORE committing transaction
+    // If template generation fails, rollback and return error (template generation is REQUIRED)
+    console.log('Starting template generation (REQUIRED - invoice will not be created if this fails)...');
+    
+    // Prepare invoice data for template generation (using invoice we just created)
+    // Convert to plain object with items for template generation
+    let completeInvoiceForTemplates = null;
     try {
-      // First, fetch invoice with Store and Customer (these don't need tenant_id filter)
-      completeInvoice = await req.db.models.Invoice.findByPk(invoice.id, {
+      // Fetch invoice with relations (within transaction) for template generation
+      const invoiceWithRelations = await req.db.models.Invoice.findByPk(invoice.id, {
         include: [
           {
             model: req.db.models.Store,
-            required: false, // Store is optional for free users
+            required: false,
             attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'email', 'phone']
           },
           {
             model: req.db.models.Customer,
-            required: false // Customer is optional - can be null when customer_id is null
+            required: false
+          }
+        ],
+        transaction // Use the same transaction
+      });
+
+      // Get invoice items (within transaction)
+      const itemsForTemplates = await req.db.models.InvoiceItem.findAll({
+        where: {
+          invoice_id: invoice.id,
+          ...(isFreePlan ? { tenant_id: tenantId } : {})
+        },
+        include: [
+          {
+            model: req.db.models.Product,
+            required: false
+          }
+        ],
+        order: [['id', 'ASC']],
+        transaction // Use the same transaction
+      });
+
+      // Convert to plain object
+      if (invoiceWithRelations) {
+        completeInvoiceForTemplates = invoiceWithRelations.toJSON ? invoiceWithRelations.toJSON() : invoiceWithRelations;
+      } else {
+        completeInvoiceForTemplates = invoice.toJSON ? invoice.toJSON() : invoice;
+      }
+      
+      // Add InvoiceItems to the invoice object
+      completeInvoiceForTemplates.InvoiceItems = itemsForTemplates.map(item => {
+        const plainItem = item.toJSON ? item.toJSON() : item;
+        if (plainItem.Product && typeof plainItem.Product.toJSON === 'function') {
+          plainItem.Product = plainItem.Product.toJSON();
+        }
+        return plainItem;
+      });
+      
+      console.log(`✅ Prepared invoice data for template generation: ${completeInvoiceForTemplates.InvoiceItems.length} items`);
+    } catch (fetchError) {
+      console.error('Error preparing invoice data for template generation:', fetchError);
+      await transaction.rollback();
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to prepare invoice data for template generation',
+        error: fetchError.message
+      });
+    }
+
+    // CRITICAL: Validate invoice has items before generating templates
+    if (!completeInvoiceForTemplates || !completeInvoiceForTemplates.InvoiceItems || completeInvoiceForTemplates.InvoiceItems.length === 0) {
+      await transaction.rollback();
+      console.error('❌ Template generation failed: Invoice has no items');
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot create invoice: Invoice must have at least one item to generate templates',
+        error: 'No items provided'
+      });
+    }
+    
+    // Generate templates (REQUIRED - invoice will not be created if this fails)
+    let templateData = null;
+    try {
+      console.log(`Generating templates for invoice ${invoice.id} with ${completeInvoiceForTemplates.InvoiceItems.length} items...`);
+      
+      // Set timeout for template generation (30 seconds)
+      const templatePromise = generateTemplatesForInvoice(completeInvoiceForTemplates, tenantId, req);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => {
+          reject(new Error('Template generation timeout after 30 seconds'));
+        }, 30000)
+      );
+      
+      templateData = await Promise.race([templatePromise, timeoutPromise]);
+      
+      // Validate that templates were generated
+      if (!templateData || !templateData.templates || !Array.isArray(templateData.templates) || templateData.templates.length === 0) {
+        await transaction.rollback();
+        console.error('❌ Template generation failed: No templates generated');
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create invoice: Template generation returned no templates',
+          error: 'Template generation failed - no templates returned',
+          debug: {
+            templateData: templateData,
+            invoiceItemsCount: completeInvoiceForTemplates.InvoiceItems?.length || 0,
+            hasApiKey: !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== '')
+          }
+        });
+      }
+      
+      console.log(`✅ Template generation successful: ${templateData.templates.length} templates generated`);
+      
+    } catch (templateError) {
+      await transaction.rollback();
+      console.error('❌ Template generation failed - rolling back transaction:', templateError);
+      console.error('Error details:', {
+        message: templateError.message,
+        name: templateError.name,
+        stack: templateError.stack?.split('\n').slice(0, 10).join('\n')
+      });
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create invoice: Template generation failed',
+        error: templateError.message,
+        errorType: templateError.name,
+        debug: {
+          invoiceItemsCount: completeInvoiceForTemplates?.InvoiceItems?.length || 0,
+          hasApiKey: !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== ''),
+          invoiceId: invoice.id,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+    
+    // Only commit transaction if template generation succeeded
+    await transaction.commit();
+    console.log(`✅ Invoice created successfully with ${createdInvoiceItems.length} invoice items and ${templateData.templates.length} templates`);
+
+    // Fetch complete invoice with relations after transaction commit (for response)
+    let completeInvoice = null;
+    try {
+      completeInvoice = await req.db.models.Invoice.findByPk(invoice.id, {
+        include: [
+          {
+            model: req.db.models.Store,
+            required: false,
+            attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'email', 'phone']
+          },
+          {
+            model: req.db.models.Customer,
+            required: false
           }
         ]
       });
 
-      // Always fetch InvoiceItems separately for free users (need tenant_id filter)
-      // For enterprise users, we could include them, but fetching separately is safer
+      // Fetch InvoiceItems separately (for free users, need tenant_id filter)
       const items = await req.db.models.InvoiceItem.findAll({
         where: {
           invoice_id: invoice.id,
@@ -821,105 +1060,35 @@ async function createInvoice(req, res) {
         include: [
           {
             model: req.db.models.Product,
-            required: false // Product is optional (manual items don't have products)
+            required: false
           }
         ],
-        order: [['id', 'ASC']] // Ensure consistent ordering
+        order: [['id', 'ASC']]
       });
 
-      // Convert invoice to plain object and add items
+      // Convert to plain object
       if (completeInvoice) {
         completeInvoice = completeInvoice.toJSON ? completeInvoice.toJSON() : completeInvoice;
-        completeInvoice.InvoiceItems = items.map(item => item.toJSON ? item.toJSON() : item);
-        console.log(`Loaded complete invoice with ${completeInvoice.InvoiceItems.length} items`);
       } else {
-        // Fallback: use invoice we just created
         completeInvoice = invoice.toJSON ? invoice.toJSON() : invoice;
-        completeInvoice.InvoiceItems = items.map(item => item.toJSON ? item.toJSON() : item);
-        console.log(`Using created invoice with ${completeInvoice.InvoiceItems.length} items as fallback`);
       }
-    } catch (fetchError) {
-      console.error('Error fetching complete invoice:', fetchError);
-      console.error('Fetch error details:', {
-        message: fetchError.message,
-        stack: fetchError.stack?.split('\n').slice(0, 5).join('\n'),
-        invoiceId: invoice.id,
-        tenantId: isFreePlan ? tenantId : null
+      
+      // Add InvoiceItems
+      completeInvoice.InvoiceItems = items.map(item => {
+        const plainItem = item.toJSON ? item.toJSON() : item;
+        if (plainItem.Product && typeof plainItem.Product.toJSON === 'function') {
+          plainItem.Product = plainItem.Product.toJSON();
+        }
+        return plainItem;
       });
-      // Use the invoice we just created as fallback with items from createdInvoiceItems
+      
+      console.log(`✅ Loaded complete invoice for response: ${completeInvoice.InvoiceItems.length} items`);
+    } catch (fetchError) {
+      console.error('Error fetching complete invoice for response:', fetchError);
+      // Use invoice data we already have
       completeInvoice = invoice.toJSON ? invoice.toJSON() : invoice;
       completeInvoice.InvoiceItems = createdInvoiceItems.map(item => item.toJSON ? item.toJSON() : item);
-      console.log(`Using created invoice with ${completeInvoice.InvoiceItems.length} items as fallback after error`);
-    }
-
-    // Generate AI templates automatically (non-blocking - if it fails, still return invoice)
-    let templateData = { templates: [], previews: [] };
-    try {
-      // Check if we have a valid invoice object with items
-      if (completeInvoice && completeInvoice.id) {
-        const hasItems = completeInvoice.InvoiceItems && 
-                        Array.isArray(completeInvoice.InvoiceItems) && 
-                        completeInvoice.InvoiceItems.length > 0;
-        
-        console.log('=== TEMPLATE GENERATION CHECK ===');
-        console.log('Invoice ID:', completeInvoice.id);
-        console.log('Has Items:', hasItems);
-        console.log('Items Count:', completeInvoice.InvoiceItems?.length || 0);
-        console.log('Invoice Total:', completeInvoice.total || completeInvoice.subtotal || 0);
-        console.log('Invoice Items:', completeInvoice.InvoiceItems ? completeInvoice.InvoiceItems.map(i => ({ id: i.id, name: i.item_name })) : 'none');
-        
-        if (hasItems) {
-          console.log(`\n✅ Generating templates for invoice ${completeInvoice.id} with ${completeInvoice.InvoiceItems.length} items...`);
-          console.log('Starting template generation process...');
-          
-          // Set a timeout for template generation to prevent hanging (30 seconds)
-          const templatePromise = generateTemplatesForInvoice(completeInvoice, tenantId, req);
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => {
-              console.error('⏱️ Template generation TIMEOUT after 30 seconds');
-              reject(new Error('Template generation timeout after 30 seconds'));
-            }, 30000)
-          );
-          
-          templateData = await Promise.race([templatePromise, timeoutPromise]);
-          console.log(`\n✅ Template generation COMPLETED:`);
-          console.log(`   - Templates: ${templateData.templates?.length || 0}`);
-          console.log(`   - Previews: ${templateData.previews?.length || 0}`);
-          
-          if (templateData.templates && templateData.templates.length > 0) {
-            console.log(`   - Template IDs: ${templateData.templates.map(t => t.id || t.name).join(', ')}`);
-          }
-        } else {
-          console.warn(`\n⚠️ Skipping template generation: Invoice ${completeInvoice.id} has no items`);
-          console.warn('InvoiceItems:', completeInvoice.InvoiceItems);
-          templateData = { templates: [], previews: [] };
-        }
-      } else {
-        console.warn('\n⚠️ Skipping template generation: Invalid invoice object');
-        console.warn('Debug:', {
-          hasInvoice: !!completeInvoice,
-          hasId: !!(completeInvoice && completeInvoice.id),
-          invoiceType: typeof completeInvoice,
-          invoiceKeys: completeInvoice ? Object.keys(completeInvoice).slice(0, 10) : []
-        });
-        templateData = { templates: [], previews: [] };
-      }
-    } catch (error) {
-      console.error('\n❌ FAILED to generate templates during invoice creation:');
-      console.error('Error:', error.message);
-      console.error('Error Type:', error.name);
-      console.error('Stack:', error.stack?.split('\n').slice(0, 10).join('\n'));
-      console.error('Debug Info:', {
-        invoiceId: completeInvoice?.id,
-        hasItems: !!(completeInvoice?.InvoiceItems && completeInvoice.InvoiceItems.length > 0),
-        itemsCount: completeInvoice?.InvoiceItems?.length || 0,
-        hasCustomer: !!completeInvoice?.Customer,
-        customerId: completeInvoice?.customer_id,
-        invoiceType: typeof completeInvoice,
-        invoiceKeys: completeInvoice ? Object.keys(completeInvoice).slice(0, 15) : []
-      });
-      // Continue without templates - invoice creation was successful
-      templateData = { templates: [], previews: [] };
+      console.log(`Using created invoice data for response: ${completeInvoice.InvoiceItems.length} items`);
     }
 
     // Ensure we always send a complete response
@@ -932,7 +1101,7 @@ async function createInvoice(req, res) {
         
         // Ensure Customer and Store are handled properly if null
         if (!safeInvoice.Customer) {
-          safeInvoice.Customer = null; // Explicitly set to null instead of undefined
+          safeInvoice.Customer = null;
         }
         if (!safeInvoice.Store) {
           safeInvoice.Store = null;
