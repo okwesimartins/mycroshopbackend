@@ -1092,6 +1092,7 @@ async function migrateFreeUserToEnterprise(tenantId) {
   }
 }
 
+
 module.exports = {
   mainSequelize,
   getTenantConnection,
