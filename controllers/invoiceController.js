@@ -1711,6 +1711,7 @@ async function deleteInvoice(req, res) {
   }
 }
 
+
 module.exports = {
   getAllInvoices,
   getInvoiceById,
