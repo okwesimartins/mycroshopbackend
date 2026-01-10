@@ -324,6 +324,20 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  // Add template and PDF columns to invoices table (if they don't exist)
+  try {
+    await connection.query(`
+      ALTER TABLE invoices 
+      ADD COLUMN IF NOT EXISTS template_id VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS template_data JSON,
+      ADD COLUMN IF NOT EXISTS pdf_url VARCHAR(500),
+      ADD COLUMN IF NOT EXISTS preview_url VARCHAR(500)
+    `);
+  } catch (error) {
+    // Columns might already exist, ignore
+    console.log('Invoice template columns may already exist');
+  }
+
   // Invoice Items table
   const invoiceItemTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
   const invoiceItemTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
@@ -814,6 +828,56 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       INDEX idx_status (status),
       INDEX idx_order_id (order_id),
       INDEX idx_invoice_id (invoice_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Brand Colors table (for invoice template color extraction and customization)
+  const brandColorTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const brandColorTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+  
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS brand_colors (
+      ${brandColorTenantId}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      logo_url VARCHAR(500),
+      primary_color VARCHAR(7),
+      secondary_color VARCHAR(7),
+      accent_color VARCHAR(7),
+      text_color VARCHAR(7),
+      background_color VARCHAR(7),
+      border_color VARCHAR(7),
+      color_palette JSON,
+      extracted_from_logo BOOLEAN DEFAULT FALSE,
+      extracted_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      ${brandColorTenantIndex}
+      UNIQUE KEY unique_tenant_brand_color (${isSharedDb ? 'tenant_id' : 'id'}),
+      INDEX idx_tenant_id (${isSharedDb ? 'tenant_id' : 'id'})
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Invoice Templates table (stores generated template options for invoices)
+  const invoiceTemplateTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const invoiceTemplateTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+  
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS invoice_templates (
+      ${invoiceTemplateTenantId}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      invoice_id INT NOT NULL,
+      template_id VARCHAR(100) NOT NULL,
+      template_name VARCHAR(255),
+      template_data JSON NOT NULL,
+      preview_url VARCHAR(500),
+      is_selected BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      ${invoiceTemplateTenantIndex}
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+      INDEX idx_invoice_id (invoice_id),
+      INDEX idx_template_id (template_id),
+      INDEX idx_is_selected (is_selected),
+      UNIQUE KEY unique_invoice_template (invoice_id, template_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 

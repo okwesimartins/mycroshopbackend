@@ -2738,7 +2738,13 @@ function initializeModels(sequelize) {
   PaymentTransaction.belongsTo(OnlineStoreOrder, { foreignKey: 'order_id' });
   PaymentTransaction.belongsTo(Invoice, { foreignKey: 'invoice_id' });
 
-  return {
+  // Verify Invoice model is defined before returning
+  if (!Invoice) {
+    console.error('ERROR: Invoice model is undefined before return statement');
+    throw new Error('Invoice model was not properly defined');
+  }
+
+  const models = {
     Store,
     Product,
     ProductStore,
@@ -2784,6 +2790,15 @@ function initializeModels(sequelize) {
     PaymentGateway,
     PaymentTransaction
   };
+
+  // Final verification
+  if (!models.Invoice) {
+    console.error('ERROR: Invoice model missing from returned models object');
+    console.error('Available models:', Object.keys(models));
+    throw new Error('Invoice model missing from models return object');
+  }
+
+  return models;
 }
 
 module.exports = initializeModels;
