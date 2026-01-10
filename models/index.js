@@ -3,7 +3,14 @@
  * This function should be called after getting tenant connection
  */
 function initializeModels(sequelize) {
-  const { DataTypes } = require('sequelize');
+  try {
+    if (!sequelize) {
+      throw new Error('Sequelize instance is required');
+    }
+
+    const { DataTypes } = require('sequelize');
+
+    console.log('Starting model initialization...');
 
   // Store Model (must be defined before Product)
   const Store = sequelize.define('Store', {
@@ -2798,7 +2805,15 @@ function initializeModels(sequelize) {
     throw new Error('Invoice model missing from models return object');
   }
 
+  console.log(`Successfully initialized ${Object.keys(models).length} models`);
   return models;
+  } catch (error) {
+    console.error('FATAL ERROR in initializeModels function:');
+    console.error('Error message:', error.message);
+    console.error('Error name:', error.name);
+    console.error('Error stack:', error.stack);
+    throw error; // Re-throw to be caught by middleware
+  }
 }
 
 module.exports = initializeModels;
