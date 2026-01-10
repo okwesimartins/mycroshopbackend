@@ -105,42 +105,53 @@ function buildBaseCss(tokens, spacing) {
     font-size: ${tokens.fontSize};
     color: ${tokens.text};
     background: ${tokens.background};
+    width: 100%;
+    height: auto;
+    overflow: hidden;
+  }
+  @page {
+    size: A4;
+    margin: 0;
   }
   .invoice-root {
     position: relative;
     width: 100%;
-    min-height: 100vh;
+    min-height: auto;
+    max-height: 1122px; /* A4 height in pixels at 96dpi */
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    padding: 60px 24px;
-    overflow: visible;
+    padding: 20px;
+    overflow: hidden;
+    page-break-inside: avoid;
   }
   .invoice-content {
     position: relative;
-    width: 800px;
-    max-width: 100%;
+    width: 100%;
+    max-width: 750px;
     background: #ffffff;
-    border-radius: 12px;
+    border-radius: 8px;
     padding: ${spacing.padding};
-    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
-    overflow: visible;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
     z-index: 1;
     margin: 0 auto;
+    page-break-inside: avoid;
+    page-break-after: avoid;
   }
 
-  /* Decorations - positioned absolutely to extend beyond content */
+  /* Decorations - constrained to not cause overflow */
   .invoice-decoration-layer {
     position: absolute;
-    top: -80px;
-    left: -80px;
-    right: -80px;
-    bottom: -80px;
-    width: calc(100% + 160px);
-    height: calc(100% + 160px);
+    top: -30px;
+    left: -30px;
+    right: -30px;
+    bottom: -30px;
+    width: calc(100% + 60px);
+    height: calc(100% + 60px);
     pointer-events: none;
     z-index: 0;
-    overflow: visible;
+    overflow: hidden;
   }
   .invoice-decoration {
     position: absolute;
@@ -154,6 +165,8 @@ function buildBaseCss(tokens, spacing) {
     margin-bottom: ${spacing.section_gap};
     position: relative;
     z-index: 1;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
   .section-title {
     font-size: ${tokens.headingSize};
@@ -195,10 +208,10 @@ function buildBaseCss(tokens, spacing) {
     color: ${tokens.primary};
   }
   .header-logo-img {
-    max-height: 70px;
-    max-width: 220px;
+    max-height: 50px;
+    max-width: 180px;
     object-fit: contain;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     display: block;
   }
   .header-meta {
@@ -215,10 +228,11 @@ function buildBaseCss(tokens, spacing) {
 
   /* Customer block */
   .customer-card {
-    border-radius: 10px;
-    padding: 16px 18px;
+    border-radius: 8px;
+    padding: 12px 14px;
     background: rgba(148, 163, 184, 0.05);
     border: 1px solid ${tokens.border};
+    page-break-inside: avoid;
   }
   .customer-label {
     font-size: 12px;
@@ -241,14 +255,16 @@ function buildBaseCss(tokens, spacing) {
   .items-table {
     width: 100%;
     border-collapse: collapse;
-    border-radius: 10px;
+    border-radius: 6px;
     overflow: hidden;
     position: relative;
     z-index: 2;
+    page-break-inside: avoid;
+    font-size: 13px;
   }
   .items-table th,
   .items-table td {
-    padding: 12px 14px;
+    padding: 8px 10px;
     text-align: left;
   }
   .items-table thead {
@@ -291,19 +307,20 @@ function buildBaseCss(tokens, spacing) {
   .totals {
     display: flex;
     justify-content: flex-end;
+    page-break-inside: avoid;
   }
   .totals-card {
-    min-width: 260px;
-    border-radius: 10px;
-    padding: 16px 18px;
+    min-width: 240px;
+    border-radius: 8px;
+    padding: 12px 14px;
     border: 1px solid ${tokens.border};
     background: rgba(148, 163, 184, 0.03);
   }
   .totals-row {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 6px;
-    font-size: 13px;
+    margin-bottom: 4px;
+    font-size: 12px;
   }
   .totals-row.total {
     margin-top: 8px;
@@ -316,11 +333,12 @@ function buildBaseCss(tokens, spacing) {
 
   /* Payment */
   .payment-box {
-    border-radius: 10px;
-    padding: 14px 16px;
+    border-radius: 8px;
+    padding: 10px 12px;
     border: 1px dashed ${tokens.border};
     background: rgba(79, 70, 229, 0.02);
-    font-size: 13px;
+    font-size: 12px;
+    page-break-inside: avoid;
   }
   .payment-label {
     font-weight: 600;
@@ -362,13 +380,13 @@ function renderDecorations(decorations, tokens) {
   const anchorToPosition = (anchor) => {
     switch (anchor) {
       case 'top-left':
-        return 'top: -80px; left: -80px;';
+        return 'top: -20px; left: -20px;';
       case 'top-right':
-        return 'top: -80px; right: -80px;';
+        return 'top: -20px; right: -20px;';
       case 'bottom-left':
-        return 'bottom: -80px; left: -80px;';
+        return 'bottom: -20px; left: -20px;';
       case 'bottom-right':
-        return 'bottom: -80px; right: -80px;';
+        return 'bottom: -20px; right: -20px;';
       case 'center':
       default:
         return 'top: 50%; left: 50%; transform: translate(-50%, -50%);';
@@ -513,9 +531,9 @@ function renderDecorations(decorations, tokens) {
 
   const elements = decorations.map((decoration, index) => {
     if (!decoration || !decoration.asset) return '';
-    const sizeScale = decoration.scale || 1.0;
-    const width = 400 * sizeScale;
-    const height = 300 * sizeScale;
+    const sizeScale = Math.min(decoration.scale || 1.0, 1.2); // Cap scale at 1.2 to prevent overflow
+    const width = 300 * sizeScale; // Reduced from 400
+    const height = 200 * sizeScale; // Reduced from 300
     const positionStyle = anchorToPosition(decoration.anchor || 'top-right');
     const opacity = decoration.colors?.opacity ?? 0.12;
     const fill = colorFromToken(decoration.colors?.fill || 'accent');

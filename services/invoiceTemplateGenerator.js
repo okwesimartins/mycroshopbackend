@@ -167,9 +167,9 @@ Template Structure (return as JSON array):
       }
     ],
     "spacing": {
-      "section_gap": "24px" | "32px" | "40px",
-      "item_gap": "8px" | "12px" | "16px",
-      "padding": "20px" | "32px" | "40px"
+      "section_gap": "16px" | "20px" | "24px",
+      "item_gap": "6px" | "8px" | "10px",
+      "padding": "20px" | "24px" | "28px"
     }
   }
 ]
@@ -188,7 +188,7 @@ CRITICAL DESIGN REQUIREMENTS:
    - Vary header positions: centered, left, split, minimal
    - Vary table styles: accent_header, zebra_stripes, bordered, minimal
    - Vary totals placement: right, left, two_column, highlighted
-   - Vary spacing: different padding (20px, 32px, 40px) and gaps
+   - Vary spacing: different padding (20px, 24px, 28px) and gaps (16px, 18px, 20px)
 
 4. **COLOR USAGE**: 
    - Use primary color for table headers and accents
@@ -290,7 +290,7 @@ Return ONLY valid JSON array, no markdown, no explanations, no code blocks.
         ];
       }
       if (!template.spacing) {
-        template.spacing = { section_gap: '32px', item_gap: '12px', padding: '32px' };
+        template.spacing = { section_gap: '20px', item_gap: '8px', padding: '24px' };
       }
       if (!template.decorations) {
         template.decorations = [];
@@ -365,7 +365,7 @@ function generateDefaultTemplates(brandColors) {
         { block: 'Payment', variant: 'centered', show_account_number: true },
         { block: 'Footer', variant: 'centered', show_terms: false }
       ],
-      spacing: { section_gap: '40px', item_gap: '16px', padding: '32px' }
+      spacing: { section_gap: '20px', item_gap: '10px', padding: '24px' }
     },
     {
       id: 'template_2',
@@ -408,7 +408,7 @@ function generateDefaultTemplates(brandColors) {
         { block: 'Payment', variant: 'two_column', show_account_number: true },
         { block: 'Footer', variant: 'left', show_terms: true }
       ],
-      spacing: { section_gap: '32px', item_gap: '12px', padding: '40px' }
+      spacing: { section_gap: '18px', item_gap: '8px', padding: '24px' }
     },
     {
       id: 'template_3',
@@ -444,7 +444,7 @@ function generateDefaultTemplates(brandColors) {
         { block: 'Payment', variant: 'minimal', show_account_number: true },
         { block: 'Footer', variant: 'minimal', show_terms: false }
       ],
-      spacing: { section_gap: '24px', item_gap: '8px', padding: '32px' }
+      spacing: { section_gap: '16px', item_gap: '6px', padding: '20px' }
     },
     {
       id: 'template_4',
@@ -494,7 +494,7 @@ function generateDefaultTemplates(brandColors) {
         { block: 'Payment', variant: 'two_column', show_account_number: true },
         { block: 'Footer', variant: 'centered', show_terms: true }
       ],
-      spacing: { section_gap: '32px', item_gap: '12px', padding: '40px' }
+      spacing: { section_gap: '18px', item_gap: '8px', padding: '24px' }
     },
     {
       id: 'template_5',

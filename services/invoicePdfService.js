@@ -104,7 +104,15 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
     await page.pdf({
       path: pdfPath,
       format: 'A4',
-      printBackground: true
+      printBackground: true,
+      margin: {
+        top: '10mm',
+        right: '10mm',
+        bottom: '10mm',
+        left: '10mm'
+      },
+      preferCSSPageSize: false,
+      displayHeaderFooter: false
     });
     console.log(`[PDF Service] PDF generated: ${pdfPath}`);
     console.log(`[PDF Service] PDF file exists: ${fs.existsSync(pdfPath)}`);
