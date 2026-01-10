@@ -237,6 +237,8 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
     };
 
     const results = [];
+    // Determine if this is a free plan user (needed for saving templates with tenant_id)
+    const isFreePlan = tenant && tenant.subscription_plan === 'free';
 
     for (const template of templates) {
       const html = renderInvoiceHtml({
@@ -254,10 +256,85 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       const normalizePath = (localPath) =>
         '/uploads' + localPath.split('/uploads').pop().replace(/\\/g, '/');
 
+      const previewUrl = normalizePath(previewPath);
+      const pdfUrl = normalizePath(pdfPath);
+
+      // Save template to invoice_templates table using raw SQL
+      // Note: We use raw SQL because there's no InvoiceTemplate Sequelize model
+      try {
+        const { QueryTypes } = require('sequelize');
+        const templateDataJson = JSON.stringify(template);
+        const templateName = template.name || template.id || `Template ${template.id}`;
+        
+        // Build query based on whether we're on free plan (needs tenant_id) or enterprise
+        if (isFreePlan && tenantId) {
+          await req.db.query(`
+            INSERT INTO invoice_templates (
+              tenant_id, invoice_id, template_id, template_name, template_data, preview_url, is_selected, created_at
+            ) VALUES (
+              :tenant_id, :invoice_id, :template_id, :template_name, :template_data, :preview_url, :is_selected, NOW()
+            )
+            ON DUPLICATE KEY UPDATE
+              template_data = :template_data_update,
+              preview_url = :preview_url_update
+          `, {
+            replacements: {
+              tenant_id: tenantId,
+              invoice_id: invoice.id,
+              template_id: template.id,
+              template_name: templateName,
+              template_data: templateDataJson,
+              preview_url: previewUrl,
+              is_selected: 0, // false
+              template_data_update: templateDataJson,
+              preview_url_update: previewUrl
+            },
+            type: QueryTypes.INSERT
+          });
+        } else {
+          // Enterprise users (no tenant_id)
+          await req.db.query(`
+            INSERT INTO invoice_templates (
+              invoice_id, template_id, template_name, template_data, preview_url, is_selected, created_at
+            ) VALUES (
+              :invoice_id, :template_id, :template_name, :template_data, :preview_url, :is_selected, NOW()
+            )
+            ON DUPLICATE KEY UPDATE
+              template_data = :template_data_update,
+              preview_url = :preview_url_update
+          `, {
+            replacements: {
+              invoice_id: invoice.id,
+              template_id: template.id,
+              template_name: templateName,
+              template_data: templateDataJson,
+              preview_url: previewUrl,
+              is_selected: 0, // false
+              template_data_update: templateDataJson,
+              preview_url_update: previewUrl
+            },
+            type: QueryTypes.INSERT
+          });
+        }
+        
+        console.log(`Saved template ${template.id} to database for invoice ${invoice.id}`);
+      } catch (saveError) {
+        console.error(`Failed to save template ${template.id} to database:`, saveError.message);
+        console.error('Save template error details:', {
+          message: saveError.message,
+          stack: saveError.stack?.split('\n').slice(0, 3).join('\n'),
+          invoiceId: invoice.id,
+          templateId: template.id,
+          isFreePlan: isFreePlan,
+          tenantId: tenantId
+        });
+        // Continue even if saving fails - templates are still returned to user
+      }
+
       results.push({
         template,
-        preview_url: normalizePath(previewPath),
-        pdf_url: normalizePath(pdfPath)
+        preview_url: previewUrl,
+        pdf_url: pdfUrl
       });
     }
 
@@ -664,20 +741,25 @@ async function createInvoice(req, res) {
     }, { transaction });
 
     // Create invoice items
+    const createdInvoiceItems = [];
     for (const item of invoiceItems) {
-      await req.db.models.InvoiceItem.create({
+      const createdItem = await req.db.models.InvoiceItem.create({
         tenant_id: isFreePlan ? tenantId : null, // Set tenant_id for free users (shared DB)
         invoice_id: invoice.id,
         ...item
       }, { transaction });
+      createdInvoiceItems.push(createdItem);
     }
 
     await transaction.commit();
+    console.log(`Invoice created successfully with ${createdInvoiceItems.length} invoice items`);
 
-    // Fetch complete invoice with relations
-    // Note: Customer is optional (required: false) since customer_id can be null
+    // Fetch complete invoice with relations after transaction commit
+    // For free users, we need to fetch InvoiceItems separately with tenant_id filter
+    // For enterprise users, we can use includes normally
     let completeInvoice = null;
     try {
+      // First, fetch invoice with Store and Customer (these don't need tenant_id filter)
       completeInvoice = await req.db.models.Invoice.findByPk(invoice.id, {
         include: [
           {
@@ -688,30 +770,49 @@ async function createInvoice(req, res) {
           {
             model: req.db.models.Customer,
             required: false // Customer is optional - can be null when customer_id is null
-          },
-          {
-            model: req.db.models.InvoiceItem,
-            required: false, // Items should exist but make it safe
-            include: [
-              {
-                model: req.db.models.Product,
-                required: false // Product is optional (manual items don't have products)
-              }
-            ]
           }
         ]
       });
 
-      // If completeInvoice is null, use the invoice we just created
-      if (!completeInvoice) {
-        console.warn('Failed to fetch complete invoice, using created invoice object');
-        completeInvoice = invoice;
+      // Always fetch InvoiceItems separately for free users (need tenant_id filter)
+      // For enterprise users, we could include them, but fetching separately is safer
+      const items = await req.db.models.InvoiceItem.findAll({
+        where: {
+          invoice_id: invoice.id,
+          ...(isFreePlan ? { tenant_id: tenantId } : {})
+        },
+        include: [
+          {
+            model: req.db.models.Product,
+            required: false // Product is optional (manual items don't have products)
+          }
+        ],
+        order: [['id', 'ASC']] // Ensure consistent ordering
+      });
+
+      // Convert invoice to plain object and add items
+      if (completeInvoice) {
+        completeInvoice = completeInvoice.toJSON ? completeInvoice.toJSON() : completeInvoice;
+        completeInvoice.InvoiceItems = items.map(item => item.toJSON ? item.toJSON() : item);
+        console.log(`Loaded complete invoice with ${completeInvoice.InvoiceItems.length} items`);
+      } else {
+        // Fallback: use invoice we just created
+        completeInvoice = invoice.toJSON ? invoice.toJSON() : invoice;
+        completeInvoice.InvoiceItems = items.map(item => item.toJSON ? item.toJSON() : item);
+        console.log(`Using created invoice with ${completeInvoice.InvoiceItems.length} items as fallback`);
       }
     } catch (fetchError) {
       console.error('Error fetching complete invoice:', fetchError);
-      console.error('Using created invoice object instead');
-      // Use the invoice we just created as fallback
-      completeInvoice = invoice;
+      console.error('Fetch error details:', {
+        message: fetchError.message,
+        stack: fetchError.stack?.split('\n').slice(0, 5).join('\n'),
+        invoiceId: invoice.id,
+        tenantId: isFreePlan ? tenantId : null
+      });
+      // Use the invoice we just created as fallback with items from createdInvoiceItems
+      completeInvoice = invoice.toJSON ? invoice.toJSON() : invoice;
+      completeInvoice.InvoiceItems = createdInvoiceItems.map(item => item.toJSON ? item.toJSON() : item);
+      console.log(`Using created invoice with ${completeInvoice.InvoiceItems.length} items as fallback after error`);
     }
 
     // Generate AI templates automatically (non-blocking - if it fails, still return invoice)
