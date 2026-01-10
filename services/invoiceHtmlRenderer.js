@@ -316,6 +316,26 @@ function buildBaseCss(tokens, spacing) {
     border: 1px solid ${tokens.border};
     background: rgba(148, 163, 184, 0.03);
   }
+  .totals-card--bold {
+    background: ${tokens.primary};
+    color: #ffffff;
+    border: none;
+  }
+  .totals-card--accent {
+    background: ${tokens.accent};
+    color: #ffffff;
+    border: none;
+  }
+  .totals-card--bold .totals-row,
+  .totals-card--accent .totals-row {
+    color: #ffffff;
+  }
+  .totals-card--bold .totals-row.total,
+  .totals-card--accent .totals-row.total {
+    color: #ffffff;
+    border-top-color: rgba(255, 255, 255, 0.3);
+    font-size: 18px;
+  }
   .totals-row {
     display: flex;
     justify-content: space-between;
@@ -348,14 +368,202 @@ function buildBaseCss(tokens, spacing) {
     white-space: pre-line;
   }
 
-  /* Footer */
+  /* Footer variants */
   .footer {
     font-size: 11px;
     color: #6b7280;
     text-align: center;
+    padding: 12px 0;
+    page-break-inside: avoid;
   }
   .footer--left {
     text-align: left;
+  }
+  .footer--band {
+    background: ${tokens.primary};
+    color: #ffffff;
+    padding: 16px 20px;
+    margin: 0 -${spacing.padding};
+    margin-top: 20px;
+    border-radius: 0 0 12px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .footer-band-content {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    width: 100%;
+    justify-content: center;
+  }
+  .footer-contact-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #ffffff;
+  }
+  .footer-icon {
+    font-size: 14px;
+  }
+  .footer--signature {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid ${tokens.border};
+  }
+  .signature-area {
+    flex: 1;
+    max-width: 200px;
+  }
+  .signature-line {
+    border-top: 1px solid ${tokens.text};
+    margin-bottom: 4px;
+    padding-top: 20px;
+  }
+  .signature-label {
+    font-size: 11px;
+    color: ${tokens.secondary};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .thank-you-large {
+    font-size: 28px;
+    font-weight: 700;
+    color: ${tokens.primary};
+    text-align: right;
+  }
+  .footer--centered-elegant {
+    text-align: center;
+    padding: 16px 0;
+    border-top: 1px solid ${tokens.border};
+  }
+  .thank-you {
+    font-size: 18px;
+    font-weight: 700;
+    color: ${tokens.primary};
+    margin-bottom: 8px;
+  }
+  .footer-contact-elegant {
+    font-size: 11px;
+    color: ${tokens.secondary};
+  }
+  .footer--contact {
+    text-align: center;
+    font-size: 11px;
+    color: ${tokens.secondary};
+    padding-top: 8px;
+  }
+
+  /* Header decorative variants */
+  .header--decorative {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    align-items: start;
+    border-bottom: none;
+    padding-bottom: 16px;
+  }
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .header-right {
+    text-align: right;
+  }
+  .invoice-title-large {
+    font-size: 36px;
+    font-weight: 800;
+    color: ${tokens.primary};
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+  }
+  .header-meta-compact {
+    font-size: 11px;
+    line-height: 1.6;
+    color: ${tokens.text};
+  }
+  .business-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: ${tokens.primary};
+  }
+  .business-name-small {
+    font-size: 16px;
+    font-weight: 600;
+    color: ${tokens.primary};
+    margin-top: 4px;
+  }
+  .header--split-invoice {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    align-items: start;
+    border-bottom: 1px solid ${tokens.border};
+    padding-bottom: 16px;
+  }
+  .invoice-title {
+    font-size: 32px;
+    font-weight: 700;
+    color: ${tokens.primary};
+    text-align: right;
+    margin-bottom: 12px;
+    letter-spacing: 1px;
+  }
+  .header--curved {
+    text-align: center;
+    border-bottom: none;
+    padding-bottom: 16px;
+  }
+  .header-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .header-meta-curved {
+    font-size: 12px;
+    color: ${tokens.text};
+    margin-top: 8px;
+  }
+
+  /* Logo stacked rectangles */
+  .header-logo-stacked {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+  .stacked-rect {
+    width: 40px;
+    height: 12px;
+    border-radius: 3px;
+  }
+  .stacked-rect.yellow {
+    background: ${tokens.accent || '#F59E0B'};
+  }
+  .stacked-rect.black {
+    background: ${tokens.primary};
+  }
+
+  /* Totals variants */
+  .totals-card--bold {
+    background: ${tokens.primary};
+    color: #ffffff;
+    border: none;
+  }
+  .totals-card--bold .totals-row {
+    color: #ffffff;
+  }
+  .totals-card--bold .totals-row.total {
+    color: #ffffff;
+    border-top-color: rgba(255, 255, 255, 0.3);
   }
   `.trim();
 }
@@ -394,7 +602,7 @@ function renderDecorations(decorations, tokens) {
   };
 
   // Generate different SVG shapes based on asset type
-  const generateSVGShape = (asset, width, height, fill, opacity) => {
+  const generateSVGShape = (asset, width, height, fill, opacity, anchor = 'top-right') => {
     const assetType = asset || 'corner_swoosh';
     
     switch (assetType) {
@@ -501,6 +709,7 @@ function renderDecorations(decorations, tokens) {
         `;
       
       case 'organic_curve':
+      case 'flowing_waves':
         // Organic flowing curves
         return `
         <path
@@ -517,6 +726,139 @@ function renderDecorations(decorations, tokens) {
         />
         `;
       
+      case 'stacked_rectangles':
+        // Stacked rounded rectangles (like logo placeholder)
+        return `
+        <rect x="${width * 0.1}" y="${height * 0.1}" width="${width * 0.15}" height="${height * 0.12}" rx="4" fill="${fill}" opacity="${opacity}"/>
+        <rect x="${width * 0.1}" y="${height * 0.26}" width="${width * 0.15}" height="${height * 0.12}" rx="4" fill="${fill}" opacity="${opacity * 0.7}"/>
+        <rect x="${width * 0.1}" y="${height * 0.42}" width="${width * 0.15}" height="${height * 0.12}" rx="4" fill="${fill}" opacity="${opacity}"/>
+        `;
+      
+      case 'accent_line':
+        // Horizontal accent line
+        return `
+        <rect x="0" y="${height * 0.5}" width="${width}" height="3" fill="${fill}" opacity="${opacity}"/>
+        `;
+      
+      case 'corner_triangles':
+      case 'corner_triangle_accent':
+        // Triangular shapes at corners
+        if (anchor === 'bottom') {
+          return `
+          <polygon points="${width * 0.8},${height * 0.9} ${width},${height * 0.9} ${width},${height}" fill="${fill}" opacity="${opacity}"/>
+          <polygon points="0,${height * 0.9} ${width * 0.2},${height * 0.9} 0,${height}" fill="${fill}" opacity="${opacity * 0.8}"/>
+          `;
+        }
+        return `
+        <polygon points="${width},0 ${width},${height * 0.2} ${width * 0.85},0" fill="${fill}" opacity="${opacity}"/>
+        <polygon points="0,${height} ${width * 0.15},${height} 0,${height * 0.8}" fill="${fill}" opacity="${opacity}"/>
+        `;
+      
+      case 'bold_geometric_header':
+        // Large overlapping geometric shape for header
+        return `
+        <path d="M${width * 0.3},0 L${width},0 L${width},${height * 0.6} L${width * 0.4},${height * 0.3} Z" fill="${fill}" opacity="${opacity}"/>
+        <path d="M${width * 0.5},${height * 0.1} L${width * 0.9},${height * 0.1} L${width},${height * 0.5} L${width * 0.6},${height * 0.4} Z" fill="${fill}" opacity="${opacity * 0.7}"/>
+        `;
+      
+      case 'geometric_crystal':
+      case 'geometric_pattern_bg':
+        // Geometric crystal/gem pattern
+        return `
+        <polygon points="${width * 0.3},${height * 0.5} ${width * 0.5},${height * 0.2} ${width * 0.7},${height * 0.5} ${width * 0.5},${height * 0.8}" fill="${fill}" opacity="${opacity}"/>
+        <polygon points="${width * 0.4},${height * 0.5} ${width * 0.5},${height * 0.35} ${width * 0.6},${height * 0.5} ${width * 0.5},${height * 0.65}" fill="${fill}" opacity="${opacity * 0.5}"/>
+        `;
+      
+      case 'bottom_wave':
+        return `
+        <path d="M0,${height * 0.6} Q${width * 0.25},${height * 0.4} ${width * 0.5},${height * 0.6} T${width},${height * 0.6} L${width},${height} L0,${height} Z" fill="${fill}" opacity="${opacity}"/>
+        `;
+      
+      case 'large_sweeping_curve_top':
+        // Large sweeping curve from left across top and down right
+        return `
+        <path d="M0,0 Q${width * 0.25},${height * 0.15} ${width * 0.5},${height * 0.1} Q${width * 0.75},${height * 0.05} ${width},${height * 0.2} L${width},0 Z" fill="${fill}" opacity="${opacity}"/>
+        <path d="M0,${height * 0.1} Q${width * 0.3},${height * 0.3} ${width * 0.6},${height * 0.25} Q${width * 0.9},${height * 0.2} ${width},${height * 0.35} L${width},${height * 0.25} Q${width * 0.85},${height * 0.15} ${width * 0.6},${height * 0.18} Q${width * 0.35},${height * 0.2} 0,${height * 0.12} Z" fill="${fill}" opacity="${opacity * 0.7}"/>
+        `;
+      
+      case 'large_sweeping_curve_bottom':
+        // Large sweeping curve from bottom-left
+        return `
+        <path d="M0,${height} Q${width * 0.25},${height * 0.85} ${width * 0.5},${height * 0.9} Q${width * 0.75},${height * 0.95} ${width},${height * 0.8} L${width},${height} Z" fill="${fill}" opacity="${opacity}"/>
+        `;
+      
+      case 'layered_angular_shapes':
+        // Layered angular shapes creating depth
+        return `
+        <polygon points="0,0 ${width * 0.4},0 ${width * 0.3},${height * 0.4} 0,${height * 0.5}" fill="${fill}" opacity="${opacity}"/>
+        <polygon points="${width * 0.15},0 ${width * 0.5},0 ${width * 0.45},${height * 0.35} ${width * 0.1},${height * 0.45}" fill="${fill}" opacity="${opacity * 0.6}"/>
+        <polygon points="${width * 0.25},${height * 0.1} ${width * 0.55},${height * 0.05} ${width * 0.52},${height * 0.38} ${width * 0.22},${height * 0.4}" fill="${fill}" opacity="${opacity * 0.4}"/>
+        <line x1="${width * 0.2}" y1="${height * 0.15}" x2="${width * 0.6}" y2="${height * 0.12}" stroke="${fill}" stroke-width="1" opacity="${opacity * 0.3}"/>
+        `;
+      
+      case 'corner_geometric_accent':
+        // Geometric accent shapes at corner
+        return `
+        <polygon points="${width * 0.7},0 ${width},0 ${width},${height * 0.3} ${width * 0.8},${height * 0.15}" fill="${fill}" opacity="${opacity}"/>
+        <polygon points="${width * 0.75},${height * 0.05} ${width * 0.95},${height * 0.03} ${width * 0.92},${height * 0.28} ${width * 0.72},${height * 0.2}" fill="${fill}" opacity="${opacity * 0.7}"/>
+        `;
+      
+      case 'abstract_gradient_shapes':
+        // Abstract overlapping gradient shapes
+        return `
+        <path d="M0,0 Q${width * 0.3},${height * 0.2} ${width * 0.2},${height * 0.5} Q${width * 0.1},${height * 0.8} 0,${height}" fill="${fill}" opacity="${opacity}"/>
+        <path d="M${width * 0.15},${height * 0.1} Q${width * 0.4},${height * 0.3} ${width * 0.3},${height * 0.6} Q${width * 0.2},${height * 0.9} ${width * 0.1},${height}" fill="${fill}" opacity="${opacity * 0.6}"/>
+        <ellipse cx="${width * 0.25}" cy="${height * 0.25}" rx="${width * 0.15}" ry="${height * 0.15}" fill="${fill}" opacity="${opacity * 0.4}"/>
+        `;
+      
+      case 'gradient_wave_header':
+        // Gradient wave header with smooth transition
+        const gradientId = `gradWave-${Math.random().toString(36).substr(2, 9)}`;
+        return `
+        <defs>
+          <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:${fill};stop-opacity:${opacity}" />
+            <stop offset="100%" style="stop-color:${fill};stop-opacity:${opacity * 0.6}" />
+          </linearGradient>
+        </defs>
+        <path d="M0,0 L${width},0 L${width},${height * 0.7} Q${width * 0.75},${height * 0.65} ${width * 0.5},${height * 0.7} T0,${height * 0.7} Z" fill="url(#${gradientId})"/>
+        `;
+      
+      case 'accent_stripe':
+        // Vertical accent stripe on the left
+        return `
+        <rect x="0" y="0" width="${width * 0.08}" height="${height}" fill="${fill}" opacity="${opacity}"/>
+        `;
+      
+      case 'minimal_geometric':
+        // Minimal geometric pattern
+        return `
+        <circle cx="${width * 0.7}" cy="${height * 0.7}" r="${width * 0.15}" fill="${fill}" opacity="${opacity}"/>
+        <rect x="${width * 0.75}" y="${height * 0.6}" width="${width * 0.2}" height="${width * 0.2}" transform="rotate(45 ${width * 0.85} ${height * 0.7})" fill="${fill}" opacity="${opacity * 0.5}"/>
+        `;
+      
+      case 'border_frame':
+        // Border frame around content
+        return `
+        <rect x="0" y="0" width="${width}" height="${height}" fill="none" stroke="${fill}" stroke-width="2" opacity="${opacity}"/>
+        <rect x="${width * 0.05}" y="${height * 0.05}" width="${width * 0.9}" height="${height * 0.9}" fill="none" stroke="${fill}" stroke-width="1" opacity="${opacity * 0.5}"/>
+        `;
+      
+      case 'corner_mark':
+        // Small corner mark/icon
+        return `
+        <polygon points="0,0 ${width * 0.3},0 ${width * 0.2},${height * 0.3} 0,${height * 0.2}" fill="${fill}" opacity="${opacity}"/>
+        <line x1="${width * 0.05}" y1="${height * 0.05}" x2="${width * 0.25}" y2="${height * 0.05}" stroke="${fill}" stroke-width="2" opacity="${opacity * 0.8}"/>
+        <line x1="${width * 0.05}" y1="${height * 0.05}" x2="${width * 0.05}" y2="${height * 0.25}" stroke="${fill}" stroke-width="2" opacity="${opacity * 0.8}"/>
+        `;
+      
+      case 'diagonal_split':
+        // Bold diagonal split
+        return `
+        <path d="M0,0 L${width},0 L${width},${height * 0.5} L${width * 0.4},${height} L0,${height} Z" fill="${fill}" opacity="${opacity}"/>
+        <path d="M${width * 0.1},${height * 0.1} L${width * 0.9},${height * 0.1} L${width * 0.85},${height * 0.55} L${width * 0.35},${height * 0.95} L${width * 0.05},${height * 0.95} Z" fill="${fill}" opacity="${opacity * 0.8}"/>
+        `;
+      
       default:
         // Default: elegant corner swoosh
         return `
@@ -531,10 +873,32 @@ function renderDecorations(decorations, tokens) {
 
   const elements = decorations.map((decoration, index) => {
     if (!decoration || !decoration.asset) return '';
-    const sizeScale = Math.min(decoration.scale || 1.0, 1.2); // Cap scale at 1.2 to prevent overflow
-    const width = 300 * sizeScale; // Reduced from 400
-    const height = 200 * sizeScale; // Reduced from 300
-    const positionStyle = anchorToPosition(decoration.anchor || 'top-right');
+    const sizeScale = Math.min(decoration.scale || 1.0, 1.5); // Allow larger scale for full-width
+    const anchor = decoration.anchor || 'top-right';
+    
+    // Special sizing for full-width/height decorations
+    let width, height, positionStyle;
+    if (anchor === 'top' || anchor === 'bottom') {
+      // Full width decoration
+      width = 1200 * sizeScale;
+      height = 200 * sizeScale;
+      positionStyle = anchor === 'top' 
+        ? 'top: -40px; left: 50%; transform: translateX(-50%); width: 120%; height: auto;'
+        : 'bottom: -40px; left: 50%; transform: translateX(-50%); width: 120%; height: auto;';
+    } else if (anchor === 'left' || anchor === 'right') {
+      // Full height decoration
+      width = 100 * sizeScale;
+      height = 1400 * sizeScale;
+      positionStyle = anchor === 'left'
+        ? 'top: 0; bottom: 0; left: -30px; width: auto; height: 100%;'
+        : 'top: 0; bottom: 0; right: -30px; width: auto; height: 100%;';
+    } else {
+      // Corner/center decorations
+      width = 300 * sizeScale;
+      height = 200 * sizeScale;
+      positionStyle = anchorToPosition(anchor);
+    }
+    
     const opacity = decoration.colors?.opacity ?? 0.12;
     const fill = colorFromToken(decoration.colors?.fill || 'accent');
     const rotate = decoration.rotate || 0;
@@ -546,9 +910,10 @@ function renderDecorations(decorations, tokens) {
       style="${positionStyle} width:${width}px; height:${height}px; pointer-events: none; z-index: 0; position: absolute;"
       viewBox="0 0 ${width} ${height}"
       xmlns="http://www.w3.org/2000/svg"
+      preserveAspectRatio="${anchor === 'top' || anchor === 'bottom' || anchor === 'left' || anchor === 'right' ? 'none' : 'xMidYMid'}"
       ${rotate ? `transform="rotate(${rotate} ${width/2} ${height/2})"` : ''}
     >
-      ${generateSVGShape(assetType, width, height, fill, opacity)}
+      ${generateSVGShape(assetType, width, height, fill, opacity, decoration.anchor)}
     </svg>
     `;
   });
@@ -561,42 +926,111 @@ function renderDecorations(decorations, tokens) {
 }
 
 function renderHeaderBlock(config = {}, { invoice, store, logoUrl }) {
-  const variantClass = (() => {
-    switch (config.variant) {
-      case 'centered':
-        return 'header header--centered';
-      case 'minimal':
-        return 'header header--minimal';
-      default:
-        return 'header';
-    }
-  })();
-
-  const businessName = store.name || 'Invoice';
-  const storeAddress = [store.address, store.city, store.state]
+  const variant = config.variant || 'default';
+  const businessName = store?.name || 'Invoice';
+  const storeAddress = [store?.address, store?.city, store?.state]
     .filter(Boolean)
     .join(', ');
 
-  // Render logo if available, otherwise use text
+  // Render logo if available, otherwise use text or stacked rectangles placeholder
   const logoHtml = logoUrl
     ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(businessName)}" class="header-logo-img" />`
+    : variant === 'bold_geometric' || variant === 'decorative_top'
+    ? `<div class="header-logo-stacked"><div class="stacked-rect yellow"></div><div class="stacked-rect black"></div><div class="stacked-rect yellow"></div></div>`
     : `<div class="header-logo">${escapeHtml(businessName)}</div>`;
 
-  return `
-  <section class="section">
-    <div class="${variantClass}">
-      <div>
-        ${logoHtml}
-      </div>
-      <div class="header-meta">
-        <div><strong>Invoice #</strong> ${escapeHtml(invoice.invoice_number || '')}</div>
-        <div><strong>Issue Date:</strong> ${escapeHtml(invoice.issue_date || '')}</div>
-        ${invoice.due_date ? `<div><strong>Due Date:</strong> ${escapeHtml(invoice.due_date)}</div>` : ''}
-        ${storeAddress ? `<div>${escapeHtml(storeAddress)}</div>` : ''}
-      </div>
-    </div>
-  </section>
-  `.trim();
+  // Different header layouts based on variant
+  switch (variant) {
+    case 'bold_geometric':
+    case 'decorative_top':
+      return `
+      <section class="section">
+        <div class="header header--decorative">
+          <div class="header-left">
+            ${logoHtml}
+            ${businessName ? `<div class="business-name">${escapeHtml(businessName)}</div>` : ''}
+          </div>
+          <div class="header-right">
+            <div class="invoice-title-large">INVOICE</div>
+            <div class="header-meta-compact">
+              <div><strong>Invoice #</strong> ${escapeHtml(invoice.invoice_number || '')}</div>
+              <div><strong>Date:</strong> ${escapeHtml(invoice.issue_date || '')}</div>
+              ${invoice.due_date ? `<div><strong>Due:</strong> ${escapeHtml(invoice.due_date)}</div>` : ''}
+              ${invoice.total ? `<div><strong>TOTAL DUE:</strong> ${escapeHtml(String(invoice.total))}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    case 'logo_left_title_right':
+    case 'logo_left_invoice_right':
+      return `
+      <section class="section">
+        <div class="header header--split-invoice">
+          <div class="header-logo-area">
+            ${logoHtml}
+            ${businessName ? `<div class="business-name-small">${escapeHtml(businessName)}</div>` : ''}
+          </div>
+          <div class="header-invoice-area">
+            <div class="invoice-title">INVOICE</div>
+            <div class="header-meta-compact">
+              <div><strong>Invoice No:</strong> ${escapeHtml(invoice.invoice_number || '')}</div>
+              <div><strong>Invoice Date:</strong> ${escapeHtml(invoice.issue_date || '')}</div>
+              ${invoice.due_date ? `<div><strong>Due Date:</strong> ${escapeHtml(invoice.due_date)}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    case 'curved_header':
+      return `
+      <section class="section">
+        <div class="header header--curved">
+          <div class="header-center">
+            ${logoHtml}
+            ${businessName ? `<div class="business-name">${escapeHtml(businessName)}</div>` : ''}
+            <div class="header-meta-curved">
+              <div><strong>Invoice #</strong> ${escapeHtml(invoice.invoice_number || '')}</div>
+              <div><strong>Issue Date:</strong> ${escapeHtml(invoice.issue_date || '')}</div>
+              ${invoice.due_date ? `<div><strong>Due Date:</strong> ${escapeHtml(invoice.due_date)}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    default:
+      const variantClass = (() => {
+        switch (variant) {
+          case 'centered':
+            return 'header header--centered';
+          case 'minimal':
+            return 'header header--minimal';
+          case 'split':
+            return 'header header--split';
+          default:
+            return 'header';
+        }
+      })();
+      
+      return `
+      <section class="section">
+        <div class="${variantClass}">
+          <div>
+            ${logoHtml}
+          </div>
+          <div class="header-meta">
+            <div><strong>Invoice #</strong> ${escapeHtml(invoice.invoice_number || '')}</div>
+            <div><strong>Issue Date:</strong> ${escapeHtml(invoice.issue_date || '')}</div>
+            ${invoice.due_date ? `<div><strong>Due Date:</strong> ${escapeHtml(invoice.due_date)}</div>` : ''}
+            ${storeAddress ? `<div>${escapeHtml(storeAddress)}</div>` : ''}
+          </div>
+        </div>
+      </section>
+      `.trim();
+  }
 }
 
 function renderCustomerBlock(config = {}, { customer = {} }) {
@@ -647,7 +1081,10 @@ function renderItemsBlock(config = {}, { items, currency }) {
   const tableClass = [
     'items-table',
     variant === 'bordered' || config.show_borders ? 'items-table--bordered' : '',
-    variant === 'minimal' ? 'items-table--minimal' : ''
+    variant === 'minimal' || variant === 'minimal_clean' ? 'items-table--minimal' : '',
+    variant === 'accent_header' || variant === 'accent_header_bold' ? 'items-table--accent_header' : '',
+    variant === 'zebra_stripes' ? 'items-table--zebra_stripes' : '',
+    variant === 'highlighted' ? 'items-table--highlighted' : ''
   ]
     .filter(Boolean)
     .join(' ');
@@ -690,36 +1127,70 @@ function renderItemsBlock(config = {}, { items, currency }) {
 }
 
 function renderTotalsBlock(config = {}, { invoice, currency }) {
+  const variant = config.variant || 'right';
   const subtotal = Number(invoice.subtotal || 0);
   const tax = Number(invoice.tax_amount || 0);
   const discount = Number(invoice.discount_amount || 0);
   const total = Number(invoice.total || subtotal + tax - discount);
 
-  return `
-  <section class="section">
-    <div class="totals">
-      <div class="totals-card">
-        <div class="totals-row">
-          <span>Subtotal</span>
-          <span>${currency} ${subtotal.toFixed(2)}</span>
-        </div>
-        <div class="totals-row">
-          <span>Tax</span>
-          <span>${currency} ${tax.toFixed(2)}</span>
-        </div>
-        ${
-          discount > 0
-            ? `<div class="totals-row">
-                <span>Discount</span>
-                <span>- ${currency} ${discount.toFixed(2)}</span>
-              </div>`
-            : ''
-        }
-        <div class="totals-row total">
-          <span>Total</span>
-          <span>${currency} ${total.toFixed(2)}</span>
+  // Determine totals card class based on variant
+  let totalsCardClass = 'totals-card';
+  if (variant === 'bold_box') {
+    totalsCardClass = 'totals-card totals-card--bold';
+  } else if (variant === 'accent_box') {
+    totalsCardClass = 'totals-card totals-card--accent';
+  }
+
+  // Determine alignment
+  const alignment = variant === 'left' ? 'flex-start' : 
+                    variant === 'two_column' ? 'space-between' : 
+                    'flex-end';
+
+  const totalsHtml = `
+    <div class="${totalsCardClass}">
+      <div class="totals-row">
+        <span>Subtotal</span>
+        <span>${currency} ${subtotal.toFixed(2)}</span>
+      </div>
+      <div class="totals-row">
+        <span>Tax</span>
+        <span>${currency} ${tax.toFixed(2)}</span>
+      </div>
+      ${
+        discount > 0
+          ? `<div class="totals-row">
+              <span>Discount</span>
+              <span>- ${currency} ${discount.toFixed(2)}</span>
+            </div>`
+          : ''
+      }
+      <div class="totals-row total">
+        <span>Total</span>
+        <span>${currency} ${total.toFixed(2)}</span>
+      </div>
+    </div>
+  `;
+
+  // Special variant with "Thank You" message
+  if (variant === 'right_with_thankyou') {
+    return `
+    <section class="section">
+      <div class="totals" style="justify-content: ${alignment};">
+        <div style="flex: 1;"></div>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 12px;">
+          ${totalsHtml}
+          <div class="thank-you-large" style="font-size: 24px; margin-top: 8px;">THANK YOU!</div>
         </div>
       </div>
+    </section>
+    `.trim();
+  }
+
+  return `
+  <section class="section">
+    <div class="totals" style="justify-content: ${alignment};">
+      ${variant === 'two_column' ? '<div></div>' : ''}
+      ${totalsHtml}
     </div>
   </section>
   `.trim();
@@ -740,21 +1211,74 @@ function renderPaymentBlock(config = {}, { invoice }) {
 
 function renderFooterBlock(config = {}, { invoice, store }) {
   const variant = config.variant || 'centered';
-  const cls =
-    variant === 'left'
-      ? 'footer footer--left'
-      : 'footer';
+  const business = store?.name || 'MycroShop Invoice';
+  const businessPhone = store?.phone || '';
+  const businessEmail = store?.email || '';
+  const businessAddress = [store?.address, store?.city, store?.state, store?.country]
+    .filter(Boolean)
+    .join(', ');
 
-  const business = store.name || 'MycroShop Invoice';
-
-  return `
-  <section class="section">
-    <div class="${cls}">
-      <div>Thank you for your business.</div>
-      <div>${escapeHtml(business)}</div>
-    </div>
-  </section>
-  `.trim();
+  switch (variant) {
+    case 'band_with_contact':
+    case 'accent_band':
+      return `
+      <section class="section">
+        <div class="footer footer--band">
+          <div class="footer-band-content">
+            ${businessEmail ? `<div class="footer-contact-item"><span class="footer-icon">✉</span> ${escapeHtml(businessEmail)}</div>` : ''}
+            ${businessPhone ? `<div class="footer-contact-item"><span class="footer-icon">☎</span> ${escapeHtml(businessPhone)}</div>` : ''}
+            ${businessAddress ? `<div class="footer-contact-item">${escapeHtml(businessAddress)}</div>` : ''}
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    case 'signature_area':
+      return `
+      <section class="section">
+        <div class="footer footer--signature">
+          <div class="signature-area">
+            <div class="signature-line"></div>
+            <div class="signature-label">Administrator</div>
+          </div>
+          <div class="thank-you-large">THANK YOU!</div>
+        </div>
+        ${businessAddress || businessEmail || businessPhone ? `
+        <div class="footer footer--contact">
+          ${businessPhone ? `${escapeHtml(businessPhone)}` : ''}
+          ${businessEmail ? `${businessPhone ? ' ' : ''}${escapeHtml(businessEmail)}` : ''}
+          ${businessAddress ? `${businessPhone || businessEmail ? ' ' : ''}${escapeHtml(businessAddress)}` : ''}
+        </div>
+        ` : ''}
+      </section>
+      `.trim();
+    
+    case 'centered_contact':
+    case 'elegant_centered':
+      return `
+      <section class="section">
+        <div class="footer footer--centered-elegant">
+          <div class="thank-you">THANK YOU FOR YOUR BUSINESS!</div>
+          <div class="footer-contact-elegant">
+            ${businessPhone ? `${escapeHtml(businessPhone)}` : ''}
+            ${businessEmail ? `${businessPhone ? ' • ' : ''}${escapeHtml(businessEmail)}` : ''}
+            ${businessAddress ? `${businessPhone || businessEmail ? ' • ' : ''}${escapeHtml(businessAddress)}` : ''}
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    default:
+      const cls = variant === 'left' ? 'footer footer--left' : 'footer';
+      return `
+      <section class="section">
+        <div class="${cls}">
+          <div>Thank you for your business.</div>
+          <div>${escapeHtml(business)}</div>
+        </div>
+      </section>
+      `.trim();
+  }
 }
 
 module.exports = {
