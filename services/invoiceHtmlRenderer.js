@@ -59,11 +59,11 @@ function renderInvoiceHtml({ invoice, template, brandColors }) {
 
   // Get logo URL from invoice context (passed from controller)
   const logoUrl = invoice.logoUrl || null;
-  const headerHtml = renderHeaderBlock(layoutMap.Header, { invoice, store, logoUrl });
-  const customerHtml = renderCustomerBlock(layoutMap.CustomerInfo, { customer });
-  const itemsHtml = renderItemsBlock(layoutMap.ItemsTable, { items, currency: '₦' });
-  const totalsHtml = renderTotalsBlock(layoutMap.Totals, { invoice, currency: '₦' });
-  const paymentHtml = renderPaymentBlock(layoutMap.Payment, { invoice });
+  const headerHtml = renderHeaderBlock(layoutMap.Header, { invoice, store, logoUrl, customer });
+  const customerHtml = renderCustomerBlock(layoutMap.CustomerInfo, { customer, invoice, store });
+  const itemsHtml = renderItemsBlock(layoutMap.ItemsTable, { items, currency: '₦', tokens });
+  const totalsHtml = renderTotalsBlock(layoutMap.Totals, { invoice, currency: '₦', tokens });
+  const paymentHtml = renderPaymentBlock(layoutMap.Payment, { invoice, store });
   const footerHtml = renderFooterBlock(layoutMap.Footer, { invoice, store });
 
   return `
@@ -565,6 +565,326 @@ function buildBaseCss(tokens, spacing) {
     color: #ffffff;
     border-top-color: rgba(255, 255, 255, 0.3);
   }
+  .totals-card--blue-box {
+    background: ${tokens.primary};
+    color: #ffffff;
+    border: none;
+    padding: 14px 16px;
+  }
+  .totals-card--blue-box .totals-row {
+    color: #ffffff;
+    font-size: 13px;
+  }
+  .totals-row--blue-box {
+    background: ${tokens.primary};
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 10px 0;
+    border-top: 2px solid rgba(255, 255, 255, 0.3);
+  }
+  .totals-bar {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-top: 1px solid ${tokens.border};
+    border-bottom: 1px solid ${tokens.border};
+    margin: 8px 0;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .totals-bar-label {
+    color: ${tokens.text};
+  }
+  .totals-bar-total {
+    color: ${tokens.primary};
+  }
+  .grand-total-button {
+    background: ${tokens.accent};
+    color: #ffffff;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 14px;
+    text-align: center;
+    margin-bottom: 8px;
+  }
+  .grand-total-amount {
+    font-size: 24px;
+    font-weight: 700;
+    color: ${tokens.text};
+    text-align: center;
+  }
+  .totals-card--blue-subtotal {
+    background: ${tokens.primary};
+    color: #ffffff;
+    border: none;
+    padding: 12px 16px;
+  }
+  .totals-card--blue-subtotal .totals-row {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  /* Header variants for exact image matches */
+  .header--logo-right-title-left {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    align-items: start;
+    border-bottom: none;
+    padding-bottom: 16px;
+  }
+  .invoice-title-large-left {
+    font-size: 42px;
+    font-weight: 800;
+    color: ${tokens.text};
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .header-meta-left {
+    font-size: 12px;
+    color: ${tokens.text};
+    line-height: 1.6;
+  }
+  .business-name-right {
+    font-size: 20px;
+    font-weight: 600;
+    color: ${tokens.text};
+    margin-top: 8px;
+  }
+  .header--logo-left-invoice-right {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: none;
+    padding-bottom: 12px;
+  }
+  .header-logo-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .business-name-left {
+    font-size: 18px;
+    font-weight: 600;
+    color: ${tokens.text};
+  }
+  .invoice-title-right {
+    font-size: 38px;
+    font-weight: 700;
+    color: ${tokens.text};
+    letter-spacing: 2px;
+  }
+  .header--arrowhead-banner {
+    position: relative;
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 16px;
+  }
+  .header-arrowhead-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: ${tokens.primary};
+    padding: 20px 24px;
+    border-radius: 0;
+    clip-path: polygon(0 0, calc(100% - 40px) 0, 100% 0, 100% 100%, 0 100%);
+  }
+  .header-logo-arrowhead {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .business-name-arrowhead {
+    font-size: 16px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .invoice-banner-arrowhead {
+    flex: 1;
+    text-align: right;
+  }
+  .invoice-title-banner {
+    font-size: 36px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: 3px;
+  }
+  .header--logo-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: none;
+    padding-bottom: 16px;
+  }
+  .header-logo-details-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .invoice-title-details {
+    font-size: 32px;
+    font-weight: 700;
+    color: ${tokens.text};
+    margin-top: 8px;
+  }
+  .header-meta-details {
+    font-size: 11px;
+    color: ${tokens.text};
+    line-height: 1.8;
+  }
+  .header-billed-to-right {
+    text-align: right;
+  }
+  .billed-to-label {
+    font-size: 11px;
+    color: ${tokens.secondary};
+    margin-bottom: 4px;
+  }
+  .billed-to-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: ${tokens.text};
+  }
+  .header--gradient-wave {
+    background: linear-gradient(180deg, ${tokens.primary} 0%, ${tokens.primary}dd 100%);
+    color: #ffffff;
+    padding: 24px 28px;
+    margin: 0 -${spacing.padding};
+    margin-bottom: 20px;
+    border-radius: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .header--gradient-wave::after {
+    content: '';
+    position: absolute;
+    bottom: -10px;
+    left: 0;
+    right: 0;
+    height: 20px;
+    background: ${tokens.background};
+    border-radius: 20px 20px 0 0;
+  }
+  .gradient-wave-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    z-index: 1;
+  }
+  .invoice-title-gradient {
+    font-size: 40px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: 2px;
+  }
+  .invoice-number-gradient {
+    font-size: 14px;
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  /* Customer info card variants */
+  .payment-info-card {
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: rgba(148, 163, 184, 0.05);
+    border: 1px solid ${tokens.border};
+  }
+  .invoice-info-card {
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: rgba(148, 163, 184, 0.05);
+    border: 1px solid ${tokens.border};
+    font-size: 12px;
+  }
+
+  /* Table variants for exact image matches */
+  .items-table--blue_header thead {
+    background: ${tokens.primary};
+    color: #ffffff;
+    font-weight: 600;
+  }
+  .items-table--colorful_headers thead th {
+    padding: 12px 10px;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .col-desc-yellow {
+    background: ${tokens.accent};
+    color: #ffffff;
+  }
+  .col-price-dark, .col-qty-dark, .col-total-dark {
+    background: ${tokens.text};
+    color: #ffffff;
+  }
+
+  /* Payment box variants */
+  .payment-box--terms {
+    background: transparent;
+    border: none;
+    padding: 8px 0;
+  }
+  .payment-box--terms .payment-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: ${tokens.text};
+    margin-bottom: 6px;
+  }
+  .payment-box--left {
+    text-align: left;
+  }
+  .payment-box--contact {
+    background: transparent;
+    border: none;
+  }
+
+  /* Footer variants for exact image matches */
+  .footer--authorized {
+    text-align: center;
+    padding: 16px 0;
+    border-top: 1px solid ${tokens.border};
+  }
+  .authorized-signed {
+    font-size: 12px;
+    color: ${tokens.primary};
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .footer--contact-grid {
+    padding: 16px 0;
+    border-top: 1px solid ${tokens.border};
+  }
+  .footer-contact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    font-size: 11px;
+    color: ${tokens.secondary};
+  }
+  .footer-grid-item {
+    display: flex;
+    gap: 4px;
+  }
+  .footer--thank-you-large {
+    text-align: right;
+    padding: 16px 0;
+  }
+  .thank-you-large-footer {
+    font-size: 32px;
+    font-weight: 700;
+    color: ${tokens.text};
+  }
+  .footer--minimal {
+    text-align: center;
+    padding: 8px 0;
+    font-size: 11px;
+    color: ${tokens.secondary};
+  }
   `.trim();
 }
 
@@ -941,6 +1261,94 @@ function renderHeaderBlock(config = {}, { invoice, store, logoUrl }) {
 
   // Different header layouts based on variant
   switch (variant) {
+    // Template 1: Logo right, INVOICE title left (Hanover & Tyke style)
+    case 'logo_right_title_left':
+      return `
+      <section class="section">
+        <div class="header header--logo-right-title-left">
+          <div class="header-left">
+            <div class="invoice-title-large-left">INVOICE</div>
+            <div class="header-meta-left">
+              <div><strong>Invoice Number:</strong> ${escapeHtml(invoice.invoice_number || '')}</div>
+              <div><strong>Date:</strong> ${escapeHtml(invoice.issue_date || '')}</div>
+            </div>
+          </div>
+          <div class="header-right">
+            ${logoHtml}
+            ${businessName ? `<div class="business-name-right">${escapeHtml(businessName)}</div>` : ''}
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 2: Logo left, INVOICE right (Borcelle style)
+    case 'logo_left_invoice_right':
+      return `
+      <section class="section">
+        <div class="header header--logo-left-invoice-right">
+          <div class="header-logo-left">
+            ${logoHtml}
+            ${businessName ? `<div class="business-name-left">${escapeHtml(businessName)}</div>` : ''}
+          </div>
+          <div class="header-invoice-right">
+            <div class="invoice-title-right">INVOICE</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 3: Arrowhead banner (Wardiere style)
+    case 'arrowhead_banner':
+      return `
+      <section class="section">
+        <div class="header header--arrowhead-banner">
+          <div class="header-arrowhead-content">
+            <div class="header-logo-arrowhead">
+              ${logoHtml}
+              ${businessName ? `<div class="business-name-arrowhead">${escapeHtml(businessName)}</div>` : ''}
+            </div>
+            <div class="invoice-banner-arrowhead">
+              <div class="invoice-title-banner">INVOICE</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 4: Logo left with invoice details (Vibrant style)
+    case 'logo_left_invoice_details':
+      return `
+      <section class="section">
+        <div class="header header--logo-details">
+          <div class="header-logo-details-left">
+            ${logoHtml}
+            <div class="invoice-title-details">Invoice</div>
+            <div class="header-meta-details">
+              <div><strong>INVOICE NO.</strong> ${escapeHtml(invoice.invoice_number || '')}</div>
+              <div><strong>DATE:</strong> ${escapeHtml(invoice.issue_date || '')}</div>
+            </div>
+          </div>
+          <div class="header-billed-to-right">
+            <div class="billed-to-label">Billed to:</div>
+            <div class="billed-to-name">${escapeHtml(customer?.name || 'Customer')}</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 5: Gradient wave header (Blue gradient style)
+    case 'gradient_wave_header':
+      return `
+      <section class="section">
+        <div class="header header--gradient-wave">
+          <div class="gradient-wave-content">
+            <div class="invoice-title-gradient">INVOICE</div>
+            <div class="invoice-number-gradient">NO: ${escapeHtml(invoice.invoice_number || '')}</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
     case 'bold_geometric':
     case 'decorative_top':
       return `
@@ -964,7 +1372,6 @@ function renderHeaderBlock(config = {}, { invoice, store, logoUrl }) {
       `.trim();
     
     case 'logo_left_title_right':
-    case 'logo_left_invoice_right':
       return `
       <section class="section">
         <div class="header header--split-invoice">
@@ -1001,12 +1408,16 @@ function renderHeaderBlock(config = {}, { invoice, store, logoUrl }) {
       </section>
       `.trim();
     
+    case 'minimal_with_stripe':
+    case 'classic_header':
+    case 'diagonal_header':
     default:
       const variantClass = (() => {
         switch (variant) {
           case 'centered':
             return 'header header--centered';
           case 'minimal':
+          case 'minimal_with_stripe':
             return 'header header--minimal';
           case 'split':
             return 'header header--split';
@@ -1033,7 +1444,7 @@ function renderHeaderBlock(config = {}, { invoice, store, logoUrl }) {
   }
 }
 
-function renderCustomerBlock(config = {}, { customer = {} }) {
+function renderCustomerBlock(config = {}, { customer = {}, invoice, store }) {
   if (!config || !config.block) {
     return '';
   }
@@ -1041,57 +1452,189 @@ function renderCustomerBlock(config = {}, { customer = {} }) {
   const showLabel = config.show_label !== false;
   const variant = config.variant || 'left';
 
-  const wrapperClass =
-    variant === 'two_column'
-      ? 'two-column'
-      : variant === 'right'
-      ? 'two-column'
-      : '';
-
-  // Safely access customer properties - customer might be null or empty object
+  // Safely access customer properties
   const customerName = (customer && customer.name) ? customer.name : 'Customer';
   const customerEmail = (customer && customer.email) ? customer.email : null;
   const customerPhone = (customer && customer.phone) ? customer.phone : null;
+  const customerAddress = [customer?.address, customer?.city, customer?.state, customer?.country]
+    .filter(Boolean)
+    .join(', ');
 
-  const card = `
-    <div class="customer-card">
-      ${showLabel ? '<div class="customer-label">Bill To</div>' : ''}
-      <div class="customer-name">${escapeHtml(customerName)}</div>
-      ${customerEmail ? `<div class="customer-detail">${escapeHtml(customerEmail)}</div>` : ''}
-      ${customerPhone ? `<div class="customer-detail">${escapeHtml(customerPhone)}</div>` : ''}
-    </div>
-  `;
+  // Different customer info layouts based on variant
+  switch (variant) {
+    // Template 1: BILL TO and PAYMENT INFORMATION side by side
+    case 'bill_to_payment_two_column':
+      const paymentNotes = invoice?.notes || '';
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div class="customer-card">
+            <div class="customer-label">BILL TO:</div>
+            <div class="customer-name">${escapeHtml(customerName)}</div>
+            ${customerAddress ? `<div class="customer-detail">${escapeHtml(customerAddress)}</div>` : ''}
+          </div>
+          <div class="payment-info-card">
+            <div class="payment-label">PAYMENT INFORMATION:</div>
+            ${paymentNotes ? `<div class="payment-notes">${escapeHtml(paymentNotes)}</div>` : ''}
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 2: Issued To and Invoice No side by side
+    case 'issued_to_invoice_no':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div class="customer-card">
+            <div class="customer-label">Issued To:</div>
+            <div class="customer-name">${escapeHtml(customerName)}</div>
+            ${customerAddress ? `<div class="customer-detail">${escapeHtml(customerAddress)}</div>` : ''}
+            ${customerEmail ? `<div class="customer-detail">${escapeHtml(customerEmail)}</div>` : ''}
+            ${customerPhone ? `<div class="customer-detail">${escapeHtml(customerPhone)}</div>` : ''}
+          </div>
+          <div class="invoice-info-card">
+            <div><strong>Invoice No:</strong> ${escapeHtml(invoice?.invoice_number || '')}</div>
+            <div><strong>Date:</strong> ${escapeHtml(invoice?.issue_date || '')}</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 3: Bill To and Invoice info side by side
+    case 'bill_to_invoice_side_by_side':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div class="customer-card">
+            <div class="customer-label">Bill To :</div>
+            <div class="customer-name">${escapeHtml(customerName)}</div>
+            ${customerAddress ? `<div class="customer-detail">${escapeHtml(customerAddress)}</div>` : ''}
+            ${customerEmail ? `<div class="customer-detail">${escapeHtml(customerEmail)}</div>` : ''}
+          </div>
+          <div class="invoice-info-card">
+            <div><strong>No :</strong> ${escapeHtml(invoice?.invoice_number || '')}</div>
+            <div><strong>Date :</strong> ${escapeHtml(invoice?.issue_date || '')}</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 4: Billed to on right
+    case 'billed_to_right':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div></div>
+          <div class="customer-card">
+            <div class="customer-label">Billed to:</div>
+            <div class="customer-name">${escapeHtml(customerName)}</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 5: Bill To and From two columns
+    case 'bill_from_two_column':
+      const storeName = store?.name || 'Business';
+      const storeAddress = [store?.address, store?.city, store?.state]
+        .filter(Boolean)
+        .join(', ');
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div class="customer-card">
+            <div class="customer-label">Bill To:</div>
+            <div class="customer-name">${escapeHtml(customerName)}</div>
+            ${customerPhone ? `<div class="customer-detail">${escapeHtml(customerPhone)}</div>` : ''}
+            ${customerAddress ? `<div class="customer-detail">${escapeHtml(customerAddress)}</div>` : ''}
+          </div>
+          <div class="customer-card">
+            <div class="customer-label">From:</div>
+            <div class="customer-name">${escapeHtml(storeName)}</div>
+            ${store?.phone ? `<div class="customer-detail">${escapeHtml(store.phone)}</div>` : ''}
+            ${storeAddress ? `<div class="customer-detail">${escapeHtml(storeAddress)}</div>` : ''}
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    default:
+      const wrapperClass =
+        variant === 'two_column'
+          ? 'two-column'
+          : variant === 'right'
+          ? 'two-column'
+          : '';
 
-  return `
-  <section class="section">
-    ${
-      wrapperClass
-        ? `<div class="${wrapperClass}">
-            <div>${card}</div>
-            <div></div>
-          </div>`
-        : card
-    }
-  </section>
-  `.trim();
+      const card = `
+        <div class="customer-card">
+          ${showLabel ? '<div class="customer-label">Bill To</div>' : ''}
+          <div class="customer-name">${escapeHtml(customerName)}</div>
+          ${customerEmail ? `<div class="customer-detail">${escapeHtml(customerEmail)}</div>` : ''}
+          ${customerPhone ? `<div class="customer-detail">${escapeHtml(customerPhone)}</div>` : ''}
+        </div>
+      `;
+
+      return `
+      <section class="section">
+        ${
+          wrapperClass
+            ? `<div class="${wrapperClass}">
+                <div>${card}</div>
+                <div></div>
+              </div>`
+            : card
+        }
+      </section>
+      `.trim();
+  }
 }
 
-function renderItemsBlock(config = {}, { items, currency }) {
+function renderItemsBlock(config = {}, { items, currency, tokens = {} }) {
   const variant = config.variant || 'bordered';
   const tableClass = [
     'items-table',
-    variant === 'bordered' || config.show_borders ? 'items-table--bordered' : '',
+    variant === 'bordered' || variant === 'blue_header_bordered' || config.show_borders ? 'items-table--bordered' : '',
     variant === 'minimal' || variant === 'minimal_clean' ? 'items-table--minimal' : '',
     variant === 'accent_header' || variant === 'accent_header_bold' ? 'items-table--accent_header' : '',
-    variant === 'zebra_stripes' ? 'items-table--zebra_stripes' : '',
-    variant === 'highlighted' ? 'items-table--highlighted' : ''
+    variant === 'blue_header' || variant === 'blue_header_bordered' || variant === 'blue_header_zebra' ? 'items-table--blue_header' : '',
+    variant === 'zebra_stripes' || variant === 'blue_header_zebra' ? 'items-table--zebra_stripes' : '',
+    variant === 'highlighted' ? 'items-table--highlighted' : '',
+    variant === 'colorful_alternating_headers' ? 'items-table--colorful_headers' : ''
   ]
     .filter(Boolean)
     .join(' ');
 
-  const rows = items.map((item) => {
+  // Determine column headers based on variant
+  let headers = `
+    <th>Description</th>
+    <th class="col-qty">Qty</th>
+    <th class="col-price">Unit Price</th>
+    <th class="col-total">Total</th>
+  `;
+  
+  if (variant === 'colorful_alternating_headers') {
+    // Template 4: Alternating colored headers
+    headers = `
+      <th class="col-desc-yellow">DESCRIPTION</th>
+      <th class="col-price-dark">PRICE</th>
+      <th class="col-qty-dark">QTY</th>
+      <th class="col-total-dark">AMOUNT</th>
+    `;
+  } else if (variant === 'blue_header' || variant === 'blue_header_bordered' || variant === 'blue_header_zebra') {
+    headers = `
+      <th>ITEM</th>
+      <th>DESCRIPTION</th>
+      <th class="col-price">RATE</th>
+      <th class="col-total">AMOUNT</th>
+    `;
+  }
+
+  const rows = items.map((item, index) => {
+    const rowClass = config.stripe_rows && index % 2 === 1 ? 'row-striped' : '';
     return `
-      <tr>
+      <tr class="${rowClass}">
         <td>
           <div>${escapeHtml(item.item_name)}</div>
           ${
@@ -1112,10 +1655,7 @@ function renderItemsBlock(config = {}, { items, currency }) {
     <table class="${tableClass}">
       <thead>
         <tr>
-          <th>Description</th>
-          <th class="col-qty">Qty</th>
-          <th class="col-price">Unit Price</th>
-          <th class="col-total">Total</th>
+          ${headers}
         </tr>
       </thead>
       <tbody>
@@ -1126,87 +1666,269 @@ function renderItemsBlock(config = {}, { items, currency }) {
   `.trim();
 }
 
-function renderTotalsBlock(config = {}, { invoice, currency }) {
+function renderTotalsBlock(config = {}, { invoice, currency, tokens = {} }) {
   const variant = config.variant || 'right';
   const subtotal = Number(invoice.subtotal || 0);
   const tax = Number(invoice.tax_amount || 0);
   const discount = Number(invoice.discount_amount || 0);
   const total = Number(invoice.total || subtotal + tax - discount);
+  const primary = tokens.primary || '#1E40AF';
+  const accent = tokens.accent || '#F59E0B';
 
-  // Determine totals card class based on variant
-  let totalsCardClass = 'totals-card';
-  if (variant === 'bold_box') {
-    totalsCardClass = 'totals-card totals-card--bold';
-  } else if (variant === 'accent_box') {
-    totalsCardClass = 'totals-card totals-card--accent';
-  }
-
-  // Determine alignment
-  const alignment = variant === 'left' ? 'flex-start' : 
-                    variant === 'two_column' ? 'space-between' : 
-                    'flex-end';
-
-  const totalsHtml = `
-    <div class="${totalsCardClass}">
-      <div class="totals-row">
-        <span>Subtotal</span>
-        <span>${currency} ${subtotal.toFixed(2)}</span>
-      </div>
-      <div class="totals-row">
-        <span>Tax</span>
-        <span>${currency} ${tax.toFixed(2)}</span>
-      </div>
-      ${
-        discount > 0
-          ? `<div class="totals-row">
-              <span>Discount</span>
-              <span>- ${currency} ${discount.toFixed(2)}</span>
-            </div>`
-          : ''
-      }
-      <div class="totals-row total">
-        <span>Total</span>
-        <span>${currency} ${total.toFixed(2)}</span>
-      </div>
-    </div>
-  `;
-
-  // Special variant with "Thank You" message
-  if (variant === 'right_with_thankyou') {
-    return `
-    <section class="section">
-      <div class="totals" style="justify-content: ${alignment};">
-        <div style="flex: 1;"></div>
-        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 12px;">
-          ${totalsHtml}
-          <div class="thank-you-large" style="font-size: 24px; margin-top: 8px;">THANK YOU!</div>
+  // Different totals layouts based on variant
+  switch (variant) {
+    // Template 1: Blue total box (Hanover style)
+    case 'blue_total_box':
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: flex-end;">
+          <div class="totals-card totals-card--blue-box">
+            <div class="totals-row">
+              <span>Sub Total:</span>
+              <span>${currency} ${subtotal.toFixed(2)}</span>
+            </div>
+            <div class="totals-row">
+              <span>Sales Tax:</span>
+              <span>${currency} ${tax.toFixed(2)}</span>
+            </div>
+            <div class="totals-row total totals-row--blue-box">
+              <span>TOTAL:</span>
+              <span>${currency} ${total.toFixed(2)}</span>
+            </div>
+          </div>
         </div>
-      </div>
-    </section>
-    `.trim();
-  }
+      </section>
+      `.trim();
+    
+    // Template 2: Subtotal and Total bar
+    case 'subtotal_total_bar':
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: flex-end;">
+          <div class="totals-card">
+            <div class="totals-row">
+              <span>Sub-total:</span>
+              <span>${currency} ${subtotal.toFixed(2)}</span>
+            </div>
+            <div class="totals-row">
+              <span>Tax:</span>
+              <span>${currency} ${tax.toFixed(2)}</span>
+            </div>
+            <div class="totals-bar">
+              <div class="totals-bar-label">SUBTOTAL</div>
+              <div class="totals-bar-total">TOTAL</div>
+            </div>
+            <div class="totals-row total">
+              <span></span>
+              <span>${currency} ${total.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 3: Right aligned with discount
+    case 'right_aligned_with_discount':
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: flex-end;">
+          <div class="totals-card">
+            <div class="totals-row">
+              <span>Subtotal:</span>
+              <span>${currency} ${subtotal.toFixed(2)}</span>
+            </div>
+            <div class="totals-row">
+              <span>Discount:</span>
+              <span>${discount > 0 ? `${discount}%` : '0%'}</span>
+            </div>
+            <div class="totals-row">
+              <span>Total Amount:</span>
+              <span>${currency} ${total.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 4: Grand Total button style
+    case 'grand_total_button':
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: flex-end;">
+          <div class="totals-card">
+            <div class="grand-total-button">GRAND TOTAL</div>
+            <div class="grand-total-amount">${currency} ${total.toFixed(2)}</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 5: Blue subtotal box
+    case 'blue_subtotal_box':
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: flex-end;">
+          <div class="totals-card totals-card--blue-subtotal">
+            <div class="totals-row">
+              <span>Sub Total</span>
+              <span>${currency} ${subtotal.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    default:
+      // Determine totals card class based on variant
+      let totalsCardClass = 'totals-card';
+      if (variant === 'bold_box') {
+        totalsCardClass = 'totals-card totals-card--bold';
+      } else if (variant === 'accent_box') {
+        totalsCardClass = 'totals-card totals-card--accent';
+      }
 
-  return `
-  <section class="section">
-    <div class="totals" style="justify-content: ${alignment};">
-      ${variant === 'two_column' ? '<div></div>' : ''}
-      ${totalsHtml}
-    </div>
-  </section>
-  `.trim();
+      // Determine alignment
+      const alignment = variant === 'left' ? 'flex-start' : 
+                        variant === 'two_column' ? 'space-between' : 
+                        'flex-end';
+
+      const totalsHtml = `
+        <div class="${totalsCardClass}">
+          <div class="totals-row">
+            <span>Subtotal</span>
+            <span>${currency} ${subtotal.toFixed(2)}</span>
+          </div>
+          <div class="totals-row">
+            <span>Tax</span>
+            <span>${currency} ${tax.toFixed(2)}</span>
+          </div>
+          ${
+            discount > 0
+              ? `<div class="totals-row">
+                  <span>Discount</span>
+                  <span>- ${currency} ${discount.toFixed(2)}</span>
+                </div>`
+              : ''
+          }
+          <div class="totals-row total">
+            <span>Total</span>
+            <span>${currency} ${total.toFixed(2)}</span>
+          </div>
+        </div>
+      `;
+
+      // Special variant with "Thank You" message
+      if (variant === 'right_with_thankyou') {
+        return `
+        <section class="section">
+          <div class="totals" style="justify-content: ${alignment};">
+            <div style="flex: 1;"></div>
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 12px;">
+              ${totalsHtml}
+              <div class="thank-you-large" style="font-size: 24px; margin-top: 8px;">THANK YOU!</div>
+            </div>
+          </div>
+        </section>
+        `.trim();
+      }
+
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: ${alignment};">
+          ${variant === 'two_column' ? '<div></div>' : ''}
+          ${totalsHtml}
+        </div>
+      </section>
+      `.trim();
+  }
 }
 
-function renderPaymentBlock(config = {}, { invoice }) {
-  const notes = invoice.notes || '';
+function renderPaymentBlock(config = {}, { invoice, store }) {
+  const variant = config.variant || 'minimal';
+  const notes = invoice?.notes || '';
+  const businessPhone = store?.phone || '';
+  const businessEmail = store?.email || '';
+  const businessAddress = [store?.address, store?.city, store?.state]
+    .filter(Boolean)
+    .join(', ');
 
-  return `
-  <section class="section">
-    <div class="payment-box">
-      <div class="payment-label">Payment Instructions</div>
-      <div class="payment-notes">${escapeHtml(notes)}</div>
-    </div>
-  </section>
-  `.trim();
+  switch (variant) {
+    // Template 1: Terms and Conditions
+    case 'terms_conditions':
+      return `
+      <section class="section">
+        <div class="payment-box payment-box--terms">
+          <div class="payment-label">TERM AND CONDITIONS:</div>
+          <div class="payment-notes">${escapeHtml(notes || 'Payment is due 30 days from the invoice date')}</div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 2: Bank and Notes two columns
+    case 'bank_notes_two_column':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div class="payment-box">
+            <div class="payment-label">BANK DETAILS</div>
+            ${notes ? `<div class="payment-notes">${escapeHtml(notes)}</div>` : ''}
+          </div>
+          <div class="payment-box">
+            <div class="payment-label">NOTES:</div>
+            <div class="payment-notes">Lorem ipsum dolor sit amet...</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 3: Left aligned payment instructions
+    case 'left_aligned':
+      return `
+      <section class="section">
+        <div class="payment-box payment-box--left">
+          <div class="payment-label">Payment Instructions:</div>
+          <div class="payment-notes">${escapeHtml(notes)}</div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 4: Contact info footer
+    case 'contact_info_footer':
+      return `
+      <section class="section">
+        <div class="payment-box payment-box--contact">
+          <div class="payment-label">Payment Instructions:</div>
+          <div class="payment-notes">${escapeHtml(notes)}</div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 5: Notes and Payment left
+    case 'notes_payment_left':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div>
+            <div class="payment-label">Note:</div>
+            <div class="payment-notes" style="min-height: 60px;"></div>
+            <div class="payment-label" style="margin-top: 16px;">Payment Information:</div>
+            <div class="payment-notes">${escapeHtml(notes)}</div>
+          </div>
+          <div></div>
+        </div>
+      </section>
+      `.trim();
+    
+    default:
+      return `
+      <section class="section">
+        <div class="payment-box">
+          <div class="payment-label">Payment Instructions</div>
+          <div class="payment-notes">${escapeHtml(notes)}</div>
+        </div>
+      </section>
+      `.trim();
+  }
 }
 
 function renderFooterBlock(config = {}, { invoice, store }) {
@@ -1219,6 +1941,55 @@ function renderFooterBlock(config = {}, { invoice, store }) {
     .join(', ');
 
   switch (variant) {
+    // Template 1: Minimal (no footer needed for this style)
+    case 'minimal':
+      return '';
+    
+    // Template 2: Minimal (no footer)
+    case 'minimal_centered':
+      return `
+      <section class="section">
+        <div class="footer footer--minimal">
+          <div>Thank you for your business.</div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 3: Authorized signature
+    case 'authorized_signature':
+      return `
+      <section class="section">
+        <div class="footer footer--authorized">
+          <div class="authorized-signed">Authorized Signed</div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 4: Contact grid footer
+    case 'contact_grid':
+      return `
+      <section class="section">
+        <div class="footer footer--contact-grid">
+          <div class="footer-contact-grid">
+            ${businessPhone ? `<div class="footer-grid-item"><strong>M:</strong> ${escapeHtml(businessPhone)}</div>` : ''}
+            ${businessEmail ? `<div class="footer-grid-item"><strong>E:</strong> ${escapeHtml(businessEmail)}</div>` : ''}
+            ${businessAddress ? `<div class="footer-grid-item"><strong>L:</strong> ${escapeHtml(businessAddress)}</div>` : ''}
+            ${store?.website ? `<div class="footer-grid-item"><strong>W:</strong> ${escapeHtml(store.website)}</div>` : ''}
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Template 5: Thank You large
+    case 'thank_you_large':
+      return `
+      <section class="section">
+        <div class="footer footer--thank-you-large">
+          <div class="thank-you-large-footer">Thank You!</div>
+        </div>
+      </section>
+      `.trim();
+    
     case 'band_with_contact':
     case 'accent_band':
       return `
