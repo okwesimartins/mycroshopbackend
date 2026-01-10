@@ -517,7 +517,8 @@ async function generateAiTemplatesForInvoice(req, res) {
           attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'email', 'phone']
         },
         {
-          model: req.db.models.Customer
+          model: req.db.models.Customer,
+          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
         },
         {
           model: req.db.models.InvoiceItem
@@ -563,7 +564,8 @@ async function getInvoiceById(req, res) {
           attributes: ['id', 'name', 'store_type', 'address', 'city', 'state']
         },
         {
-          model: req.db.models.Customer
+          model: req.db.models.Customer,
+          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
         },
         {
           model: req.db.models.InvoiceItem,
@@ -914,7 +916,9 @@ async function createInvoice(req, res) {
           },
           {
             model: req.db.models.Customer,
-            required: false
+            required: false,
+            // Explicitly specify attributes to avoid selecting non-existent columns like zip_code
+            attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
           }
         ],
         transaction // Use the same transaction
@@ -1046,7 +1050,9 @@ async function createInvoice(req, res) {
           },
           {
             model: req.db.models.Customer,
-            required: false
+            required: false,
+            // Explicitly specify attributes to avoid selecting non-existent columns like zip_code
+            attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
           }
         ]
       });
@@ -1299,7 +1305,8 @@ async function updateInvoice(req, res) {
     const updatedInvoice = await req.db.models.Invoice.findByPk(invoice.id, {
       include: [
         {
-          model: req.db.models.Customer
+          model: req.db.models.Customer,
+          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
         },
         {
           model: req.db.models.InvoiceItem,
