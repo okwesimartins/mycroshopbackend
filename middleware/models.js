@@ -56,7 +56,7 @@ function initializeTenantModels(req, res, next) {
       console.error('Available models:', req.db.models ? Object.keys(req.db.models) : 'none');
       return res.status(500).json({
         success: false,
-        message: 'Invoice model not available',
+        message: 'Invoice model is not available',
         debug: process.env.NODE_ENV === 'development' ? {
           models_exist: !!req.db.models,
           available_models: req.db.models ? Object.keys(req.db.models) : 'none'
