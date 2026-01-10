@@ -104,18 +104,20 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       console.warn('Could not fetch tenant for AI templates:', error);
     }
 
-    const store = invoice.Store || {};
-    const customer = invoice.Customer || {};
+    // Safely extract store and customer - they might be null if foreign keys are null
+    const store = (invoice && invoice.Store) ? invoice.Store : {};
+    const customer = (invoice && invoice.Customer) ? invoice.Customer : {};
+    const items = (invoice && invoice.InvoiceItems) ? invoice.InvoiceItems : [];
 
     const invoiceDataForAi = {
-      business_name: store.name || tenant?.name || 'Business Name',
-      business_email: store.email || null,
-      business_phone: store.phone || null,
-      customer_name: customer.name || 'Customer',
-      items_count: Array.isArray(invoice.InvoiceItems) ? invoice.InvoiceItems.length : 0,
-      total_amount: invoice.total || invoice.subtotal || 0,
+      business_name: (store && store.name) || (tenant && tenant.name) || 'Business Name',
+      business_email: (store && store.email) || null,
+      business_phone: (store && store.phone) || null,
+      customer_name: (customer && customer.name) || 'Customer',
+      items_count: Array.isArray(items) ? items.length : 0,
+      total_amount: (invoice && invoice.total) || (invoice && invoice.subtotal) || 0,
       currency: 'NGN',
-      industry: tenant?.business_category || 'general'
+      industry: (tenant && tenant.business_category) || 'general'
     };
 
     // Default brand colors (fallback)
@@ -187,8 +189,50 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
     const templates = await generateTemplateOptions(invoiceDataForAi, brandColors);
 
     // Attach logo URL to invoice object for rendering
+    // Safely convert invoice to JSON - handle null associations
+    let invoiceJson = null;
+    try {
+      if (!invoice) {
+        throw new Error('Invoice is null or undefined');
+      }
+
+      // Use Sequelize's toJSON method if available
+      if (typeof invoice.toJSON === 'function') {
+        invoiceJson = invoice.toJSON();
+      } else {
+        // Fallback: use invoice as-is if it's already a plain object
+        invoiceJson = invoice;
+      }
+      
+      // Ensure null associations are handled properly (Sequelize sets them to null when foreign key is null)
+      if (invoiceJson.Customer === null || invoiceJson.Customer === undefined) {
+        invoiceJson.Customer = null;
+      }
+      if (invoiceJson.Store === null || invoiceJson.Store === undefined) {
+        invoiceJson.Store = null;
+      }
+      if (!Array.isArray(invoiceJson.InvoiceItems)) {
+        invoiceJson.InvoiceItems = invoiceJson.InvoiceItems ? [invoiceJson.InvoiceItems] : [];
+      }
+    } catch (jsonError) {
+      console.error('Error converting invoice to JSON in generateTemplatesForInvoice:', jsonError);
+      console.error('Invoice object type:', typeof invoice);
+      console.error('Invoice has toJSON:', typeof invoice?.toJSON);
+      // Create a minimal safe invoice object
+      invoiceJson = {
+        id: invoice?.id || null,
+        invoice_number: invoice?.invoice_number || null,
+        customer_id: invoice?.customer_id || null,
+        total: invoice?.total || 0,
+        subtotal: invoice?.subtotal || 0,
+        Customer: null,
+        Store: null,
+        InvoiceItems: []
+      };
+    }
+
     const invoiceWithLogo = {
-      ...invoice.toJSON(),
+      ...invoiceJson,
       logoUrl: logoUrl || null
     };
 
@@ -361,7 +405,7 @@ async function createInvoice(req, res) {
   try {
     const {
       store_id,
-      customer_id,
+      customer_id, // This is optional - can be null, undefined, or a valid integer
       issue_date,
       due_date,
       items,
@@ -369,6 +413,63 @@ async function createInvoice(req, res) {
       discount_amount = 0,
       notes
     } = req.body;
+
+    // Validate required fields
+    if (!issue_date) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'issue_date is required'
+      });
+    }
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'At least one item is required'
+      });
+    }
+
+    // Validate customer_id only if it's explicitly provided (not null/undefined/empty)
+    // customer_id is optional, so null/undefined is valid
+    let validCustomerId = null;
+    if (customer_id !== undefined && customer_id !== null && customer_id !== '') {
+      const parsedCustomerId = parseInt(customer_id);
+      if (isNaN(parsedCustomerId) || parsedCustomerId < 1) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'customer_id must be a positive integer if provided',
+          error_details: `Received customer_id: ${customer_id} (type: ${typeof customer_id})`
+        });
+      }
+
+      // Verify customer exists if customer_id is provided
+      try {
+        const customer = await req.db.models.Customer.findByPk(parsedCustomerId);
+        if (!customer) {
+          await transaction.rollback();
+          return res.status(404).json({
+            success: false,
+            message: `Customer with ID ${parsedCustomerId} not found`
+          });
+        }
+        validCustomerId = parsedCustomerId;
+      } catch (customerError) {
+        await transaction.rollback();
+        console.error('Error validating customer:', customerError);
+        return res.status(500).json({
+          success: false,
+          message: 'Error validating customer',
+          error: customerError.message,
+          error_details: process.env.NODE_ENV === 'development' ? {
+            stack: customerError.stack?.split('\n').slice(0, 5).join('\n'),
+            customer_id: parsedCustomerId
+          } : undefined
+        });
+      }
+    }
 
     // Get tenant to check subscription plan
     const tenantId = req.user.tenantId;
@@ -545,7 +646,7 @@ async function createInvoice(req, res) {
       tenant_id: isFreePlan ? tenantId : null, // Set tenant_id for free users (shared DB)
       invoice_number: generateInvoiceNumber(),
       store_id: store_id || null, // null for free users without physical stores
-      customer_id: customer_id || null,
+      customer_id: validCustomerId, // Use validated customer_id (null if not provided)
       issue_date,
       due_date: due_date || null,
       subtotal,
@@ -574,44 +675,155 @@ async function createInvoice(req, res) {
     await transaction.commit();
 
     // Fetch complete invoice with relations
-    const completeInvoice = await req.db.models.Invoice.findByPk(invoice.id, {
-      include: [
-        {
-          model: req.db.models.Store,
-          attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'email', 'phone']
-        },
-        {
-          model: req.db.models.Customer
-        },
-        {
-          model: req.db.models.InvoiceItem,
-          include: [
-            {
-              model: req.db.models.Product
-            }
-          ]
-        }
-      ]
-    });
+    // Note: Customer is optional (required: false) since customer_id can be null
+    let completeInvoice = null;
+    try {
+      completeInvoice = await req.db.models.Invoice.findByPk(invoice.id, {
+        include: [
+          {
+            model: req.db.models.Store,
+            required: false, // Store is optional for free users
+            attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'email', 'phone']
+          },
+          {
+            model: req.db.models.Customer,
+            required: false // Customer is optional - can be null when customer_id is null
+          },
+          {
+            model: req.db.models.InvoiceItem,
+            required: false, // Items should exist but make it safe
+            include: [
+              {
+                model: req.db.models.Product,
+                required: false // Product is optional (manual items don't have products)
+              }
+            ]
+          }
+        ]
+      });
+
+      // If completeInvoice is null, use the invoice we just created
+      if (!completeInvoice) {
+        console.warn('Failed to fetch complete invoice, using created invoice object');
+        completeInvoice = invoice;
+      }
+    } catch (fetchError) {
+      console.error('Error fetching complete invoice:', fetchError);
+      console.error('Using created invoice object instead');
+      // Use the invoice we just created as fallback
+      completeInvoice = invoice;
+    }
 
     // Generate AI templates automatically (non-blocking - if it fails, still return invoice)
     let templateData = { templates: [], previews: [] };
     try {
-      templateData = await generateTemplatesForInvoice(completeInvoice, tenantId, req);
+      // Only generate templates if we have a valid invoice object
+      if (completeInvoice && completeInvoice.id) {
+        // Set a timeout for template generation to prevent hanging
+        const templatePromise = generateTemplatesForInvoice(completeInvoice, tenantId, req);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Template generation timeout')), 30000)
+        );
+        
+        templateData = await Promise.race([templatePromise, timeoutPromise]);
+      }
     } catch (error) {
-      console.warn('Failed to generate templates during invoice creation:', error);
+      console.error('Failed to generate templates during invoice creation:', error);
+      console.error('Template generation error details:', {
+        message: error.message,
+        stack: error.stack?.split('\n').slice(0, 5).join('\n'),
+        invoiceId: completeInvoice?.id,
+        hasCustomer: !!completeInvoice?.Customer,
+        customerId: completeInvoice?.customer_id
+      });
       // Continue without templates - invoice creation was successful
+      templateData = { templates: [], previews: [] };
     }
 
-    res.status(201).json({
-      success: true,
-      message: 'Invoice created successfully',
-      data: {
-        invoice: completeInvoice,
-        templates: templateData.templates,
-        previews: templateData.previews
+    // Ensure we always send a complete response
+    // Safely serialize invoice - handle null associations
+    let safeInvoice = null;
+    try {
+      if (completeInvoice) {
+        // Convert Sequelize instance to plain object and handle null associations
+        safeInvoice = completeInvoice.toJSON ? completeInvoice.toJSON() : completeInvoice;
+        
+        // Ensure Customer and Store are handled properly if null
+        if (!safeInvoice.Customer) {
+          safeInvoice.Customer = null; // Explicitly set to null instead of undefined
+        }
+        if (!safeInvoice.Store) {
+          safeInvoice.Store = null;
+        }
+        // Ensure InvoiceItems is an array
+        if (!Array.isArray(safeInvoice.InvoiceItems)) {
+          safeInvoice.InvoiceItems = safeInvoice.InvoiceItems ? [safeInvoice.InvoiceItems] : [];
+        }
+      } else {
+        // Fallback if completeInvoice is null/undefined
+        safeInvoice = {
+          id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          status: invoice.status,
+          total: invoice.total,
+          Customer: null,
+          Store: null,
+          InvoiceItems: []
+        };
       }
-    });
+    } catch (serializeError) {
+      console.error('Error serializing invoice:', serializeError);
+      // Use basic invoice data if serialization fails
+      safeInvoice = {
+        id: invoice.id,
+        invoice_number: invoice.invoice_number,
+        status: invoice.status,
+        total: invoice.total
+      };
+    }
+
+    try {
+      res.status(201).json({
+        success: true,
+        message: 'Invoice created successfully',
+        data: {
+          invoice: safeInvoice,
+          templates: templateData.templates || [],
+          previews: templateData.previews || []
+        }
+      });
+    } catch (responseError) {
+      console.error('Error sending response:', responseError);
+      console.error('Response error details:', {
+        message: responseError.message,
+        stack: responseError.stack?.split('\n').slice(0, 5).join('\n'),
+        headersSent: res.headersSent
+      });
+      // If response not sent yet, try to send a minimal response
+      if (!res.headersSent) {
+        try {
+          res.status(201).json({
+            success: true,
+            message: 'Invoice created successfully',
+            data: {
+              invoice: { 
+                id: invoice.id, 
+                invoice_number: invoice.invoice_number,
+                customer_id: invoice.customer_id 
+              },
+              templates: [],
+              previews: []
+            }
+          });
+        } catch (finalError) {
+          console.error('Failed to send minimal response:', finalError);
+          // Last resort - send plain text
+          if (!res.headersSent) {
+            res.status(201).type('text/plain').send(`Invoice created: ${invoice.invoice_number}`);
+          }
+        }
+      }
+    }
   } catch (error) {
     await transaction.rollback();
     console.error('Error creating invoice:', error);

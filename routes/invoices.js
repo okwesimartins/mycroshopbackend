@@ -23,13 +23,28 @@ router.post('/:id/ai-templates', invoiceController.generateAiTemplatesForInvoice
 // Create invoice
 router.post('/',
   [
-    body('customer_id').optional().isInt().withMessage('Customer ID must be an integer'),
+    body('customer_id')
+      .optional({ values: 'falsy' }) // Accept null, undefined, empty string
+      .isInt({ min: 1 })
+      .withMessage('Customer ID must be a positive integer if provided'),
     body('issue_date').notEmpty().withMessage('Issue date is required'),
     body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
     body('items.*.item_name').notEmpty().withMessage('Item name is required'),
     body('items.*.quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),
     body('items.*.unit_price').isFloat({ min: 0 }).withMessage('Unit price must be positive')
   ],
+  (req, res, next) => {
+    // Handle validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+    next();
+  },
   invoiceController.createInvoice
 );
 

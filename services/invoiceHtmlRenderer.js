@@ -49,9 +49,10 @@ function renderInvoiceHtml({ invoice, template, brandColors }) {
     ? template.decorations
     : [];
 
-  const customer = invoice.Customer || {};
-  const store = invoice.Store || {};
-  const items = invoice.InvoiceItems || [];
+  // Safely extract associations - they might be null if foreign keys are null
+  const customer = (invoice && invoice.Customer) ? invoice.Customer : {};
+  const store = (invoice && invoice.Store) ? invoice.Store : {};
+  const items = (invoice && invoice.InvoiceItems) ? (Array.isArray(invoice.InvoiceItems) ? invoice.InvoiceItems : []) : [];
 
   const css = buildBaseCss(tokens, spacing);
   const decorationLayer = renderDecorations(decorations, tokens);
@@ -407,7 +408,11 @@ function renderHeaderBlock(config = {}, { invoice, store, logoUrl }) {
   `.trim();
 }
 
-function renderCustomerBlock(config = {}, { customer }) {
+function renderCustomerBlock(config = {}, { customer = {} }) {
+  if (!config || !config.block) {
+    return '';
+  }
+
   const showLabel = config.show_label !== false;
   const variant = config.variant || 'left';
 
@@ -418,12 +423,17 @@ function renderCustomerBlock(config = {}, { customer }) {
       ? 'two-column'
       : '';
 
+  // Safely access customer properties - customer might be null or empty object
+  const customerName = (customer && customer.name) ? customer.name : 'Customer';
+  const customerEmail = (customer && customer.email) ? customer.email : null;
+  const customerPhone = (customer && customer.phone) ? customer.phone : null;
+
   const card = `
     <div class="customer-card">
       ${showLabel ? '<div class="customer-label">Bill To</div>' : ''}
-      <div class="customer-name">${escapeHtml(customer.name || 'Customer')}</div>
-      ${customer.email ? `<div class="customer-detail">${escapeHtml(customer.email)}</div>` : ''}
-      ${customer.phone ? `<div class="customer-detail">${escapeHtml(customer.phone)}</div>` : ''}
+      <div class="customer-name">${escapeHtml(customerName)}</div>
+      ${customerEmail ? `<div class="customer-detail">${escapeHtml(customerEmail)}</div>` : ''}
+      ${customerPhone ? `<div class="customer-detail">${escapeHtml(customerPhone)}</div>` : ''}
     </div>
   `;
 
