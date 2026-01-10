@@ -40,7 +40,7 @@ async function generateTemplateOptions(invoiceData, brandColors) {
     });
 
     const prompt = `
-You are an expert invoice design generator. Given invoice data and brand colors, generate 5 visually distinct, professional invoice template designs as JSON.
+You are an expert invoice design generator. Generate 5 COMPLETELY DIFFERENT and visually striking invoice template designs as JSON. Each template must have a UNIQUE design identity that looks completely different from the others.
 
 Invoice Context:
 - Business: ${business_name || 'Business Name'}
@@ -57,12 +57,48 @@ Brand Colors:
 - Background: ${brandColors.background}
 - Border: ${brandColors.border}
 
-Generate 5 different templates. Each template must have:
+CRITICAL REQUIREMENTS - Each template MUST be visually UNIQUE:
 
-1. **Unique visual style** (modern, classic, minimalist, bold, elegant)
-2. **Different layout arrangements** (header positions, table styles, totals placement)
-3. **Varied decoration usage** (some with curves, some minimal, some geometric)
-4. **Professional appearance** suitable for business invoices
+Template 1: **Bold Geometric Design**
+- Large overlapping geometric shapes at the top (use diagonal_band or geometric_pattern)
+- Strong angular shapes, triangular elements
+- Bold header with geometric background
+- High contrast, dynamic layout
+- Use 1-2 large decorations at top corners (scale 1.3-1.5, opacity 0.15-0.25)
+- Example: Large triangular shapes overlapping, bold accent colors
+
+Template 2: **Elegant Flowing Curves**
+- Subtle wave patterns flowing from corners (use wave_footer, organic_curve)
+- Smooth, organic curves in background
+- Soft, elegant design with flowing lines
+- Use 2 decorations: one at top-right (organic_curve), one at bottom-left (wave_footer)
+- Lower opacity (0.08-0.15) for sophisticated subtlety
+- Example: Gentle waves from corners, soft flowing curves
+
+Template 3: **Modern Minimalist with Accents**
+- Clean design with ONE bold geometric element
+- Sharp angles, stacked shapes (geometric_pattern)
+- Minimal decorations but impactful
+- Use geometric_pattern at one corner with medium scale (1.1-1.2)
+- High contrast, clean lines
+- Example: Stacked rectangular shapes at corner, clean layout
+
+Template 4: **Sophisticated Curved Background**
+- Multiple curved elements creating depth
+- Use corner_swoosh at top-right AND bottom-left (different rotations)
+- Wave patterns for elegance
+- Medium opacity (0.12-0.18) for layered effect
+- Example: Multiple swooshes creating depth, elegant curves
+
+Template 5: **Bold Corner Accents**
+- Strong corner elements (circle_stamp, corner_swoosh)
+- Angular designs at opposite corners
+- Bold use of accent colors
+- Use 2 decorations at opposite corners (e.g., top-left circle_stamp, bottom-right corner_swoosh)
+- Higher opacity (0.15-0.22) for impact
+- Example: Large decorative circles/stamps at corners, bold accents
+
+DESIGN RULES:
 
 Template Structure (return as JSON array):
 [
@@ -138,18 +174,40 @@ Template Structure (return as JSON array):
   }
 ]
 
-Requirements:
-- Each template must be visually distinct and beautiful
-- Use brand colors intelligently (not overwhelming) - create elegant color harmonies
-- Include beautiful decorative shapes: curves, waves, geometric patterns, organic shapes
-- Ensure excellent readability and professional appearance
-- Include 1-2 decorations per template with varied shapes (corner_swoosh, wave_footer, organic_curve, geometric_pattern, circle_stamp, diagonal_band)
-- Use subtle opacity (0.08-0.25) for decorations to maintain readability
-- Vary font choices, layouts, and decoration placements
-- Create modern, elegant designs with smooth curves and beautiful shapes
-- Ensure decorations complement the brand colors and don't distract from content
-- Return exactly 5 templates
-- Return ONLY valid JSON array, no markdown, no explanations
+CRITICAL DESIGN REQUIREMENTS:
+
+1. **VISUAL VARIETY**: Each template must look COMPLETELY DIFFERENT. Do NOT use similar decoration styles across templates.
+2. **DECORATION DIVERSITY**: 
+   - Template 1: Use diagonal_band or geometric_pattern (bold, angular)
+   - Template 2: Use organic_curve and wave_footer (flowing, elegant)
+   - Template 3: Use geometric_pattern (modern, minimalist)
+   - Template 4: Use corner_swoosh (multiple, layered curves)
+   - Template 5: Use circle_stamp and corner_swoosh (bold accents)
+
+3. **LAYOUT VARIETY**: 
+   - Vary header positions: centered, left, split, minimal
+   - Vary table styles: accent_header, zebra_stripes, bordered, minimal
+   - Vary totals placement: right, left, two_column, highlighted
+   - Vary spacing: different padding (20px, 32px, 40px) and gaps
+
+4. **COLOR USAGE**: 
+   - Use primary color for table headers and accents
+   - Use accent color for decorative elements
+   - Use secondary color for subtle backgrounds
+   - Create visual hierarchy with color
+
+5. **DECORATION PLACEMENT**:
+   - Vary anchor positions (top-left, top-right, bottom-left, bottom-right, center)
+   - Vary scales (1.0 for subtle, 1.5 for bold)
+   - Vary rotations (0, 90, 180, 270 degrees)
+   - Use 1-2 decorations per template for visual interest
+
+6. **FONT VARIETY**: Use different fonts: Inter, Roboto, Open Sans, Lato, Poppins
+
+7. **BACKGROUND DESIGN**: Some templates should have background decorative elements that create depth without overwhelming content
+
+RETURN EXACTLY 5 TEMPLATES - EACH MUST BE VISUALLY UNIQUE AND DISTINCT!
+Return ONLY valid JSON array, no markdown, no explanations, no code blocks.
 `;
 
     console.log('Sending prompt to Gemini AI...');
@@ -268,72 +326,8 @@ function generateDefaultTemplates(brandColors) {
   return [
     {
       id: 'template_1',
-      name: 'Modern Minimalist',
-      description: 'Clean and simple design with minimal decorations',
-      tokens: {
-        primary: brandColors.primary,
-        secondary: brandColors.secondary,
-        accent: brandColors.accent,
-        text: brandColors.text,
-        background: brandColors.background,
-        border: brandColors.border,
-        table_header: brandColors.table_header,
-        table_row_alt: brandColors.table_row_alt,
-        font: 'Inter',
-        fontSize: '14px',
-        headingSize: '24px'
-      },
-      decorations: [],
-      layout: [
-        { block: 'Header', variant: 'minimal', show_logo: true, show_business_info: true },
-        { block: 'CustomerInfo', variant: 'left', show_label: true },
-        { block: 'ItemsTable', variant: 'minimal', show_borders: false, stripe_rows: true },
-        { block: 'Totals', variant: 'right', show_borders: false },
-        { block: 'Payment', variant: 'minimal', show_account_number: true },
-        { block: 'Footer', variant: 'centered', show_terms: false }
-      ],
-      spacing: { section_gap: '32px', item_gap: '12px', padding: '32px' }
-    },
-    {
-      id: 'template_2',
-      name: 'Classic Professional',
-      description: 'Traditional business invoice with structured layout',
-      tokens: {
-        primary: brandColors.primary,
-        secondary: brandColors.secondary,
-        accent: brandColors.accent,
-        text: brandColors.text,
-        background: brandColors.background,
-        border: brandColors.border,
-        table_header: brandColors.table_header,
-        table_row_alt: brandColors.table_row_alt,
-        font: 'Roboto',
-        fontSize: '14px',
-        headingSize: '26px'
-      },
-      decorations: [
-        {
-          asset: 'diagonal_band',
-          anchor: 'top-right',
-          scale: 1.2,
-          rotate: 0,
-          colors: { fill: 'primary', opacity: 0.1 }
-        }
-      ],
-      layout: [
-        { block: 'Header', variant: 'logo_left_contact_right', show_logo: true, show_business_info: true },
-        { block: 'CustomerInfo', variant: 'two_column', show_label: true },
-        { block: 'ItemsTable', variant: 'bordered', show_borders: true, stripe_rows: false },
-        { block: 'Totals', variant: 'two_column', show_borders: true },
-        { block: 'Payment', variant: 'two_column', show_account_number: true },
-        { block: 'Footer', variant: 'left', show_terms: true }
-      ],
-      spacing: { section_gap: '24px', item_gap: '8px', padding: '40px' }
-    },
-    {
-      id: 'template_3',
-      name: 'Bold Accent',
-      description: 'Vibrant design with strong color accents',
+      name: 'Bold Geometric',
+      description: 'Strong angular shapes with overlapping geometric elements for modern impact',
       tokens: {
         primary: brandColors.primary,
         secondary: brandColors.secondary,
@@ -349,16 +343,23 @@ function generateDefaultTemplates(brandColors) {
       },
       decorations: [
         {
-          asset: 'corner_swoosh',
+          asset: 'diagonal_band',
           anchor: 'top-right',
-          scale: 1.05,
+          scale: 1.4,
           rotate: 0,
-          colors: { fill: 'accent', opacity: 0.15 }
+          colors: { fill: 'accent', opacity: 0.22 }
+        },
+        {
+          asset: 'geometric_pattern',
+          anchor: 'top-left',
+          scale: 1.2,
+          rotate: 0,
+          colors: { fill: 'primary', opacity: 0.18 }
         }
       ],
       layout: [
         { block: 'Header', variant: 'centered', show_logo: true, show_business_info: true },
-        { block: 'CustomerInfo', variant: 'left', show_label: true },
+        { block: 'CustomerInfo', variant: 'two_column', show_label: true },
         { block: 'ItemsTable', variant: 'accent_header', show_borders: false, stripe_rows: true },
         { block: 'Totals', variant: 'highlighted', show_borders: false },
         { block: 'Payment', variant: 'centered', show_account_number: true },
@@ -367,9 +368,9 @@ function generateDefaultTemplates(brandColors) {
       spacing: { section_gap: '40px', item_gap: '16px', padding: '32px' }
     },
     {
-      id: 'template_4',
-      name: 'Elegant Curves',
-      description: 'Sophisticated design with decorative elements',
+      id: 'template_2',
+      name: 'Elegant Waves',
+      description: 'Flowing curves and wave patterns creating sophisticated elegance',
       tokens: {
         primary: brandColors.primary,
         secondary: brandColors.secondary,
@@ -385,25 +386,111 @@ function generateDefaultTemplates(brandColors) {
       },
       decorations: [
         {
-          asset: 'corner_swoosh',
+          asset: 'organic_curve',
+          anchor: 'top-right',
+          scale: 1.3,
+          rotate: 0,
+          colors: { fill: 'secondary', opacity: 0.12 }
+        },
+        {
+          asset: 'wave_footer',
+          anchor: 'bottom-left',
+          scale: 1.2,
+          rotate: 180,
+          colors: { fill: 'accent', opacity: 0.10 }
+        }
+      ],
+      layout: [
+        { block: 'Header', variant: 'minimal', show_logo: true, show_business_info: true },
+        { block: 'CustomerInfo', variant: 'right', show_label: true },
+        { block: 'ItemsTable', variant: 'zebra_stripes', show_borders: true, stripe_rows: true },
+        { block: 'Totals', variant: 'right', show_borders: false },
+        { block: 'Payment', variant: 'two_column', show_account_number: true },
+        { block: 'Footer', variant: 'left', show_terms: true }
+      ],
+      spacing: { section_gap: '32px', item_gap: '12px', padding: '40px' }
+    },
+    {
+      id: 'template_3',
+      name: 'Modern Minimal',
+      description: 'Clean design with geometric accent elements',
+      tokens: {
+        primary: brandColors.primary,
+        secondary: brandColors.secondary,
+        accent: brandColors.accent,
+        text: brandColors.text,
+        background: brandColors.background,
+        border: brandColors.border,
+        table_header: brandColors.table_header,
+        table_row_alt: brandColors.table_row_alt,
+        font: 'Inter',
+        fontSize: '14px',
+        headingSize: '22px'
+      },
+      decorations: [
+        {
+          asset: 'geometric_pattern',
           anchor: 'top-right',
           scale: 1.1,
+          rotate: 45,
+          colors: { fill: 'primary', opacity: 0.15 }
+        }
+      ],
+      layout: [
+        { block: 'Header', variant: 'logo_left_contact_right', show_logo: true, show_business_info: true },
+        { block: 'CustomerInfo', variant: 'left', show_label: true },
+        { block: 'ItemsTable', variant: 'minimal', show_borders: false, stripe_rows: true },
+        { block: 'Totals', variant: 'left', show_borders: true },
+        { block: 'Payment', variant: 'minimal', show_account_number: true },
+        { block: 'Footer', variant: 'minimal', show_terms: false }
+      ],
+      spacing: { section_gap: '24px', item_gap: '8px', padding: '32px' }
+    },
+    {
+      id: 'template_4',
+      name: 'Sophisticated Curves',
+      description: 'Layered curved elements creating depth and elegance',
+      tokens: {
+        primary: brandColors.primary,
+        secondary: brandColors.secondary,
+        accent: brandColors.accent,
+        text: brandColors.text,
+        background: brandColors.background,
+        border: brandColors.border,
+        table_header: brandColors.table_header,
+        table_row_alt: brandColors.table_row_alt,
+        font: 'Roboto',
+        fontSize: '14px',
+        headingSize: '26px'
+      },
+      decorations: [
+        {
+          asset: 'corner_swoosh',
+          anchor: 'top-right',
+          scale: 1.3,
           rotate: 0,
-          colors: { fill: 'primary', stroke: 'accent', opacity: 0.2 }
+          colors: { fill: 'accent', opacity: 0.16 }
         },
         {
           asset: 'corner_swoosh',
           anchor: 'bottom-left',
-          scale: 1.1,
+          scale: 1.2,
           rotate: 180,
-          colors: { fill: 'secondary', opacity: 0.15 }
+          colors: { fill: 'primary', opacity: 0.14 }
+        },
+        {
+          asset: 'wave_footer',
+          anchor: 'bottom-right',
+          scale: 1.0,
+          rotate: 270,
+          colors: { fill: 'secondary', opacity: 0.10 }
         }
       ],
       layout: [
         { block: 'Header', variant: 'split', show_logo: true, show_business_info: true },
-        { block: 'CustomerInfo', variant: 'right', show_label: true },
-        { block: 'ItemsTable', variant: 'zebra_stripes', show_borders: true, stripe_rows: true },
-        { block: 'Totals', variant: 'right', show_borders: false },
+        { block: 'CustomerInfo', variant: 'two_column', show_label: true },
+        { block: 'ItemsTable', variant: 'bordered', show_borders: true, stripe_rows: false },
+        { block: 'Totals', variant: 'two_column', show_borders: true },
         { block: 'Payment', variant: 'two_column', show_account_number: true },
         { block: 'Footer', variant: 'centered', show_terms: true }
       ],
@@ -411,8 +498,8 @@ function generateDefaultTemplates(brandColors) {
     },
     {
       id: 'template_5',
-      name: 'Clean Grid',
-      description: 'Structured grid-based layout',
+      name: 'Bold Corner Accents',
+      description: 'Strong decorative elements at corners with geometric patterns',
       tokens: {
         primary: brandColors.primary,
         secondary: brandColors.secondary,
@@ -424,26 +511,33 @@ function generateDefaultTemplates(brandColors) {
         table_row_alt: brandColors.table_row_alt,
         font: 'Open Sans',
         fontSize: '14px',
-        headingSize: '22px'
+        headingSize: '24px'
       },
       decorations: [
         {
-          asset: 'geometric_pattern',
-          anchor: 'center',
-          scale: 1.0,
+          asset: 'circle_stamp',
+          anchor: 'top-left',
+          scale: 1.2,
           rotate: 0,
-          colors: { fill: 'border', opacity: 0.05 }
+          colors: { fill: 'primary', opacity: 0.18 }
+        },
+        {
+          asset: 'corner_swoosh',
+          anchor: 'bottom-right',
+          scale: 1.4,
+          rotate: 180,
+          colors: { fill: 'accent', opacity: 0.20 }
         }
       ],
       layout: [
-        { block: 'Header', variant: 'logo_left_contact_right', show_logo: true, show_business_info: true },
-        { block: 'CustomerInfo', variant: 'two_column', show_label: true },
-        { block: 'ItemsTable', variant: 'bordered', show_borders: true, stripe_rows: false },
-        { block: 'Totals', variant: 'left', show_borders: true },
-        { block: 'Payment', variant: 'minimal', show_account_number: true },
-        { block: 'Footer', variant: 'minimal', show_terms: false }
+        { block: 'Header', variant: 'centered', show_logo: true, show_business_info: true },
+        { block: 'CustomerInfo', variant: 'left', show_label: true },
+        { block: 'ItemsTable', variant: 'accent_header', show_borders: false, stripe_rows: true },
+        { block: 'Totals', variant: 'right', show_borders: false },
+        { block: 'Payment', variant: 'centered', show_account_number: true },
+        { block: 'Footer', variant: 'left', show_terms: false }
       ],
-      spacing: { section_gap: '24px', item_gap: '8px', padding: '32px' }
+      spacing: { section_gap: '36px', item_gap: '14px', padding: '36px' }
     }
   ].map(template => ({
     ...template,

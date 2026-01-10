@@ -113,7 +113,8 @@ function buildBaseCss(tokens, spacing) {
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    padding: 24px;
+    padding: 60px 24px;
+    overflow: visible;
   }
   .invoice-content {
     position: relative;
@@ -123,19 +124,29 @@ function buildBaseCss(tokens, spacing) {
     border-radius: 12px;
     padding: ${spacing.padding};
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
-    overflow: hidden;
+    overflow: visible;
+    z-index: 1;
+    margin: 0 auto;
   }
 
-  /* Decorations */
+  /* Decorations - positioned absolutely to extend beyond content */
   .invoice-decoration-layer {
     position: absolute;
-    inset: 0;
+    top: -80px;
+    left: -80px;
+    right: -80px;
+    bottom: -80px;
+    width: calc(100% + 160px);
+    height: calc(100% + 160px);
     pointer-events: none;
     z-index: 0;
+    overflow: visible;
   }
   .invoice-decoration {
     position: absolute;
-    opacity: 0.25;
+    pointer-events: none;
+    z-index: 0;
+    overflow: visible;
   }
 
   /* Layout */
@@ -159,14 +170,24 @@ function buildBaseCss(tokens, spacing) {
     gap: 16px;
     border-bottom: 2px solid ${tokens.border};
     padding-bottom: 16px;
+    position: relative;
+    z-index: 2;
   }
   .header--centered {
     flex-direction: column;
     align-items: center;
     text-align: center;
+    border-bottom: 3px solid ${tokens.primary};
+    padding-bottom: 20px;
   }
   .header--minimal {
     border-bottom: none;
+  }
+  .header--split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    align-items: start;
   }
   .header-logo {
     font-size: 24px;
@@ -174,9 +195,11 @@ function buildBaseCss(tokens, spacing) {
     color: ${tokens.primary};
   }
   .header-logo-img {
-    max-height: 60px;
-    max-width: 200px;
+    max-height: 70px;
+    max-width: 220px;
     object-fit: contain;
+    margin-bottom: 8px;
+    display: block;
   }
   .header-meta {
     text-align: right;
@@ -220,15 +243,22 @@ function buildBaseCss(tokens, spacing) {
     border-collapse: collapse;
     border-radius: 10px;
     overflow: hidden;
+    position: relative;
+    z-index: 2;
   }
   .items-table th,
   .items-table td {
-    padding: 10px 12px;
+    padding: 12px 14px;
     text-align: left;
   }
   .items-table thead {
     background: ${tokens.table_header};
     color: #ffffff;
+  }
+  .items-table--accent_header thead {
+    background: ${tokens.accent};
+    color: #ffffff;
+    font-weight: 600;
   }
   .items-table--bordered td,
   .items-table--bordered th {
@@ -237,9 +267,17 @@ function buildBaseCss(tokens, spacing) {
   .items-table--minimal thead {
     background: transparent;
     color: ${tokens.text};
-    border-bottom: 1px solid ${tokens.border};
+    border-bottom: 2px solid ${tokens.border};
+    font-weight: 600;
+  }
+  .items-table--highlighted thead {
+    background: linear-gradient(135deg, ${tokens.primary} 0%, ${tokens.accent} 100%);
+    color: #ffffff;
   }
   .items-table tbody tr:nth-child(even) {
+    background: ${tokens.table_row_alt};
+  }
+  .items-table--zebra_stripes tbody tr:nth-child(even) {
     background: ${tokens.table_row_alt};
   }
   .items-table .col-qty,
@@ -324,13 +362,13 @@ function renderDecorations(decorations, tokens) {
   const anchorToPosition = (anchor) => {
     switch (anchor) {
       case 'top-left':
-        return 'top: -40px; left: -40px;';
+        return 'top: -80px; left: -80px;';
       case 'top-right':
-        return 'top: -40px; right: -40px;';
+        return 'top: -80px; right: -80px;';
       case 'bottom-left':
-        return 'bottom: -40px; left: -40px;';
+        return 'bottom: -80px; left: -80px;';
       case 'bottom-right':
-        return 'bottom: -40px; right: -40px;';
+        return 'bottom: -80px; right: -80px;';
       case 'center':
       default:
         return 'top: 50%; left: 50%; transform: translate(-50%, -50%);';
@@ -498,7 +536,7 @@ function renderDecorations(decorations, tokens) {
   });
 
   return `
-  <div class="invoice-decoration-layer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; z-index: 0;">
+  <div class="invoice-decoration-layer">
     ${elements.join('\n')}
   </div>
   `.trim();
