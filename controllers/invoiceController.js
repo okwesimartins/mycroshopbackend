@@ -506,70 +506,52 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         console.error(`    ❌ Error processing template ${template.id}:`, templateError.message);
         console.error(`    Template error details:`, {
           message: templateError.message,
-          stack: templateError.stack?.split('\n').slice(0, 3).join('\n'),
+          stack: templateError.stack?.split('\n').slice(0, 5).join('\n'),
           templateId: template.id,
           templateName: template.name
         });
-        // Continue with next template even if this one fails
+        // RE-THROW error - invoice should NOT be created if any template fails
+        // This ensures all templates must have valid previews/PDFs before invoice is created
+        throw new Error(`Failed to generate preview/PDF for template ${template.id}: ${templateError.message}`);
       }
     }
 
     console.log(`\n📊 Template rendering complete: ${results.length}/${templates.length} templates successfully processed`);
     
-    // Always return templates - even if PDF/preview generation failed for some
-    // Frontend can use the template data to render previews client-side if needed
-    const templatesWithPreviews = results.map((r) => ({
-      ...r.template,
-      _hasPreview: true
-    }));
-    
-    // Add templates that failed rendering (if any)
-    const failedTemplateIds = results.map(r => r.template.id);
-    const failedTemplates = templates.filter(t => !failedTemplateIds.includes(t.id));
-    
-    if (results.length === 0) {
-      console.warn('⚠️ WARNING: No templates were successfully rendered! All templates failed.');
-      console.warn('This means PDF/preview generation failed for all templates.');
-      console.warn('Returning templates without PDFs/previews - frontend can render them client-side...');
-    } else if (failedTemplates.length > 0) {
-      console.warn(`⚠️ WARNING: ${failedTemplates.length} templates failed PDF/preview generation, but returning them anyway`);
+    // CRITICAL: All templates MUST have valid previews/PDFs
+    // If we reach here, all templates in the loop succeeded (errors are re-thrown)
+    // But we still validate that results match templates exactly
+    if (results.length !== templates.length) {
+      const errorMsg = `Preview/PDF generation incomplete: ${results.length} successful out of ${templates.length} templates`;
+      console.error(`❌ ${errorMsg}`);
+      throw new Error(errorMsg);
     }
+    
+    // Validate that all results have valid URLs (should never happen if we reach here, but double-check)
+    const invalidResults = results.filter(r => !r.preview_url || !r.pdf_url);
+    if (invalidResults.length > 0) {
+      const errorMsg = `Invalid previews generated: ${invalidResults.length} templates have null URLs`;
+      console.error(`❌ ${errorMsg}`);
+      console.error('Invalid results:', invalidResults.map(r => ({
+        template_id: r.template.id,
+        preview_url: r.preview_url,
+        pdf_url: r.pdf_url
+      })));
+      throw new Error(errorMsg);
+    }
+
+    console.log(`✅ All ${results.length} templates have valid previews and PDFs`);
 
     return {
       templates: templates.map(t => ({
         ...t,
         generated_at: t.generated_at || new Date().toISOString()
       })),
-      previews: results.length > 0 ? results.map((r) => {
-        // Ensure URLs are always set (even if null, we should know why)
-        const previewUrl = r.preview_url || null;
-        const pdfUrl = r.pdf_url || null;
-        
-        if (!previewUrl || !pdfUrl) {
-          console.warn(`Template ${r.template.id} has missing URLs: previewUrl=${previewUrl}, pdfUrl=${pdfUrl}`);
-        }
-        
-        return {
-          template_id: r.template.id,
-          preview_url: previewUrl,
-          pdf_url: pdfUrl
-        };
-      }) : templates.map(t => ({
-        template_id: t.id || `template_${templates.indexOf(t) + 1}`,
-        preview_url: null,
-        pdf_url: null,
-        _note: 'Preview generation failed - all templates failed PDF/preview generation'
-      })),
-      ...(results.length < templates.length ? {
-        _info: {
-          successful: results.length,
-          total: templates.length,
-          failed: templates.length - results.length,
-          message: results.length === 0 
-            ? 'All preview generation failed - templates returned without previews. Frontend can render them client-side.'
-            : 'Some templates failed preview generation but are still returned.'
-        }
-      } : {})
+      previews: results.map((r) => ({
+        template_id: r.template.id,
+        preview_url: r.preview_url,
+        pdf_url: r.pdf_url
+      }))
     };
   } catch (error) {
     console.error('\n❌ CRITICAL ERROR in generateTemplatesForInvoice:', error);
@@ -1160,7 +1142,68 @@ async function createInvoice(req, res) {
         });
       }
       
+      // CRITICAL: Validate that ALL templates have valid preview and PDF URLs
+      // Invoice should NOT be created if preview/PDF generation failed
+      if (!templateData.previews || !Array.isArray(templateData.previews) || templateData.previews.length === 0) {
+        await transaction.rollback();
+        console.error('❌ Preview/PDF generation failed: No previews generated');
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create invoice: Preview/PDF generation failed - no previews generated',
+          error: 'Preview/PDF generation failed - all templates failed',
+          debug: {
+            templatesCount: templateData.templates?.length || 0,
+            previewsCount: templateData.previews?.length || 0,
+            invoiceId: invoice.id,
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+      
+      // Validate that previews count matches templates count
+      if (templateData.previews.length !== templateData.templates.length) {
+        await transaction.rollback();
+        console.error(`❌ Preview/PDF generation incomplete: ${templateData.previews.length} previews generated for ${templateData.templates.length} templates`);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create invoice: Preview/PDF generation incomplete',
+          error: `Expected ${templateData.templates.length} previews but got ${templateData.previews.length}`,
+          debug: {
+            templatesCount: templateData.templates.length,
+            previewsCount: templateData.previews.length,
+            invoiceId: invoice.id,
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+      
+      // Validate that ALL previews have valid (non-null) preview_url and pdf_url
+      const invalidPreviews = templateData.previews.filter(p => !p.preview_url || !p.pdf_url);
+      if (invalidPreviews.length > 0) {
+        await transaction.rollback();
+        console.error(`❌ Preview/PDF generation failed: ${invalidPreviews.length} previews have null URLs`);
+        console.error('Invalid previews:', invalidPreviews.map(p => ({
+          template_id: p.template_id,
+          preview_url: p.preview_url,
+          pdf_url: p.pdf_url
+        })));
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create invoice: Preview/PDF generation failed - some previews have invalid URLs',
+          error: `${invalidPreviews.length} out of ${templateData.previews.length} previews have null URLs`,
+          debug: {
+            templatesCount: templateData.templates.length,
+            previewsCount: templateData.previews.length,
+            invalidPreviewsCount: invalidPreviews.length,
+            invalidTemplateIds: invalidPreviews.map(p => p.template_id),
+            invoiceId: invoice.id,
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+      
       console.log(`✅ Template generation successful: ${templateData.templates.length} templates generated`);
+      console.log(`✅ Preview/PDF generation successful: ${templateData.previews.length} previews with valid URLs generated`);
       
     } catch (templateError) {
       await transaction.rollback();
@@ -1185,9 +1228,9 @@ async function createInvoice(req, res) {
       });
     }
     
-    // Only commit transaction if template generation succeeded
+    // Only commit transaction if template AND preview/PDF generation succeeded
     await transaction.commit();
-    console.log(`✅ Invoice created successfully with ${createdInvoiceItems.length} invoice items and ${templateData.templates.length} templates`);
+    console.log(`✅ Invoice created successfully with ${createdInvoiceItems.length} invoice items, ${templateData.templates.length} templates, and ${templateData.previews.length} previews/PDFs`);
 
     // Fetch complete invoice with relations after transaction commit (for response)
     let completeInvoice = null;
