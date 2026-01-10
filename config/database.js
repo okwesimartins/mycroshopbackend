@@ -39,8 +39,20 @@ const SHARED_FREE_DB_NAME = process.env.SHARED_FREE_DB_NAME || 'mycroshop_free_u
  * Get shared free tier database connection
  */
 async function getSharedFreeDatabase() {
+  // Check if connection exists and is healthy
   if (tenantConnections.has('shared_free')) {
-    return tenantConnections.get('shared_free');
+    const existingConnection = tenantConnections.get('shared_free');
+    
+    // Check if the connection is corrupted (modelManager.models is null)
+    // If corrupted, remove it from cache and create a new one
+    if (existingConnection && existingConnection.modelManager && 
+        (existingConnection.modelManager.models === null || existingConnection.modelManager.models === undefined)) {
+      console.warn('WARNING: Cached shared_free connection is corrupted (modelManager.models is null). Creating fresh connection.');
+      tenantConnections.delete('shared_free');
+      // Don't close the old connection as it might cause issues, just remove from cache
+    } else if (existingConnection) {
+      return existingConnection;
+    }
   }
 
   const sequelize = new Sequelize(
@@ -63,10 +75,22 @@ async function getSharedFreeDatabase() {
 
   try {
     await sequelize.authenticate();
+    
+    // Ensure modelManager.models is initialized (should be done by Sequelize, but double-check)
+    if (!sequelize.modelManager || sequelize.modelManager.models === null || sequelize.modelManager.models === undefined) {
+      console.warn('WARNING: New Sequelize instance has null modelManager.models. Initializing...');
+      if (!sequelize.modelManager) {
+        // This shouldn't happen, but handle it
+        throw new Error('Sequelize instance created without modelManager');
+      }
+      sequelize.modelManager.models = {};
+      sequelize.models = sequelize.modelManager.models;
+    }
+    
     tenantConnections.set('shared_free', sequelize);
     return sequelize;
   } catch (error) {
-    throw new Error(`Shared free database connection failed`);
+    throw new Error(`Shared free database connection failed: ${error.message}`);
   }
 }
 

@@ -13,10 +13,31 @@ function initializeModels(sequelize) {
     console.log('Starting model initialization...');
     console.log('Sequelize instance type:', typeof sequelize);
     console.log('Sequelize has define method:', typeof sequelize.define === 'function');
+    
+    // CRITICAL FIX: Check and fix Sequelize ModelManager state
+    // The ModelManager.models can be null, which causes "Cannot set properties of null" errors
+    if (!sequelize.modelManager) {
+      throw new Error('Sequelize instance does not have a modelManager. Instance may be corrupted.');
+    }
+    
+    // If modelManager.models is null, we need to initialize it
+    // This is the root cause of both "Cannot set properties of null" and "Cannot convert undefined or null to object" errors
+    if (sequelize.modelManager.models === null || sequelize.modelManager.models === undefined) {
+      console.warn('CRITICAL: sequelize.modelManager.models is null/undefined. Reinitializing...');
+      sequelize.modelManager.models = {};
+      // Sync sequelize.models immediately to ensure consistency
+      sequelize.models = sequelize.modelManager.models;
+      console.log('ModelManager.models reinitialized successfully');
+    } else if (!sequelize.models || sequelize.models !== sequelize.modelManager.models) {
+      // Ensure sequelize.models references modelManager.models
+      sequelize.models = sequelize.modelManager.models;
+    }
+    
+    console.log('ModelManager.models type:', typeof sequelize.modelManager.models);
+    console.log('ModelManager.models is null:', sequelize.modelManager.models === null);
     console.log('Existing models on sequelize:', sequelize.models ? Object.keys(sequelize.models).length : 0);
     
     // Check if models are already defined - if so, return existing models
-    // But we need to be careful - if models exist but are corrupted, we need to clear them
     if (sequelize.models && Object.keys(sequelize.models).length > 0) {
       console.log('Models already exist on sequelize instance.');
       console.log('Existing models count:', Object.keys(sequelize.models).length);
@@ -27,23 +48,8 @@ function initializeModels(sequelize) {
         console.log('Invoice model found in existing models. Returning existing models.');
         return sequelize.models;
       } else {
-        console.warn('WARNING: Models exist but Invoice is missing or invalid. Clearing and reinitializing.');
-        // Clear all models before reinitializing to avoid conflicts
-        try {
-          // Clear models object
-          Object.keys(sequelize.models).forEach(modelName => {
-            try {
-              delete sequelize.models[modelName];
-            } catch (e) {
-              console.warn(`Could not delete model ${modelName}:`, e.message);
-            }
-          });
-          sequelize.models = {};
-        } catch (clearError) {
-          console.error('Error clearing models:', clearError.message);
-          // If we can't clear, create a fresh models object
-          sequelize.models = {};
-        }
+        console.warn('WARNING: Models exist but Invoice is missing or invalid. Will attempt to add Invoice.');
+        // Don't clear all models - just try to define the missing ones
       }
     }
 
