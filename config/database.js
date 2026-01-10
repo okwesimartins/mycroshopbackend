@@ -349,17 +349,83 @@ async function runTenantMigrations(connection, isSharedDb = false) {
   `);
 
   // Add template and PDF columns to invoices table (if they don't exist)
+  // MySQL doesn't support IF NOT EXISTS in ALTER TABLE, so we need to check first
   try {
-    await connection.query(`
-      ALTER TABLE invoices 
-      ADD COLUMN IF NOT EXISTS template_id VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS template_data JSON,
-      ADD COLUMN IF NOT EXISTS pdf_url VARCHAR(500),
-      ADD COLUMN IF NOT EXISTS preview_url VARCHAR(500)
+    // Check which columns already exist and their constraints
+    const [existingColumns] = await connection.query(`
+      SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE, COLUMN_DEFAULT
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'invoices'
+      AND COLUMN_NAME IN ('template_id', 'template_data', 'pdf_url', 'preview_url')
     `);
+    
+    const existingColumnNames = existingColumns.map(col => col.COLUMN_NAME);
+    
+    // Add columns that don't exist (make sure they're all nullable)
+    const columnsToAdd = [];
+    if (!existingColumnNames.includes('template_id')) {
+      columnsToAdd.push('ADD COLUMN template_id VARCHAR(100) NULL');
+    }
+    if (!existingColumnNames.includes('template_data')) {
+      columnsToAdd.push('ADD COLUMN template_data JSON NULL');
+    }
+    if (!existingColumnNames.includes('pdf_url')) {
+      columnsToAdd.push('ADD COLUMN pdf_url VARCHAR(500) NULL');
+    }
+    if (!existingColumnNames.includes('preview_url')) {
+      columnsToAdd.push('ADD COLUMN preview_url VARCHAR(500) NULL');
+    }
+    
+    if (columnsToAdd.length > 0) {
+      await connection.query(`ALTER TABLE invoices ${columnsToAdd.join(', ')}`);
+      console.log('Added missing invoice template columns');
+    }
+    
+    // CRITICAL: Ensure ALL template columns are nullable (modify if they exist and are NOT NULL)
+    for (const column of existingColumns) {
+      if (column.IS_NULLABLE === 'NO') {
+        try {
+          let modifyStatement = '';
+          switch (column.COLUMN_NAME) {
+            case 'template_id':
+              modifyStatement = 'MODIFY COLUMN template_id VARCHAR(100) NULL';
+              break;
+            case 'template_data':
+              modifyStatement = 'MODIFY COLUMN template_data JSON NULL';
+              break;
+            case 'pdf_url':
+              modifyStatement = 'MODIFY COLUMN pdf_url VARCHAR(500) NULL';
+              break;
+            case 'preview_url':
+              modifyStatement = 'MODIFY COLUMN preview_url VARCHAR(500) NULL';
+              break;
+          }
+          
+          if (modifyStatement) {
+            await connection.query(`ALTER TABLE invoices ${modifyStatement}`);
+            console.log(`Modified ${column.COLUMN_NAME} column to be nullable`);
+          }
+        } catch (modifyError) {
+          console.warn(`Could not modify ${column.COLUMN_NAME} to nullable:`, modifyError.message);
+        }
+      }
+    }
   } catch (error) {
-    // Columns might already exist, ignore
-    console.log('Invoice template columns may already exist');
+    // If there's an error, try to fix the template_data column specifically
+    console.warn('Invoice template columns setup error:', error.message);
+    // Try to modify template_data to be nullable (it might exist with NOT NULL constraint)
+    try {
+      await connection.query(`
+        ALTER TABLE invoices 
+        MODIFY COLUMN template_data JSON NULL
+      `);
+      console.log('Modified template_data to nullable');
+    } catch (modifyError) {
+      console.error('Could not modify template_data column:', modifyError.message);
+      // Column might not exist or there might be a constraint issue
+      // This is not critical - the column might need manual fixing
+    }
   }
 
   // Invoice Items table
