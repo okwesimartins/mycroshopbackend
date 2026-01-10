@@ -1235,6 +1235,27 @@ async function createInvoice(req, res) {
         Object.assign(errorDetails, templateError.details);
       }
       
+      // Include installation instructions if Chrome not found
+      if (actualError.includes('Could not find Chrome') || actualError.includes('Chrome not found')) {
+        errorDetails.installationInstructions = {
+          quickFix: 'Run on server: npx puppeteer browsers install chrome',
+          option1: 'Install Chrome via Puppeteer: cd /home/legithairng/public_html/backend.mycroshop.com && npx puppeteer browsers install chrome',
+          option2: 'Install system Chromium (Debian/Ubuntu): sudo apt-get update && sudo apt-get install -y chromium-browser',
+          option3: 'Install system Chromium (CentOS/RHEL): sudo yum install -y chromium',
+          option4: 'Set custom path in .env file: PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium',
+          documentation: 'See PUPPETEER_CHROME_INSTALLATION.md for detailed instructions'
+        };
+        errorDetails.installationCommand = 'npx puppeteer browsers install chrome';
+      }
+      
+      // Include original error details if available (from PDF service)
+      if (rootError.installationCommand) {
+        errorDetails.installationCommand = rootError.installationCommand;
+      }
+      if (rootError.installationInstructions) {
+        errorDetails.installationInstructions = rootError.installationInstructions;
+      }
+      
       return res.status(500).json({
         success: false,
         message: 'Failed to create invoice: Template/preview generation failed',

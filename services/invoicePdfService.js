@@ -40,10 +40,60 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
 
   let browser = null;
   try {
-    browser = await puppeteer.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-    });
-    console.log('[PDF Service] Puppeteer browser launched');
+    // Configuration for Puppeteer to find Chrome/Chromium
+    // On Linux servers, we need to try multiple approaches
+    const launchOptions = {
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--disable-web-security'
+      ],
+      headless: true,
+      timeout: 30000 // 30 second timeout
+    };
+
+    // Check for custom Chrome path in environment variable first
+    if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+      console.log(`[PDF Service] Using Chrome from PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
+      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    } else {
+      // Try to find system Chrome/Chromium (common paths on Linux)
+      // CentOS/RHEL typically installs Chromium at /usr/bin/chromium or /usr/bin/chromium-browser
+      // Debian/Ubuntu typically installs at /usr/bin/chromium-browser
+      const possibleChromePaths = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium',           // CentOS/RHEL (yum install chromium)
+        '/usr/bin/chromium-browser',   // Debian/Ubuntu (apt-get install chromium-browser)
+        '/usr/local/bin/chrome',
+        '/usr/local/bin/chromium',
+        '/opt/google/chrome/chrome',   // Some Google Chrome installations
+        '/usr/lib/chromium-browser/chromium-browser' // Alternative Debian path
+      ];
+
+      // Check if system Chrome/Chromium exists
+      for (const chromePath of possibleChromePaths) {
+        if (fs.existsSync(chromePath)) {
+          console.log(`[PDF Service] Found system Chrome/Chromium at: ${chromePath}`);
+          launchOptions.executablePath = chromePath;
+          break;
+        }
+      }
+
+      // If no system Chrome found, Puppeteer will try to use bundled Chrome
+      // (requires: npx puppeteer browsers install chrome)
+      if (!launchOptions.executablePath) {
+        console.log('[PDF Service] No system Chrome/Chromium found, using Puppeteer bundled Chrome');
+        console.log('[PDF Service] If this fails, run: npx puppeteer browsers install chrome');
+        console.log('[PDF Service] Or install system Chromium: sudo apt-get install -y chromium-browser (Debian/Ubuntu)');
+      }
+    }
+
+    browser = await puppeteer.launch(launchOptions);
+    console.log('[PDF Service] Puppeteer browser launched successfully');
 
     const page = await browser.newPage();
     console.log('[PDF Service] New page created, setting HTML content...');
@@ -90,8 +140,10 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
     let enhancedMessage = error.message;
     
     // Check for common Puppeteer errors and provide helpful messages
-    if (error.message.includes('Failed to launch the browser process')) {
-      enhancedMessage = `Puppeteer failed to launch browser: ${error.message}. This usually means Chrome/Chromium is not installed or missing dependencies. On Linux, you may need to install: sudo apt-get install -y chromium-browser`;
+    if (error.message.includes('Could not find Chrome') || error.message.includes('Chrome not found')) {
+      enhancedMessage = `Chrome/Chromium not found. ${error.message}\n\nSOLUTION:\n1. Install Chrome for Puppeteer: npx puppeteer browsers install chrome\n2. OR install system Chromium: sudo apt-get install -y chromium-browser (Debian/Ubuntu) or sudo yum install -y chromium (CentOS/RHEL)\n3. OR use system Chrome: The system should have Chrome installed at /usr/bin/google-chrome or /usr/bin/chromium`;
+    } else if (error.message.includes('Failed to launch the browser process')) {
+      enhancedMessage = `Puppeteer failed to launch browser: ${error.message}. This usually means Chrome/Chromium is not installed or missing dependencies. On Linux, you may need to install: sudo apt-get install -y chromium-browser (Debian/Ubuntu) or sudo yum install -y chromium (CentOS/RHEL)`;
     } else if (error.message.includes('Browser closed unexpectedly')) {
       enhancedMessage = `Browser closed unexpectedly: ${error.message}. This may be due to insufficient memory or permissions.`;
     } else if (error.message.includes('ENOENT') || error.message.includes('no such file')) {
@@ -110,6 +162,17 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
     enhancedError.pdfDirExists = fs.existsSync(pdfDir);
     enhancedError.previewDirExists = fs.existsSync(previewDir);
     enhancedError.stack = error.stack;
+    
+    // Add installation instructions for Chrome errors
+    if (error.message.includes('Could not find Chrome') || error.message.includes('Chrome not found')) {
+      enhancedError.installationCommand = 'npx puppeteer browsers install chrome';
+      enhancedError.installationInstructions = {
+        option1: 'Install Chrome via Puppeteer: npx puppeteer browsers install chrome',
+        option2: 'Install system Chromium (Debian/Ubuntu): sudo apt-get install -y chromium-browser',
+        option3: 'Install system Chromium (CentOS/RHEL): sudo yum install -y chromium',
+        option4: 'Set custom path in .env: PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium'
+      };
+    }
     
     throw enhancedError;
   } finally {
