@@ -186,7 +186,17 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       console.log('No logo found, using default brand colors');
     }
 
+    // Generate templates using AI (or defaults if AI fails)
+    console.log('Calling AI template generator with data:', {
+      business_name: invoiceDataForAi.business_name,
+      items_count: invoiceDataForAi.items_count,
+      total_amount: invoiceDataForAi.total_amount,
+      hasApiKey: !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== '')
+    });
+    
     const templates = await generateTemplateOptions(invoiceDataForAi, brandColors);
+    
+    console.log(`Received ${templates.length} templates from AI generator`);
 
     // Attach logo URL to invoice object for rendering
     // Safely convert invoice to JSON - handle null associations
