@@ -246,106 +246,125 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       logoUrl: logoUrl || null
     };
 
+    console.log(`\n📄 Starting template rendering for ${templates.length} templates...`);
     const results = [];
     // Determine if this is a free plan user (needed for saving templates with tenant_id)
     const isFreePlan = tenant && tenant.subscription_plan === 'free';
 
-    for (const template of templates) {
-      const html = renderInvoiceHtml({
-        invoice: invoiceWithLogo,
-        template,
-        brandColors
-      });
-
-      const { pdfPath, previewPath } = await generateInvoicePdfAndPreview({
-        html,
-        invoiceId: invoice.id,
-        templateId: template.id
-      });
-
-      const normalizePath = (localPath) =>
-        '/uploads' + localPath.split('/uploads').pop().replace(/\\/g, '/');
-
-      const previewUrl = normalizePath(previewPath);
-      const pdfUrl = normalizePath(pdfPath);
-
-      // Save template to invoice_templates table using raw SQL
-      // Note: We use raw SQL because there's no InvoiceTemplate Sequelize model
+    for (let i = 0; i < templates.length; i++) {
+      const template = templates[i];
+      console.log(`\n  Processing template ${i + 1}/${templates.length}: ${template.id || template.name || 'Unknown'}`);
+      
       try {
-        const { QueryTypes } = require('sequelize');
-        const templateDataJson = JSON.stringify(template);
-        const templateName = template.name || template.id || `Template ${template.id}`;
-        
-        // Build query based on whether we're on free plan (needs tenant_id) or enterprise
-        if (isFreePlan && tenantId) {
-          await req.db.query(`
-            INSERT INTO invoice_templates (
-              tenant_id, invoice_id, template_id, template_name, template_data, preview_url, is_selected, created_at
-            ) VALUES (
-              :tenant_id, :invoice_id, :template_id, :template_name, :template_data, :preview_url, :is_selected, NOW()
-            )
-            ON DUPLICATE KEY UPDATE
-              template_data = :template_data_update,
-              preview_url = :preview_url_update
-          `, {
-            replacements: {
-              tenant_id: tenantId,
-              invoice_id: invoice.id,
-              template_id: template.id,
-              template_name: templateName,
-              template_data: templateDataJson,
-              preview_url: previewUrl,
-              is_selected: 0, // false
-              template_data_update: templateDataJson,
-              preview_url_update: previewUrl
-            },
-            type: QueryTypes.INSERT
-          });
-        } else {
-          // Enterprise users (no tenant_id)
-          await req.db.query(`
-            INSERT INTO invoice_templates (
-              invoice_id, template_id, template_name, template_data, preview_url, is_selected, created_at
-            ) VALUES (
-              :invoice_id, :template_id, :template_name, :template_data, :preview_url, :is_selected, NOW()
-            )
-            ON DUPLICATE KEY UPDATE
-              template_data = :template_data_update,
-              preview_url = :preview_url_update
-          `, {
-            replacements: {
-              invoice_id: invoice.id,
-              template_id: template.id,
-              template_name: templateName,
-              template_data: templateDataJson,
-              preview_url: previewUrl,
-              is_selected: 0, // false
-              template_data_update: templateDataJson,
-              preview_url_update: previewUrl
-            },
-            type: QueryTypes.INSERT
-          });
-        }
-        
-        console.log(`Saved template ${template.id} to database for invoice ${invoice.id}`);
-      } catch (saveError) {
-        console.error(`Failed to save template ${template.id} to database:`, saveError.message);
-        console.error('Save template error details:', {
-          message: saveError.message,
-          stack: saveError.stack?.split('\n').slice(0, 3).join('\n'),
-          invoiceId: invoice.id,
-          templateId: template.id,
-          isFreePlan: isFreePlan,
-          tenantId: tenantId
+        console.log(`    - Rendering HTML for template ${template.id}...`);
+        const html = renderInvoiceHtml({
+          invoice: invoiceWithLogo,
+          template,
+          brandColors
         });
-        // Continue even if saving fails - templates are still returned to user
-      }
+        
+        console.log(`    - HTML rendered (${html.length} chars). Generating PDF and preview...`);
+        const { pdfPath, previewPath } = await generateInvoicePdfAndPreview({
+          html,
+          invoiceId: invoice.id,
+          templateId: template.id
+        });
+        
+        console.log(`    - PDF generated: ${pdfPath}`);
+        console.log(`    - Preview generated: ${previewPath}`);
 
-      results.push({
-        template,
-        preview_url: previewUrl,
-        pdf_url: pdfUrl
-      });
+        const normalizePath = (localPath) =>
+          '/uploads' + localPath.split('/uploads').pop().replace(/\\/g, '/');
+
+        const previewUrl = normalizePath(previewPath);
+        const pdfUrl = normalizePath(pdfPath);
+
+        // Save template to invoice_templates table using raw SQL
+        // Note: We use raw SQL because there's no InvoiceTemplate Sequelize model
+        try {
+          const { QueryTypes } = require('sequelize');
+          const templateDataJson = JSON.stringify(template);
+          const templateName = template.name || template.id || `Template ${template.id}`;
+          
+          // Build query based on whether we're on free plan (needs tenant_id) or enterprise
+          if (isFreePlan && tenantId) {
+            await req.db.query(`
+              INSERT INTO invoice_templates (
+                tenant_id, invoice_id, template_id, template_name, template_data, preview_url, is_selected, created_at
+              ) VALUES (
+                :tenant_id, :invoice_id, :template_id, :template_name, :template_data, :preview_url, :is_selected, NOW()
+              )
+              ON DUPLICATE KEY UPDATE
+                template_data = :template_data_update,
+                preview_url = :preview_url_update
+            `, {
+              replacements: {
+                tenant_id: tenantId,
+                invoice_id: invoice.id,
+                template_id: template.id,
+                template_name: templateName,
+                template_data: templateDataJson,
+                preview_url: previewUrl,
+                is_selected: 0, // false
+                template_data_update: templateDataJson,
+                preview_url_update: previewUrl
+              },
+              type: QueryTypes.INSERT
+            });
+          } else {
+            // Enterprise users (no tenant_id)
+            await req.db.query(`
+              INSERT INTO invoice_templates (
+                invoice_id, template_id, template_name, template_data, preview_url, is_selected, created_at
+              ) VALUES (
+                :invoice_id, :template_id, :template_name, :template_data, :preview_url, :is_selected, NOW()
+              )
+              ON DUPLICATE KEY UPDATE
+                template_data = :template_data_update,
+                preview_url = :preview_url_update
+            `, {
+              replacements: {
+                invoice_id: invoice.id,
+                template_id: template.id,
+                template_name: templateName,
+                template_data: templateDataJson,
+                preview_url: previewUrl,
+                is_selected: 0, // false
+                template_data_update: templateDataJson,
+                preview_url_update: previewUrl
+              },
+              type: QueryTypes.INSERT
+            });
+          }
+          
+          console.log(`    - Saved template ${template.id} to database`);
+        } catch (saveError) {
+          console.error(`    - Failed to save template ${template.id} to database:`, saveError.message);
+          // Continue even if saving fails - templates are still returned to user
+        }
+
+        results.push({
+          template,
+          preview_url: previewUrl,
+          pdf_url: pdfUrl
+        });
+        console.log(`    ✅ Template ${template.id} completed successfully`);
+      } catch (templateError) {
+        console.error(`    ❌ Error processing template ${template.id}:`, templateError.message);
+        console.error(`    Template error details:`, {
+          message: templateError.message,
+          stack: templateError.stack?.split('\n').slice(0, 3).join('\n'),
+          templateId: template.id,
+          templateName: template.name
+        });
+        // Continue with next template even if this one fails
+      }
+    }
+
+    console.log(`\n📊 Template rendering complete: ${results.length}/${templates.length} templates successfully processed`);
+    
+    if (results.length === 0) {
+      console.warn('⚠️ WARNING: No templates were successfully rendered! All templates failed.');
     }
 
     return {
@@ -357,7 +376,15 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       }))
     };
   } catch (error) {
-    console.error('Error generating templates:', error);
+    console.error('\n❌ CRITICAL ERROR in generateTemplatesForInvoice:', error);
+    console.error('Error message:', error.message);
+    console.error('Error type:', error.name);
+    console.error('Error stack:', error.stack?.split('\n').slice(0, 10).join('\n'));
+    console.error('Invoice data:', {
+      invoiceId: invoice?.id,
+      hasItems: !!(invoice?.InvoiceItems && invoice.InvoiceItems.length > 0),
+      itemsCount: invoice?.InvoiceItems?.length || 0
+    });
     // Return empty templates on error (don't fail the whole request)
     return {
       templates: [],
@@ -828,24 +855,68 @@ async function createInvoice(req, res) {
     // Generate AI templates automatically (non-blocking - if it fails, still return invoice)
     let templateData = { templates: [], previews: [] };
     try {
-      // Only generate templates if we have a valid invoice object
+      // Check if we have a valid invoice object with items
       if (completeInvoice && completeInvoice.id) {
-        // Set a timeout for template generation to prevent hanging
-        const templatePromise = generateTemplatesForInvoice(completeInvoice, tenantId, req);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Template generation timeout')), 30000)
-        );
+        const hasItems = completeInvoice.InvoiceItems && 
+                        Array.isArray(completeInvoice.InvoiceItems) && 
+                        completeInvoice.InvoiceItems.length > 0;
         
-        templateData = await Promise.race([templatePromise, timeoutPromise]);
+        console.log('=== TEMPLATE GENERATION CHECK ===');
+        console.log('Invoice ID:', completeInvoice.id);
+        console.log('Has Items:', hasItems);
+        console.log('Items Count:', completeInvoice.InvoiceItems?.length || 0);
+        console.log('Invoice Total:', completeInvoice.total || completeInvoice.subtotal || 0);
+        console.log('Invoice Items:', completeInvoice.InvoiceItems ? completeInvoice.InvoiceItems.map(i => ({ id: i.id, name: i.item_name })) : 'none');
+        
+        if (hasItems) {
+          console.log(`\n✅ Generating templates for invoice ${completeInvoice.id} with ${completeInvoice.InvoiceItems.length} items...`);
+          console.log('Starting template generation process...');
+          
+          // Set a timeout for template generation to prevent hanging (30 seconds)
+          const templatePromise = generateTemplatesForInvoice(completeInvoice, tenantId, req);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => {
+              console.error('⏱️ Template generation TIMEOUT after 30 seconds');
+              reject(new Error('Template generation timeout after 30 seconds'));
+            }, 30000)
+          );
+          
+          templateData = await Promise.race([templatePromise, timeoutPromise]);
+          console.log(`\n✅ Template generation COMPLETED:`);
+          console.log(`   - Templates: ${templateData.templates?.length || 0}`);
+          console.log(`   - Previews: ${templateData.previews?.length || 0}`);
+          
+          if (templateData.templates && templateData.templates.length > 0) {
+            console.log(`   - Template IDs: ${templateData.templates.map(t => t.id || t.name).join(', ')}`);
+          }
+        } else {
+          console.warn(`\n⚠️ Skipping template generation: Invoice ${completeInvoice.id} has no items`);
+          console.warn('InvoiceItems:', completeInvoice.InvoiceItems);
+          templateData = { templates: [], previews: [] };
+        }
+      } else {
+        console.warn('\n⚠️ Skipping template generation: Invalid invoice object');
+        console.warn('Debug:', {
+          hasInvoice: !!completeInvoice,
+          hasId: !!(completeInvoice && completeInvoice.id),
+          invoiceType: typeof completeInvoice,
+          invoiceKeys: completeInvoice ? Object.keys(completeInvoice).slice(0, 10) : []
+        });
+        templateData = { templates: [], previews: [] };
       }
     } catch (error) {
-      console.error('Failed to generate templates during invoice creation:', error);
-      console.error('Template generation error details:', {
-        message: error.message,
-        stack: error.stack?.split('\n').slice(0, 5).join('\n'),
+      console.error('\n❌ FAILED to generate templates during invoice creation:');
+      console.error('Error:', error.message);
+      console.error('Error Type:', error.name);
+      console.error('Stack:', error.stack?.split('\n').slice(0, 10).join('\n'));
+      console.error('Debug Info:', {
         invoiceId: completeInvoice?.id,
+        hasItems: !!(completeInvoice?.InvoiceItems && completeInvoice.InvoiceItems.length > 0),
+        itemsCount: completeInvoice?.InvoiceItems?.length || 0,
         hasCustomer: !!completeInvoice?.Customer,
-        customerId: completeInvoice?.customer_id
+        customerId: completeInvoice?.customer_id,
+        invoiceType: typeof completeInvoice,
+        invoiceKeys: completeInvoice ? Object.keys(completeInvoice).slice(0, 15) : []
       });
       // Continue without templates - invoice creation was successful
       templateData = { templates: [], previews: [] };
