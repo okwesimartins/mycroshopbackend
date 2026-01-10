@@ -53,7 +53,8 @@ async function getAllInvoices(req, res) {
         },
         {
           model: req.db.models.Customer,
-          attributes: ['id', 'name', 'email', 'phone']
+          required: false,
+          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country']
         },
         {
           model: req.db.models.InvoiceItem,
@@ -518,7 +519,8 @@ async function generateAiTemplatesForInvoice(req, res) {
         },
         {
           model: req.db.models.Customer,
-          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
+          required: false,
+          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country']
         },
         {
           model: req.db.models.InvoiceItem
@@ -565,7 +567,8 @@ async function getInvoiceById(req, res) {
         },
         {
           model: req.db.models.Customer,
-          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
+          required: false,
+          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country']
         },
         {
           model: req.db.models.InvoiceItem,
@@ -917,8 +920,9 @@ async function createInvoice(req, res) {
           {
             model: req.db.models.Customer,
             required: false,
-            // Explicitly specify attributes to avoid selecting non-existent columns like zip_code
-            attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
+            // Explicitly specify attributes - only include columns that exist in the database table
+            // Exclude zip_code and notes as they may not exist in all database schemas
+            attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country']
           }
         ],
         transaction // Use the same transaction
@@ -1051,8 +1055,9 @@ async function createInvoice(req, res) {
           {
             model: req.db.models.Customer,
             required: false,
-            // Explicitly specify attributes to avoid selecting non-existent columns like zip_code
-            attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
+            // Explicitly specify attributes - only include columns that exist in the database table
+            // Exclude zip_code and notes as they may not exist in all database schemas
+            attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country']
           }
         ]
       });
@@ -1306,7 +1311,8 @@ async function updateInvoice(req, res) {
       include: [
         {
           model: req.db.models.Customer,
-          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'notes']
+          required: false,
+          attributes: ['id', 'name', 'email', 'phone', 'address', 'city', 'state', 'country']
         },
         {
           model: req.db.models.InvoiceItem,
