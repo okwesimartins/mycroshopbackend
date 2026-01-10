@@ -50,8 +50,9 @@ function renderInvoiceHtml({ invoice, template, brandColors }) {
     : [];
 
   // Safely extract associations - they might be null if foreign keys are null
-  const customer = (invoice && invoice.Customer) ? invoice.Customer : {};
-  const store = (invoice && invoice.Store) ? invoice.Store : {};
+  // Ensure customer is always an object (never null or undefined) since customer_id is optional
+  const customer = (invoice && invoice.Customer && typeof invoice.Customer === 'object' && invoice.Customer !== null) ? invoice.Customer : {};
+  const store = (invoice && invoice.Store && typeof invoice.Store === 'object' && invoice.Store !== null) ? invoice.Store : {};
   const items = (invoice && invoice.InvoiceItems) ? (Array.isArray(invoice.InvoiceItems) ? invoice.InvoiceItems : []) : [];
 
   const css = buildBaseCss(tokens, spacing);
@@ -1245,7 +1246,12 @@ function renderDecorations(decorations, tokens) {
   `.trim();
 }
 
-function renderHeaderBlock(config = {}, { invoice, store, logoUrl }) {
+function renderHeaderBlock(config = {}, { invoice, store, logoUrl, customer = null }) {
+  // Ensure customer is always defined (handle case where customer_id is optional)
+  if (typeof customer === 'undefined' || customer === null) {
+    customer = {};
+  }
+  
   const variant = config.variant || 'default';
   const businessName = store?.name || 'Invoice';
   const storeAddress = [store?.address, store?.city, store?.state]
