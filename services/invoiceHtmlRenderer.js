@@ -337,33 +337,168 @@ function renderDecorations(decorations, tokens) {
     }
   };
 
+  // Generate different SVG shapes based on asset type
+  const generateSVGShape = (asset, width, height, fill, opacity) => {
+    const assetType = asset || 'corner_swoosh';
+    
+    switch (assetType) {
+      case 'corner_swoosh':
+        // Beautiful curved swoosh at corner
+        return `
+        <path
+          d="M0,${height * 0.6} Q${width * 0.3},${height * 0.2} ${width * 0.6},${height * 0.4} T${width},0 L${width},${height} L0,${height} Z"
+          fill="${fill}"
+          opacity="${opacity}"
+        />
+        <path
+          d="M0,${height * 0.8} Q${width * 0.2},${height * 0.3} ${width * 0.5},${height * 0.5} T${width * 0.9},${height * 0.2}"
+          stroke="${fill}"
+          stroke-width="2"
+          fill="none"
+          opacity="${opacity * 0.6}"
+        />
+        `;
+      
+      case 'diagonal_band':
+        // Diagonal gradient-like band
+        const gradId = `diagonalGrad-${Math.random().toString(36).substr(2, 9)}`;
+        return `
+        <defs>
+          <linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:${fill};stop-opacity:${opacity}" />
+            <stop offset="100%" style="stop-color:${fill};stop-opacity:${opacity * 0.3}" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M0,${height * 0.4} L${width * 0.7},0 L${width},${height * 0.3} L${width * 0.3},${height} Z"
+          fill="url(#${gradId})"
+        />
+        `;
+      
+      case 'wave_footer':
+        // Wave pattern at bottom
+        return `
+        <path
+          d="M0,${height * 0.7} Q${width * 0.25},${height * 0.5} ${width * 0.5},${height * 0.7} T${width},${height * 0.7} L${width},${height} L0,${height} Z"
+          fill="${fill}"
+          opacity="${opacity}"
+        />
+        <path
+          d="M0,${height * 0.8} Q${width * 0.25},${height * 0.65} ${width * 0.5},${height * 0.8} T${width},${height * 0.8}"
+          stroke="${fill}"
+          stroke-width="1.5"
+          fill="none"
+          opacity="${opacity * 0.5}"
+        />
+        `;
+      
+      case 'circle_stamp':
+        // Circular decorative stamp
+        const circleGradId = `circleGrad-${Math.random().toString(36).substr(2, 9)}`;
+        const radius = Math.min(width, height) * 0.4;
+        return `
+        <defs>
+          <radialGradient id="${circleGradId}" cx="50%" cy="50%">
+            <stop offset="0%" style="stop-color:${fill};stop-opacity:${opacity * 0.8}" />
+            <stop offset="100%" style="stop-color:${fill};stop-opacity:${opacity * 0.2}" />
+          </radialGradient>
+        </defs>
+        <circle
+          cx="${width / 2}"
+          cy="${height / 2}"
+          r="${radius}"
+          fill="url(#${circleGradId})"
+        />
+        <circle
+          cx="${width / 2}"
+          cy="${height / 2}"
+          r="${radius * 0.875}"
+          fill="none"
+          stroke="${fill}"
+          stroke-width="2"
+          opacity="${opacity * 0.6}"
+        />
+        `;
+      
+      case 'geometric_pattern':
+        // Geometric pattern with triangles and shapes
+        return `
+        <polygon
+          points="${width * 0.2},${height * 0.8} ${width * 0.5},${height * 0.2} ${width * 0.8},${height * 0.8}"
+          fill="${fill}"
+          opacity="${opacity}"
+        />
+        <polygon
+          points="${width * 0.3},${height * 0.7} ${width * 0.5},${height * 0.4} ${width * 0.7},${height * 0.7}"
+          fill="${fill}"
+          opacity="${opacity * 0.5}"
+        />
+        <rect
+          x="${width * 0.6}"
+          y="${height * 0.3}"
+          width="${width * 0.3}"
+          height="${height * 0.3}"
+          fill="${fill}"
+          opacity="${opacity * 0.4}"
+          transform="rotate(45 ${width * 0.75} ${height * 0.45})"
+        />
+        `;
+      
+      case 'organic_curve':
+        // Organic flowing curves
+        return `
+        <path
+          d="M0,${height} C${width * 0.2},${height * 0.7} ${width * 0.4},${height * 0.3} ${width * 0.6},${height * 0.5} C${width * 0.8},${height * 0.7} ${width},${height * 0.4} ${width},0 L${width},${height} Z"
+          fill="${fill}"
+          opacity="${opacity}"
+        />
+        <path
+          d="M0,${height * 0.9} Q${width * 0.25},${height * 0.6} ${width * 0.5},${height * 0.75} Q${width * 0.75},${height * 0.9} ${width},${height * 0.7}"
+          stroke="${fill}"
+          stroke-width="2"
+          fill="none"
+          opacity="${opacity * 0.6}"
+        />
+        `;
+      
+      default:
+        // Default: elegant corner swoosh
+        return `
+        <path
+          d="M0,${height * 0.7} C${width * 0.1},${height * 0.3} ${width * 0.3},${height * 0.1} ${width * 0.6},${height * 0.3} C${width * 0.8},${height * 0.5} ${width},${height * 0.2} ${width},0 L${width},${height} L0,${height} Z"
+          fill="${fill}"
+          opacity="${opacity}"
+        />
+        `;
+    }
+  };
+
   const elements = decorations.map((decoration, index) => {
     if (!decoration || !decoration.asset) return '';
     const sizeScale = decoration.scale || 1.0;
-    const width = 320 * sizeScale;
-    const height = 200 * sizeScale;
-    const positionStyle = anchorToPosition(decoration.anchor);
-    const opacity = decoration.colors?.opacity ?? 0.18;
+    const width = 400 * sizeScale;
+    const height = 300 * sizeScale;
+    const positionStyle = anchorToPosition(decoration.anchor || 'top-right');
+    const opacity = decoration.colors?.opacity ?? 0.12;
     const fill = colorFromToken(decoration.colors?.fill || 'accent');
+    const rotate = decoration.rotate || 0;
+    const assetType = decoration.asset;
 
-    // Single generic swoosh/shape that can stand in for all assets
     return `
     <svg
       class="invoice-decoration"
-      style="${positionStyle} width:${width}px; height:${height}px; opacity:${opacity};"
-      viewBox="0 0 320 200"
+      style="${positionStyle} width:${width}px; height:${height}px; pointer-events: none; z-index: 0; position: absolute;"
+      viewBox="0 0 ${width} ${height}"
       xmlns="http://www.w3.org/2000/svg"
+      ${rotate ? `transform="rotate(${rotate} ${width/2} ${height/2})"` : ''}
     >
-      <path
-        d="M0,160 C80,40 160,40 320,0 L320,200 L0,200 Z"
-        fill="${fill}"
-      />
+      ${generateSVGShape(assetType, width, height, fill, opacity)}
     </svg>
     `;
   });
 
   return `
-  <div class="invoice-decoration-layer">
+  <div class="invoice-decoration-layer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; z-index: 0;">
     ${elements.join('\n')}
   </div>
   `.trim();

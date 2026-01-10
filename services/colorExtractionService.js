@@ -26,18 +26,52 @@ async function extractColorsFromLogo(logoImage) {
 
     // Handle URL or buffer
     if (typeof logoImage === 'string') {
-      // Download image from URL
-      const response = await axios.get(logoImage, { responseType: 'arraybuffer' });
-      imageBuffer = Buffer.from(response.data);
-      
-      // Detect mime type from URL or response headers
-      if (logoImage.endsWith('.jpg') || logoImage.endsWith('.jpeg')) {
-        mimeType = 'image/jpeg';
-      } else if (logoImage.endsWith('.webp')) {
-        mimeType = 'image/webp';
+      // Check if it's a relative path (starts with /uploads/ or uploads/)
+      if (logoImage.startsWith('/uploads/') || logoImage.startsWith('uploads/')) {
+        // Read file from local filesystem
+        const fs = require('fs');
+        const path = require('path');
+        const logoFilename = logoImage.split('/').pop();
+        const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
+        
+        if (fs.existsSync(logoFilePath)) {
+          imageBuffer = fs.readFileSync(logoFilePath);
+          // Detect mime type from file extension
+          if (logoImage.endsWith('.jpg') || logoImage.endsWith('.jpeg')) {
+            mimeType = 'image/jpeg';
+          } else if (logoImage.endsWith('.webp')) {
+            mimeType = 'image/webp';
+          } else if (logoImage.endsWith('.gif')) {
+            mimeType = 'image/gif';
+          } else if (logoImage.endsWith('.png')) {
+            mimeType = 'image/png';
+          }
+          console.log(`✅ Read logo file for color extraction: ${logoFilePath} (${imageBuffer.length} bytes, ${mimeType})`);
+        } else {
+          throw new Error(`Logo file not found at: ${logoFilePath}`);
+        }
+      } else if (logoImage.startsWith('http://') || logoImage.startsWith('https://')) {
+        // Download image from absolute URL
+        const response = await axios.get(logoImage, { responseType: 'arraybuffer' });
+        imageBuffer = Buffer.from(response.data);
+        
+        // Detect mime type from URL or response headers
+        if (logoImage.endsWith('.jpg') || logoImage.endsWith('.jpeg')) {
+          mimeType = 'image/jpeg';
+        } else if (logoImage.endsWith('.webp')) {
+          mimeType = 'image/webp';
+        } else if (logoImage.endsWith('.gif')) {
+          mimeType = 'image/gif';
+        } else if (logoImage.endsWith('.png')) {
+          mimeType = 'image/png';
+        }
+      } else {
+        throw new Error(`Invalid logo path: ${logoImage}. Must be a relative path (/uploads/...), absolute URL (http://...), or Buffer.`);
       }
     } else {
+      // Assume it's a Buffer
       imageBuffer = logoImage;
+      mimeType = 'image/png'; // Default for buffer
     }
 
     // Convert to PNG if needed (Gemini works best with PNG/JPEG)

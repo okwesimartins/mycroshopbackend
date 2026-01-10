@@ -85,14 +85,14 @@ Template Structure (return as JSON array):
     },
     "decorations": [
       {
-        "asset": "corner_swoosh" | "diagonal_band" | "wave_footer" | "circle_stamp" | "geometric_pattern" | null,
+        "asset": "corner_swoosh" | "diagonal_band" | "wave_footer" | "circle_stamp" | "geometric_pattern" | "organic_curve" | null,
         "anchor": "top-right" | "top-left" | "bottom-right" | "bottom-left" | "center",
         "scale": 1.0-1.5,
         "rotate": 0 | 90 | 180 | 270,
         "colors": {
           "fill": "primary" | "secondary" | "accent",
           "stroke": "primary" | "secondary" | "accent" | null,
-          "opacity": 0.1-0.3
+          "opacity": 0.08-0.25
         }
       }
     ],
@@ -139,11 +139,15 @@ Template Structure (return as JSON array):
 ]
 
 Requirements:
-- Each template must be visually distinct
-- Use brand colors intelligently (not overwhelming)
-- Ensure readability and professionalism
-- Include 0-2 decorations per template (some can be minimal)
-- Vary font choices and layouts
+- Each template must be visually distinct and beautiful
+- Use brand colors intelligently (not overwhelming) - create elegant color harmonies
+- Include beautiful decorative shapes: curves, waves, geometric patterns, organic shapes
+- Ensure excellent readability and professional appearance
+- Include 1-2 decorations per template with varied shapes (corner_swoosh, wave_footer, organic_curve, geometric_pattern, circle_stamp, diagonal_band)
+- Use subtle opacity (0.08-0.25) for decorations to maintain readability
+- Vary font choices, layouts, and decoration placements
+- Create modern, elegant designs with smooth curves and beautiful shapes
+- Ensure decorations complement the brand colors and don't distract from content
 - Return exactly 5 templates
 - Return ONLY valid JSON array, no markdown, no explanations
 `;

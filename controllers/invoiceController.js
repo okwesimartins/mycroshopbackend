@@ -186,10 +186,34 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
     }
 
     // Extract colors from logo if available
+    // Logo URL might be relative (/uploads/logos/...) so we need to convert it to absolute URL or read the file
     if (logoUrl) {
       try {
         console.log(`Extracting brand colors from logo: ${logoUrl}`);
-        const extractedColors = await extractColorsFromLogo(logoUrl);
+        
+        // Convert relative URL to absolute URL or read file as buffer for color extraction
+        let logoForColorExtraction = logoUrl;
+        const fs = require('fs');
+        const path = require('path');
+        
+        // If logoUrl is relative, try to read the file and convert to absolute URL
+        if (logoUrl.startsWith('/uploads/') || logoUrl.startsWith('uploads/')) {
+          const logoFilename = logoUrl.split('/').pop();
+          const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
+          
+          if (fs.existsSync(logoFilePath)) {
+            // Read file as buffer for color extraction (Gemini can use buffer)
+            logoForColorExtraction = fs.readFileSync(logoFilePath);
+            console.log(`✅ Read logo file for color extraction: ${logoFilePath} (${fs.statSync(logoFilePath).size} bytes)`);
+          } else {
+            // Fallback: construct absolute URL
+            const baseUrl = process.env.BASE_URL || process.env.API_URL || process.env.BACKEND_URL || 'http://backend.mycroshop.com';
+            logoForColorExtraction = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
+            console.log(`⚠️ Logo file not found, using absolute URL for color extraction: ${logoForColorExtraction}`);
+          }
+        }
+        
+        const extractedColors = await extractColorsFromLogo(logoForColorExtraction);
         
         // Generate full color palette from extracted colors
         const fullPalette = await generateColorPalette(extractedColors);
@@ -205,13 +229,13 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           table_row_alt: fullPalette.table_row_alt || defaultBrandColors.table_row_alt
         };
         
-        console.log('Successfully extracted brand colors from logo:', brandColors);
+        console.log('✅ Successfully extracted brand colors from logo:', brandColors);
       } catch (error) {
-        console.warn('Failed to extract colors from logo, using defaults:', error.message);
+        console.warn('⚠️ Failed to extract colors from logo, using defaults:', error.message);
         // Continue with default colors
       }
     } else {
-      console.log('No logo found, using default brand colors');
+      console.log('ℹ️ No logo found, using default brand colors');
     }
 
     // Generate templates using AI (or defaults if AI fails)
@@ -269,9 +293,44 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       };
     }
 
+    // Convert logo URL to absolute URL or base64 data URI for Puppeteer
+    let logoDataUri = null;
+    if (logoUrl) {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        
+        // Extract filename from logo URL (e.g., /uploads/logos/logo.jpg -> logo.jpg)
+        const logoFilename = logoUrl.split('/').pop();
+        const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
+        
+        // Check if file exists and read it as base64
+        if (fs.existsSync(logoFilePath)) {
+          const logoBuffer = fs.readFileSync(logoFilePath);
+          const logoMimeType = logoUrl.endsWith('.png') ? 'image/png' :
+                              logoUrl.endsWith('.jpg') || logoUrl.endsWith('.jpeg') ? 'image/jpeg' :
+                              logoUrl.endsWith('.gif') ? 'image/gif' :
+                              logoUrl.endsWith('.webp') ? 'image/webp' : 'image/png';
+          
+          logoDataUri = `data:${logoMimeType};base64,${logoBuffer.toString('base64')}`;
+          console.log(`✅ Converted logo to base64 data URI (${logoBuffer.length} bytes)`);
+        } else {
+          // Fallback: try to construct absolute URL if file doesn't exist locally
+          const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://backend.mycroshop.com';
+          logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
+          console.log(`⚠️ Logo file not found at ${logoFilePath}, using absolute URL: ${logoDataUri}`);
+        }
+      } catch (logoError) {
+        console.warn('Failed to convert logo to base64, using absolute URL:', logoError.message);
+        // Fallback to absolute URL
+        const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://backend.mycroshop.com';
+        logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
+      }
+    }
+
     const invoiceWithLogo = {
       ...invoiceJson,
-      logoUrl: logoUrl || null
+      logoUrl: logoDataUri || logoUrl || null
     };
 
     console.log(`\n📄 Starting template rendering for ${templates.length} templates...`);
