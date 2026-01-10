@@ -292,20 +292,127 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         });
         
         console.log(`    - HTML rendered (${html.length} chars). Generating PDF and preview...`);
-        const { pdfPath, previewPath } = await generateInvoicePdfAndPreview({
-          html,
-          invoiceId: invoice.id,
-          templateId: template.id
-        });
         
-        console.log(`    - PDF generated: ${pdfPath}`);
-        console.log(`    - Preview generated: ${previewPath}`);
+        let pdfPath = null;
+        let previewPath = null;
+        let pdfUrl = null;
+        let previewUrl = null;
+        
+        try {
+          const result = await generateInvoicePdfAndPreview({
+            html,
+            invoiceId: invoice.id,
+            templateId: template.id
+          });
+          
+          pdfPath = result.pdfPath;
+          previewPath = result.previewPath;
+          
+          console.log(`    - PDF generated: ${pdfPath}`);
+          console.log(`    - Preview generated: ${previewPath}`);
+          
+          // Normalize file path to URL path
+          // pdfPath/previewPath are absolute paths from generateInvoicePdfAndPreview:
+          //   Windows: C:\Users\...\uploads\invoices\pdfs\file.pdf
+          //   Linux: /home/user/.../uploads/invoices/pdfs/file.pdf
+          // We need: /uploads/invoices/pdfs/file.pdf (relative to server root)
+          // This will be accessible at: http://backend.mycroshop.com/uploads/invoices/pdfs/file.pdf
+          const normalizePath = (localPath, fileType) => {
+            if (!localPath) {
+              console.warn(`normalizePath received empty path for ${fileType}`);
+              return null;
+            }
+            
+            // Convert to forward slashes for consistency (handle Windows paths)
+            let normalized = String(localPath).replace(/\\/g, '/');
+            console.log(`    - Normalizing ${fileType} path: ${localPath}`);
+            console.log(`    - Normalized (forward slashes): ${normalized}`);
+            
+            // Method 1: Find '/uploads' in the path (most common case)
+            const uploadsIndex = normalized.indexOf('/uploads');
+            if (uploadsIndex !== -1) {
+              const relativePath = normalized.substring(uploadsIndex);
+              console.log(`    - ✅ Extracted path using '/uploads' method: ${relativePath}`);
+              return relativePath;
+            }
+            
+            // Method 2: Find 'uploads' (case-insensitive, works for Windows paths like C:\...\uploads\...)
+            const normalizedLower = normalized.toLowerCase();
+            const uploadsIndex2 = normalizedLower.indexOf('uploads');
+            if (uploadsIndex2 !== -1) {
+              // Extract from 'uploads' onwards
+              const afterUploads = normalized.substring(uploadsIndex2);
+              // Ensure it starts with '/uploads'
+              const relativePath = afterUploads.startsWith('/') ? afterUploads : '/uploads' + afterUploads.substring(7);
+              console.log(`    - ✅ Extracted path using 'uploads' method: ${relativePath}`);
+              return relativePath;
+            }
+            
+            // Method 3: Extract filename from path (last part after last slash)
+            // Files are always named: invoice-{id}-{templateId}-{timestamp}.pdf or .png
+            const pathParts = normalized.split('/').filter(p => p && p !== '.' && p !== '..'); // Remove empty, ., ..
+            const filename = pathParts.length > 0 ? pathParts[pathParts.length - 1] : null;
+            
+            if (filename) {
+              // Construct URL based on file extension - this always works as fallback
+              if (filename.endsWith('.pdf')) {
+                const constructedPath = `/uploads/invoices/pdfs/${filename}`;
+                console.log(`    - ✅ Method 3: Constructed PDF path from filename: ${constructedPath}`);
+                return constructedPath;
+              } else if (filename.match(/\.(png|jpg|jpeg)$/i)) {
+                const constructedPath = `/uploads/invoices/previews/${filename}`;
+                console.log(`    - ✅ Method 3: Constructed preview path from filename: ${constructedPath}`);
+                return constructedPath;
+              }
+            }
+            
+            // Last resort: if we can't extract filename, log error
+            console.error(`    ❌ Could not normalize ${fileType} path: ${localPath}`);
+            console.error(`       Normalized: ${normalized}`);
+            console.error(`       Filename extracted: ${filename || 'none'}`);
+            console.error(`       Path parts: ${pathParts.join(' > ')}`);
+            return null;
+          };
 
-        const normalizePath = (localPath) =>
-          '/uploads' + localPath.split('/uploads').pop().replace(/\\/g, '/');
-
-        const previewUrl = normalizePath(previewPath);
-        const pdfUrl = normalizePath(pdfPath);
+          previewUrl = normalizePath(previewPath, 'preview');
+          pdfUrl = normalizePath(pdfPath, 'PDF');
+          
+          console.log(`    - Preview URL result: ${previewUrl}`);
+          console.log(`    - PDF URL result: ${pdfUrl}`);
+          
+          // Validate URLs were generated - if not, construct them from paths
+          if (!previewUrl && previewPath) {
+            // Fallback: extract filename and construct URL
+            const previewFilename = previewPath.split(/[/\\]/).pop();
+            previewUrl = `/uploads/invoices/previews/${previewFilename}`;
+            console.log(`    - ⚠️ Preview URL was null, constructed fallback: ${previewUrl}`);
+          }
+          
+          if (!pdfUrl && pdfPath) {
+            // Fallback: extract filename and construct URL
+            const pdfFilename = pdfPath.split(/[/\\]/).pop();
+            pdfUrl = `/uploads/invoices/pdfs/${pdfFilename}`;
+            console.log(`    - ⚠️ PDF URL was null, constructed fallback: ${pdfUrl}`);
+          }
+          
+          // Final validation - if still null, throw error
+          if (!previewUrl || !pdfUrl) {
+            throw new Error(`Failed to generate URLs after all attempts - previewUrl: ${previewUrl}, pdfUrl: ${pdfUrl}, previewPath: ${previewPath}, pdfPath: ${pdfPath}`);
+          }
+          
+          console.log(`    - ✅ Final Preview URL: ${previewUrl}`);
+          console.log(`    - ✅ Final PDF URL: ${pdfUrl}`);
+        } catch (pdfError) {
+          console.error(`    ❌ Error generating PDF/preview for template ${template.id}:`, pdfError.message);
+          console.error(`    PDF Error details:`, {
+            message: pdfError.message,
+            stack: pdfError.stack?.split('\n').slice(0, 5).join('\n'),
+            pdfPath: pdfPath,
+            previewPath: previewPath
+          });
+          // Re-throw to be caught by outer catch block
+          throw pdfError;
+        }
 
         // Save template to invoice_templates table using raw SQL
         // Note: We use raw SQL because there's no InvoiceTemplate Sequelize model
@@ -318,13 +425,14 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           if (isFreePlan && tenantId) {
             await req.db.query(`
               INSERT INTO invoice_templates (
-                tenant_id, invoice_id, template_id, template_name, template_data, preview_url, is_selected, created_at
+                tenant_id, invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
               ) VALUES (
-                :tenant_id, :invoice_id, :template_id, :template_name, :template_data, :preview_url, :is_selected, NOW()
+                :tenant_id, :invoice_id, :template_id, :template_name, :template_data, :preview_url, :pdf_url, :is_selected, NOW()
               )
               ON DUPLICATE KEY UPDATE
                 template_data = :template_data_update,
-                preview_url = :preview_url_update
+                preview_url = :preview_url_update,
+                pdf_url = :pdf_url_update
             `, {
               replacements: {
                 tenant_id: tenantId,
@@ -333,9 +441,11 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
                 template_name: templateName,
                 template_data: templateDataJson,
                 preview_url: previewUrl,
+                pdf_url: pdfUrl,
                 is_selected: 0, // false
                 template_data_update: templateDataJson,
-                preview_url_update: previewUrl
+                preview_url_update: previewUrl,
+                pdf_url_update: pdfUrl
               },
               type: QueryTypes.INSERT
             });
@@ -343,13 +453,14 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
             // Enterprise users (no tenant_id)
             await req.db.query(`
               INSERT INTO invoice_templates (
-                invoice_id, template_id, template_name, template_data, preview_url, is_selected, created_at
+                invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
               ) VALUES (
-                :invoice_id, :template_id, :template_name, :template_data, :preview_url, :is_selected, NOW()
+                :invoice_id, :template_id, :template_name, :template_data, :preview_url, :pdf_url, :is_selected, NOW()
               )
               ON DUPLICATE KEY UPDATE
                 template_data = :template_data_update,
-                preview_url = :preview_url_update
+                preview_url = :preview_url_update,
+                pdf_url = :pdf_url_update
             `, {
               replacements: {
                 invoice_id: invoice.id,
@@ -357,9 +468,11 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
                 template_name: templateName,
                 template_data: templateDataJson,
                 preview_url: previewUrl,
+                pdf_url: pdfUrl,
                 is_selected: 0, // false
                 template_data_update: templateDataJson,
-                preview_url_update: previewUrl
+                preview_url_update: previewUrl,
+                pdf_url_update: pdfUrl
               },
               type: QueryTypes.INSERT
             });
@@ -371,12 +484,24 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           // Continue even if saving fails - templates are still returned to user
         }
 
+        // Validate URLs are not null before adding to results
+        if (!previewUrl || !pdfUrl) {
+          console.error(`    ❌ Template ${template.id} has null URLs!`);
+          console.error(`       previewUrl: ${previewUrl}`);
+          console.error(`       pdfUrl: ${pdfUrl}`);
+          console.error(`       previewPath: ${previewPath}`);
+          console.error(`       pdfPath: ${pdfPath}`);
+          throw new Error(`Failed to generate valid URLs for template ${template.id}`);
+        }
+        
         results.push({
           template,
           preview_url: previewUrl,
           pdf_url: pdfUrl
         });
-        console.log(`    ✅ Template ${template.id} completed successfully`);
+        console.log(`    ✅ Template ${template.id} completed successfully with URLs:`);
+        console.log(`       Preview URL: ${previewUrl}`);
+        console.log(`       PDF URL: ${pdfUrl}`);
       } catch (templateError) {
         console.error(`    ❌ Error processing template ${template.id}:`, templateError.message);
         console.error(`    Template error details:`, {
@@ -415,15 +540,25 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         ...t,
         generated_at: t.generated_at || new Date().toISOString()
       })),
-      previews: results.length > 0 ? results.map((r) => ({
-        template_id: r.template.id,
-        preview_url: r.preview_url,
-        pdf_url: r.pdf_url
-      })) : templates.map(t => ({
+      previews: results.length > 0 ? results.map((r) => {
+        // Ensure URLs are always set (even if null, we should know why)
+        const previewUrl = r.preview_url || null;
+        const pdfUrl = r.pdf_url || null;
+        
+        if (!previewUrl || !pdfUrl) {
+          console.warn(`Template ${r.template.id} has missing URLs: previewUrl=${previewUrl}, pdfUrl=${pdfUrl}`);
+        }
+        
+        return {
+          template_id: r.template.id,
+          preview_url: previewUrl,
+          pdf_url: pdfUrl
+        };
+      }) : templates.map(t => ({
         template_id: t.id || `template_${templates.indexOf(t) + 1}`,
         preview_url: null,
         pdf_url: null,
-        _note: 'Preview generation pending'
+        _note: 'Preview generation failed - all templates failed PDF/preview generation'
       })),
       ...(results.length < templates.length ? {
         _info: {
