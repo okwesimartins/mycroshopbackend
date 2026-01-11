@@ -85,6 +85,54 @@ async function getAllInvoices(req, res) {
       order: [['created_at', 'DESC']]
     });
 
+    // Get preview URLs for all invoices
+    const invoiceIds = rows.map(inv => inv.id);
+    const previewUrls = {};
+    
+    if (invoiceIds.length > 0) {
+      try {
+        const tenantId = req.user.tenantId;
+        const isFreePlan = req.user.subscription_plan === 'free';
+        
+        // Query invoice_templates to get preview URLs
+        const templateQuery = isFreePlan
+          ? `SELECT invoice_id, preview_url, is_selected, created_at 
+             FROM invoice_templates 
+             WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
+             AND preview_url IS NOT NULL
+             ORDER BY invoice_id, is_selected DESC, created_at DESC`
+          : `SELECT invoice_id, preview_url, is_selected, created_at 
+             FROM invoice_templates 
+             WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
+             AND preview_url IS NOT NULL
+             ORDER BY invoice_id, is_selected DESC, created_at DESC`;
+        
+        const queryParams = isFreePlan ? invoiceIds : [tenantId, ...invoiceIds];
+        const [templateResults] = await req.db.sequelize.query(templateQuery, {
+          replacements: queryParams
+        });
+        
+        // Group by invoice_id and get the first (selected or most recent) preview URL
+        templateResults.forEach(result => {
+          if (result.preview_url && !previewUrls[result.invoice_id]) {
+            previewUrls[result.invoice_id] = result.preview_url;
+          }
+        });
+      } catch (previewError) {
+        console.warn('Error fetching preview URLs:', previewError.message);
+        // Continue without preview URLs if query fails
+      }
+    }
+
+    // Add preview URLs to invoice objects
+    const invoicesWithPreview = rows.map(invoice => {
+      const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
+      return {
+        ...invoiceJson,
+        preview_url: previewUrls[invoice.id] || null
+      };
+    });
+
     // Calculate pagination metadata
     const totalPages = Math.ceil(count / limit);
     const hasNextPage = page < totalPages;
@@ -93,7 +141,7 @@ async function getAllInvoices(req, res) {
     res.json({
       success: true,
       data: {
-        invoices: rows,
+        invoices: invoicesWithPreview,
         pagination: {
           total: count,
           page: page,
@@ -761,15 +809,55 @@ async function getInvoiceById(req, res) {
       });
     }
 
+    // Get preview URL for this invoice
+    let previewUrl = null;
+    try {
+      const tenantId = req.user.tenantId;
+      const isFreePlan = req.user.subscription_plan === 'free';
+      
+      // Query invoice_templates to get preview URL (prefer selected template)
+      const templateQuery = isFreePlan
+        ? `SELECT preview_url FROM invoice_templates 
+           WHERE invoice_id = ? 
+           AND (is_selected = 1 OR is_selected IS NULL)
+           ORDER BY is_selected DESC, created_at DESC 
+           LIMIT 1`
+        : `SELECT preview_url FROM invoice_templates 
+           WHERE tenant_id = ? AND invoice_id = ? 
+           AND (is_selected = 1 OR is_selected IS NULL)
+           ORDER BY is_selected DESC, created_at DESC 
+           LIMIT 1`;
+      
+      const queryParams = isFreePlan ? [invoice.id] : [tenantId, invoice.id];
+      const [templateResults] = await req.db.sequelize.query(templateQuery, {
+        replacements: queryParams
+      });
+      
+      if (templateResults && templateResults.length > 0 && templateResults[0].preview_url) {
+        previewUrl = templateResults[0].preview_url;
+      }
+    } catch (previewError) {
+      console.warn('Error fetching preview URL:', previewError.message);
+      // Continue without preview URL if query fails
+    }
+
+    // Add preview URL to invoice object
+    const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
+    const invoiceWithPreview = {
+      ...invoiceJson,
+      preview_url: previewUrl
+    };
+
     res.json({
       success: true,
-      data: { invoice }
+      data: { invoice: invoiceWithPreview }
     });
   } catch (error) {
     console.error('Error getting invoice:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get invoice'
+      message: 'Failed to get invoice',
+      error: error.message
     });
   }
 }
