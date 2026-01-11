@@ -82,7 +82,7 @@ function getInvoiceTemplate(templateId, data) {
     
     case 'template_3':
     case 'salford_olive':
-      return getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerPhone, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes });
+      return getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes });
     
     case 'template_4':
     case 'studio_shodwe':
@@ -875,7 +875,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
  * Template 3: Salford & Co. Olive Style - Dark gray with olive green
  * Exact HTML from user's third template
  */
-function getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerPhone, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes }) {
+function getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes }) {
   // Use olive green as accent if available, otherwise use accent color
   const olive = accent || '#9bb42f';
   const dark = primary || '#2f2f2f';
