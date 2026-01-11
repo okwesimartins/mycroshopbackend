@@ -89,18 +89,20 @@ async function getAllInvoices(req, res) {
     const invoiceIds = rows.map(inv => inv.id);
     const previewUrls = {};
     const pdfUrls = {};
+    const urlErrors = {}; // Store errors per invoice
     
     if (invoiceIds.length > 0) {
       try {
         const tenantId = req.user.tenantId;
         // Get subscription plan from tenant
         let isFreePlan = false;
+        let subscriptionError = null;
         try {
           const tenant = await getTenantById(tenantId);
           isFreePlan = tenant && tenant.subscription_plan === 'free';
         } catch (err) {
-          // Default to enterprise if can't determine
-          console.warn('Could not determine subscription plan, defaulting to enterprise');
+          subscriptionError = `Failed to determine subscription plan: ${err.message}`;
+          console.warn('Could not determine subscription plan, defaulting to enterprise', err);
         }
         
         console.log(`Fetching preview URLs and PDF URLs for ${invoiceIds.length} invoices (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
@@ -172,30 +174,46 @@ async function getAllInvoices(req, res) {
       console.log(`Mapped ${Object.keys(previewUrls).length} preview URLs and ${Object.keys(pdfUrls).length} PDF URLs to invoices`);
       
       // Log which invoices don't have preview URLs for debugging
-      const invoicesWithoutPreview = invoiceIds.filter(id => !previewUrls[id]);
+      const invoicesWithoutPreview = invoiceIds.filter(id => !previewUrls[id] && !pdfUrls[id]);
       if (invoicesWithoutPreview.length > 0) {
-        console.log(`⚠️ ${invoicesWithoutPreview.length} invoices without preview URLs: ${invoicesWithoutPreview.join(', ')}`);
+        console.log(`⚠️ ${invoicesWithoutPreview.length} invoices without preview/PDF URLs: ${invoicesWithoutPreview.join(', ')}`);
+        // Store error message for invoices without URLs
+        invoicesWithoutPreview.forEach(id => {
+          urlErrors[id] = subscriptionError || 'No template found in database. Template may not have been generated during invoice creation.';
+        });
       }
       } catch (previewError) {
-        console.error('Error fetching preview URLs and PDF URLs:', previewError);
+        const errorMessage = `Error fetching preview URLs and PDF URLs: ${previewError.message}`;
+        console.error(errorMessage, previewError);
         console.error('Preview error stack:', previewError.stack);
-        // Continue without preview URLs if query fails
+        // Store error for all invoices
+        invoiceIds.forEach(id => {
+          urlErrors[id] = errorMessage;
+        });
       }
     }
 
     // Add preview URLs and PDF URLs to invoice objects
     const invoicesWithPreview = rows.map(invoice => {
       const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
+      const hasPreview = previewUrls[invoice.id] !== undefined;
+      const hasPdf = pdfUrls[invoice.id] !== undefined;
+      const error = urlErrors[invoice.id];
+      
       return {
         ...invoiceJson,
-        preview_url: previewUrls[invoice.id] || null,
-        pdf_url: pdfUrls[invoice.id] || null
+        preview_url: hasPreview ? previewUrls[invoice.id] : null,
+        pdf_url: hasPdf ? pdfUrls[invoice.id] : null,
+        ...(error && !hasPreview && !hasPdf ? { 
+          url_error: error,
+          error_message: error 
+        } : {})
       };
     });
 
-    // Filter out invoices where both preview_url and pdf_url are null
+    // Filter out invoices where both preview_url and pdf_url are null (unless they have error messages)
     const validInvoices = invoicesWithPreview.filter(invoice => {
-      return invoice.preview_url !== null || invoice.pdf_url !== null;
+      return invoice.preview_url !== null || invoice.pdf_url !== null || invoice.url_error;
     });
 
     // Calculate pagination metadata based on valid invoices
@@ -882,6 +900,8 @@ async function getInvoiceById(req, res) {
     // Get preview URL and PDF URL for this invoice
     let previewUrl = null;
     let pdfUrl = null;
+    let urlError = null;
+    
     try {
       const tenantId = req.user.tenantId;
       // Get subscription plan from tenant
@@ -890,7 +910,8 @@ async function getInvoiceById(req, res) {
         const tenant = await getTenantById(tenantId);
         isFreePlan = tenant && tenant.subscription_plan === 'free';
       } catch (err) {
-        console.warn('Could not determine subscription plan, defaulting to enterprise');
+        urlError = `Failed to determine subscription plan: ${err.message}`;
+        console.warn('Could not determine subscription plan, defaulting to enterprise', err);
       }
       
       console.log(`Fetching preview URL and PDF URL for invoice ${invoice.id} (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
@@ -938,6 +959,10 @@ async function getInvoiceById(req, res) {
             tenant_id: r.tenant_id,
             is_selected: r.is_selected
           })));
+          // If templates exist but preview_url is NULL, that's an error
+          urlError = `Template exists in database but preview_url is NULL. Template may have been created without generating preview/PDF.`;
+        } else {
+          urlError = `No template found in database for invoice ${invoice.id}. Template may not have been generated during invoice creation.`;
         }
       }
       
@@ -947,7 +972,8 @@ async function getInvoiceById(req, res) {
           previewUrl = foundPreviewUrl;
           console.log(`✅ Preview URL found: ${previewUrl}`);
         } else {
-          console.log(`⚠️ Preview URL exists but is empty for invoice ${invoice.id}`);
+          urlError = `Preview URL exists in database but is empty for invoice ${invoice.id}`;
+          console.log(`⚠️ ${urlError}`);
         }
         
         // Also get PDF URL if available
@@ -956,6 +982,10 @@ async function getInvoiceById(req, res) {
           if (foundPdfUrl !== '') {
             pdfUrl = foundPdfUrl;
             console.log(`✅ PDF URL found: ${pdfUrl}`);
+          } else {
+            if (!urlError) {
+              urlError = `PDF URL exists in database but is empty for invoice ${invoice.id}`;
+            }
           }
         }
       } else {
@@ -990,6 +1020,7 @@ async function getInvoiceById(req, res) {
             if (foundPreviewUrl !== '') {
               previewUrl = foundPreviewUrl;
               console.log(`✅ Preview URL generated and found: ${previewUrl}`);
+              urlError = null; // Clear error if generation succeeded
             }
             
             // Also get PDF URL if available
@@ -1000,24 +1031,32 @@ async function getInvoiceById(req, res) {
                 console.log(`✅ PDF URL generated and found: ${pdfUrl}`);
               }
             }
+          } else {
+            urlError = `Failed to generate preview/PDF on-the-fly. Template generation completed but no preview_url was found in database.`;
           }
         } catch (generateError) {
+          urlError = `Error generating preview on-the-fly: ${generateError.message}. Stack: ${generateError.stack}`;
           console.error('Error generating preview on-the-fly:', generateError);
-          // Continue without preview URL
         }
       }
     } catch (previewError) {
+      urlError = `Error fetching preview URL and PDF URL: ${previewError.message}. Stack: ${previewError.stack}`;
       console.error('Error fetching preview URL and PDF URL:', previewError);
       console.error('Preview error stack:', previewError.stack);
-      // Continue without preview URL if query fails
     }
 
-    // Check if both preview_url and pdf_url are null - if so, return error
+    // Check if both preview_url and pdf_url are null - if so, return error with details
     if (previewUrl === null && pdfUrl === null) {
       return res.status(404).json({
         success: false,
         message: 'Invoice templates not found. Preview and PDF URLs are not available for this invoice.',
-        error: 'Both preview_url and pdf_url are null. The invoice template may not have been generated yet.'
+        error: urlError || 'Both preview_url and pdf_url are null. The invoice template may not have been generated yet.',
+        error_details: {
+          invoice_id: invoice.id,
+          tenant_id: req.user.tenantId,
+          error_message: urlError || 'Unknown error - no template found and generation failed',
+          timestamp: new Date().toISOString()
+        }
       });
     }
 
@@ -1026,7 +1065,11 @@ async function getInvoiceById(req, res) {
     const invoiceWithPreview = {
       ...invoiceJson,
       preview_url: previewUrl,
-      pdf_url: pdfUrl
+      pdf_url: pdfUrl,
+      ...(urlError ? { 
+        url_error: urlError,
+        error_message: urlError 
+      } : {})
     };
 
     res.json({
