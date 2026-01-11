@@ -85,9 +85,10 @@ async function getAllInvoices(req, res) {
       order: [['created_at', 'DESC']]
     });
 
-    // Get preview URLs for all invoices
+    // Get preview URLs and PDF URLs for all invoices
     const invoiceIds = rows.map(inv => inv.id);
     const previewUrls = {};
+    const pdfUrls = {};
     
     if (invoiceIds.length > 0) {
       try {
@@ -102,19 +103,19 @@ async function getAllInvoices(req, res) {
           console.warn('Could not determine subscription plan, defaulting to enterprise');
         }
         
-        console.log(`Fetching preview URLs for ${invoiceIds.length} invoices (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
+        console.log(`Fetching preview URLs and PDF URLs for ${invoiceIds.length} invoices (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
         console.log(`Invoice IDs to query: ${invoiceIds.join(', ')}`);
         
-        // Query invoice_templates to get preview URLs
+        // Query invoice_templates to get preview URLs and PDF URLs
         // Free plan: shared database, need tenant_id filter
         // Enterprise: separate database, no tenant_id needed
         const templateQuery = isFreePlan
-          ? `SELECT invoice_id, preview_url, is_selected, created_at 
+          ? `SELECT invoice_id, preview_url, pdf_url, is_selected, created_at 
              FROM invoice_templates 
              WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
              AND preview_url IS NOT NULL AND preview_url != ''
              ORDER BY invoice_id, is_selected DESC, created_at DESC`
-          : `SELECT invoice_id, preview_url, is_selected, created_at 
+          : `SELECT invoice_id, preview_url, pdf_url, is_selected, created_at 
              FROM invoice_templates 
              WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
              AND preview_url IS NOT NULL AND preview_url != ''
@@ -136,13 +137,14 @@ async function getAllInvoices(req, res) {
           console.log(`Sample template results:`, templateResults.slice(0, 3).map(r => ({
             invoice_id: r.invoice_id,
             preview_url: r.preview_url ? r.preview_url.substring(0, 50) + '...' : 'NULL',
+            pdf_url: r.pdf_url ? r.pdf_url.substring(0, 50) + '...' : 'NULL',
             is_selected: r.is_selected
           })));
         } else {
           // Debug: Check if templates exist at all for these invoices
           const debugQuery = isFreePlan
-            ? `SELECT invoice_id, preview_url, tenant_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')})`
-            : `SELECT invoice_id, preview_url FROM invoice_templates WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`;
+            ? `SELECT invoice_id, preview_url, pdf_url, tenant_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')})`
+            : `SELECT invoice_id, preview_url, pdf_url FROM invoice_templates WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`;
           const [debugResults] = await req.db.sequelize.query(debugQuery, {
             replacements: queryParams
           });
@@ -151,19 +153,23 @@ async function getAllInvoices(req, res) {
             console.log(`DEBUG results:`, debugResults.map(r => ({
               invoice_id: r.invoice_id,
               preview_url: r.preview_url || 'NULL',
+              pdf_url: r.pdf_url || 'NULL',
               tenant_id: r.tenant_id
             })));
           }
         }
       
-      // Group by invoice_id and get the first (selected or most recent) preview URL
+      // Group by invoice_id and get the first (selected or most recent) preview URL and PDF URL
       templateResults.forEach(result => {
         if (result.preview_url && result.preview_url.trim() !== '' && !previewUrls[result.invoice_id]) {
           previewUrls[result.invoice_id] = result.preview_url.trim();
         }
+        if (result.pdf_url && result.pdf_url.trim() !== '' && !pdfUrls[result.invoice_id]) {
+          pdfUrls[result.invoice_id] = result.pdf_url.trim();
+        }
       });
       
-      console.log(`Mapped ${Object.keys(previewUrls).length} preview URLs to invoices`);
+      console.log(`Mapped ${Object.keys(previewUrls).length} preview URLs and ${Object.keys(pdfUrls).length} PDF URLs to invoices`);
       
       // Log which invoices don't have preview URLs for debugging
       const invoicesWithoutPreview = invoiceIds.filter(id => !previewUrls[id]);
@@ -171,18 +177,19 @@ async function getAllInvoices(req, res) {
         console.log(`⚠️ ${invoicesWithoutPreview.length} invoices without preview URLs: ${invoicesWithoutPreview.join(', ')}`);
       }
       } catch (previewError) {
-        console.error('Error fetching preview URLs:', previewError);
+        console.error('Error fetching preview URLs and PDF URLs:', previewError);
         console.error('Preview error stack:', previewError.stack);
         // Continue without preview URLs if query fails
       }
     }
 
-    // Add preview URLs to invoice objects
+    // Add preview URLs and PDF URLs to invoice objects
     const invoicesWithPreview = rows.map(invoice => {
       const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
       return {
         ...invoiceJson,
-        preview_url: previewUrls[invoice.id] || null
+        preview_url: previewUrls[invoice.id] || null,
+        pdf_url: pdfUrls[invoice.id] || null
       };
     });
 
@@ -866,8 +873,9 @@ async function getInvoiceById(req, res) {
       });
     }
 
-    // Get preview URL for this invoice
+    // Get preview URL and PDF URL for this invoice
     let previewUrl = null;
+    let pdfUrl = null;
     try {
       const tenantId = req.user.tenantId;
       // Get subscription plan from tenant
@@ -879,16 +887,16 @@ async function getInvoiceById(req, res) {
         console.warn('Could not determine subscription plan, defaulting to enterprise');
       }
       
-      console.log(`Fetching preview URL for invoice ${invoice.id} (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
+      console.log(`Fetching preview URL and PDF URL for invoice ${invoice.id} (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
       
-      // Query invoice_templates to get preview URL (prefer selected template)
+      // Query invoice_templates to get preview URL and PDF URL (prefer selected template)
       const templateQuery = isFreePlan
-        ? `SELECT preview_url, is_selected, created_at FROM invoice_templates 
+        ? `SELECT preview_url, pdf_url, is_selected, created_at FROM invoice_templates 
            WHERE tenant_id = ? AND invoice_id = ? 
            AND preview_url IS NOT NULL AND preview_url != ''
            ORDER BY is_selected DESC, created_at DESC 
            LIMIT 1`
-        : `SELECT preview_url, is_selected, created_at FROM invoice_templates 
+        : `SELECT preview_url, pdf_url, is_selected, created_at FROM invoice_templates 
            WHERE invoice_id = ? 
            AND preview_url IS NOT NULL AND preview_url != ''
            ORDER BY is_selected DESC, created_at DESC 
@@ -910,8 +918,8 @@ async function getInvoiceById(req, res) {
       // Debug: Check all templates for this invoice
       if (templateResults.length === 0) {
         const debugQuery = isFreePlan
-          ? `SELECT invoice_id, preview_url, tenant_id, is_selected FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ?`
-          : `SELECT invoice_id, preview_url, is_selected FROM invoice_templates WHERE invoice_id = ?`;
+          ? `SELECT invoice_id, preview_url, pdf_url, tenant_id, is_selected FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ?`
+          : `SELECT invoice_id, preview_url, pdf_url, is_selected FROM invoice_templates WHERE invoice_id = ?`;
         const [debugResults] = await req.db.sequelize.query(debugQuery, {
           replacements: queryParams
         });
@@ -920,6 +928,7 @@ async function getInvoiceById(req, res) {
           console.log(`DEBUG results:`, debugResults.map(r => ({
             invoice_id: r.invoice_id,
             preview_url: r.preview_url || 'NULL',
+            pdf_url: r.pdf_url || 'NULL',
             tenant_id: r.tenant_id,
             is_selected: r.is_selected
           })));
@@ -927,12 +936,21 @@ async function getInvoiceById(req, res) {
       }
       
       if (templateResults && templateResults.length > 0 && templateResults[0].preview_url) {
-        const foundUrl = templateResults[0].preview_url.trim();
-        if (foundUrl !== '') {
-          previewUrl = foundUrl;
+        const foundPreviewUrl = templateResults[0].preview_url.trim();
+        if (foundPreviewUrl !== '') {
+          previewUrl = foundPreviewUrl;
           console.log(`✅ Preview URL found: ${previewUrl}`);
         } else {
           console.log(`⚠️ Preview URL exists but is empty for invoice ${invoice.id}`);
+        }
+        
+        // Also get PDF URL if available
+        if (templateResults[0].pdf_url) {
+          const foundPdfUrl = templateResults[0].pdf_url.trim();
+          if (foundPdfUrl !== '') {
+            pdfUrl = foundPdfUrl;
+            console.log(`✅ PDF URL found: ${pdfUrl}`);
+          }
         }
       } else {
         console.log(`⚠️ No preview URL found for invoice ${invoice.id} - attempting to generate preview on-the-fly...`);
@@ -945,12 +963,12 @@ async function getInvoiceById(req, res) {
           
           // Query again after generation
           const retryQuery = isFreePlan
-            ? `SELECT preview_url FROM invoice_templates 
+            ? `SELECT preview_url, pdf_url FROM invoice_templates 
                WHERE tenant_id = ? AND invoice_id = ? 
                AND preview_url IS NOT NULL AND preview_url != ''
                ORDER BY is_selected DESC, created_at DESC 
                LIMIT 1`
-            : `SELECT preview_url FROM invoice_templates 
+            : `SELECT preview_url, pdf_url FROM invoice_templates 
                WHERE invoice_id = ? 
                AND preview_url IS NOT NULL AND preview_url != ''
                ORDER BY is_selected DESC, created_at DESC 
@@ -962,10 +980,19 @@ async function getInvoiceById(req, res) {
           });
           
           if (retryResults && retryResults.length > 0 && retryResults[0].preview_url) {
-            const foundUrl = retryResults[0].preview_url.trim();
-            if (foundUrl !== '') {
-              previewUrl = foundUrl;
+            const foundPreviewUrl = retryResults[0].preview_url.trim();
+            if (foundPreviewUrl !== '') {
+              previewUrl = foundPreviewUrl;
               console.log(`✅ Preview URL generated and found: ${previewUrl}`);
+            }
+            
+            // Also get PDF URL if available
+            if (retryResults[0].pdf_url) {
+              const foundPdfUrl = retryResults[0].pdf_url.trim();
+              if (foundPdfUrl !== '') {
+                pdfUrl = foundPdfUrl;
+                console.log(`✅ PDF URL generated and found: ${pdfUrl}`);
+              }
             }
           }
         } catch (generateError) {
@@ -974,16 +1001,17 @@ async function getInvoiceById(req, res) {
         }
       }
     } catch (previewError) {
-      console.error('Error fetching preview URL:', previewError);
+      console.error('Error fetching preview URL and PDF URL:', previewError);
       console.error('Preview error stack:', previewError.stack);
       // Continue without preview URL if query fails
     }
 
-    // Add preview URL to invoice object
+    // Add preview URL and PDF URL to invoice object
     const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
     const invoiceWithPreview = {
       ...invoiceJson,
-      preview_url: previewUrl
+      preview_url: previewUrl,
+      pdf_url: pdfUrl
     };
 
     res.json({
