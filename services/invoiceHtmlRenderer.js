@@ -886,6 +886,141 @@ function buildBaseCss(tokens, spacing) {
     font-size: 11px;
     color: ${tokens.secondary};
   }
+
+  /* New header variants for image templates */
+  .header--invoice-title-right {
+    text-align: right;
+    padding-bottom: 16px;
+    border-bottom: none;
+  }
+  .invoice-title-right-aligned {
+    font-size: 42px;
+    font-weight: 800;
+    color: ${tokens.text};
+    letter-spacing: 2px;
+    text-align: right;
+  }
+  .header--invoice-left-logo-right {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: none;
+    padding-bottom: 16px;
+  }
+  .header-left-invoice {
+    flex: 1;
+  }
+  .invoice-title-left-large {
+    font-size: 36px;
+    font-weight: 700;
+    color: ${tokens.text};
+    margin-bottom: 8px;
+  }
+  .header-right-logo {
+    text-align: right;
+  }
+  .header-meta-right {
+    font-size: 12px;
+    color: ${tokens.secondary};
+    margin-top: 8px;
+    line-height: 1.6;
+  }
+  .header--dark-header {
+    background: ${tokens.primary};
+    color: #ffffff;
+    padding: 20px 24px;
+    margin: 0 -${spacing.padding};
+    margin-bottom: 20px;
+    border-radius: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .header-dark-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .business-name-white {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .business-tagline-white {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+  .header-dark-right {
+    flex: 1;
+    text-align: right;
+  }
+  .invoice-title-white {
+    font-size: 40px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: 3px;
+  }
+
+  /* Three column layout */
+  .three-column {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+    align-items: start;
+  }
+
+  /* Customer info variants */
+  .customer-name-underline {
+    border-bottom: 2px solid ${tokens.primary};
+    padding-bottom: 4px;
+    display: inline-block;
+  }
+  .invoice-total-due {
+    text-align: right;
+  }
+  .total-due-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: ${tokens.text};
+    margin-bottom: 4px;
+    text-transform: uppercase;
+  }
+  .total-due-amount {
+    font-size: 24px;
+    font-weight: 700;
+    color: ${tokens.text};
+  }
+  .invoice-meta-left {
+    font-size: 12px;
+    color: ${tokens.text};
+    line-height: 1.8;
+  }
+  .invoice-meta-right {
+    font-size: 12px;
+    color: ${tokens.text};
+    line-height: 1.8;
+    text-align: right;
+  }
+  .invoice-total-due-far {
+    text-align: right;
+  }
+
+  /* Totals variants */
+  .totals-card--dark-box {
+    background: ${tokens.primary};
+    color: #ffffff;
+    border: none;
+    padding: 12px 16px;
+    margin-top: 8px;
+  }
+
+  /* Payment box variants */
+  .payment-box--gray {
+    background: #F3F4F6;
+    border: 1px solid ${tokens.border};
+    padding: 12px 14px;
+    border-radius: 6px;
+  }
   `.trim();
 }
 
@@ -1355,6 +1490,52 @@ function renderHeaderBlock(config = {}, { invoice, store, logoUrl, customer = nu
       </section>
       `.trim();
     
+    // Image 1: Invoice title right-aligned (upper-middle)
+    case 'invoice_title_right_aligned':
+      return `
+      <section class="section">
+        <div class="header header--invoice-title-right">
+          <div class="invoice-title-right-aligned">INVOICE</div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 2: Invoice left, logo right
+    case 'invoice_left_logo_right':
+      return `
+      <section class="section">
+        <div class="header header--invoice-left-logo-right">
+          <div class="header-left-invoice">
+            <div class="invoice-title-left-large">Invoice</div>
+          </div>
+          <div class="header-right-logo">
+            ${logoHtml}
+            <div class="header-meta-right">
+              <div>Invoice #${escapeHtml(invoice.invoice_number || '00000')}</div>
+              <div>Due ${escapeHtml(invoice.due_date || '1 January 2022')}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 3: Dark header with logo left, INVOICE right
+    case 'dark_header_logo_left_invoice_right':
+      return `
+      <section class="section">
+        <div class="header header--dark-header">
+          <div class="header-dark-left">
+            ${logoHtml}
+            ${businessName ? `<div class="business-name-white">${escapeHtml(businessName)}</div>` : ''}
+            ${store?.description ? `<div class="business-tagline-white">${escapeHtml(store.description)}</div>` : ''}
+          </div>
+          <div class="header-dark-right">
+            <div class="invoice-title-white">INVOICE</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
     case 'bold_geometric':
     case 'decorative_top':
       return `
@@ -1543,7 +1724,7 @@ function renderCustomerBlock(config = {}, { customer = {}, invoice, store }) {
     // Template 5: Bill To and From two columns
     case 'bill_from_two_column':
       const storeName = store?.name || 'Business';
-      const storeAddress = [store?.address, store?.city, store?.state]
+      const storeAddressFull = [store?.address, store?.city, store?.state]
         .filter(Boolean)
         .join(', ');
       return `
@@ -1559,7 +1740,66 @@ function renderCustomerBlock(config = {}, { customer = {}, invoice, store }) {
             <div class="customer-label">From:</div>
             <div class="customer-name">${escapeHtml(storeName)}</div>
             ${store?.phone ? `<div class="customer-detail">${escapeHtml(store.phone)}</div>` : ''}
-            ${storeAddress ? `<div class="customer-detail">${escapeHtml(storeAddress)}</div>` : ''}
+            ${storeAddressFull ? `<div class="customer-detail">${escapeHtml(storeAddressFull)}</div>` : ''}
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 1: Invoice TO left, Total Due right
+    case 'invoice_to_left_total_right':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div class="customer-card">
+            <div class="customer-label">INVOICE TO:</div>
+            <div class="customer-name customer-name-underline">${escapeHtml(customerName)}</div>
+            ${customerAddress ? `<div class="customer-detail">${escapeHtml(customerAddress)}</div>` : ''}
+          </div>
+          <div class="invoice-total-due">
+            <div class="total-due-label">TOTAL DUE:</div>
+            <div class="total-due-amount">USD: $ ${Number(invoice?.total || 0).toLocaleString()}</div>
+          </div>
+        </div>
+        <div class="invoice-meta-left" style="margin-top: 12px;">
+          <div>Date: ${escapeHtml(invoice?.issue_date || '')}</div>
+          <div>Invoice No: ${escapeHtml(invoice?.invoice_number || '')}</div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 2: Invoice to left, metadata right
+    case 'invoice_to_left_metadata_right':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div class="customer-card">
+            <div class="customer-label">Invoice to</div>
+            <div class="customer-name">${escapeHtml(customerName)}</div>
+            ${store?.name ? `<div class="customer-detail">${escapeHtml(store.name)}</div>` : ''}
+            ${customerEmail ? `<div class="customer-detail">${escapeHtml(customerEmail)}</div>` : ''}
+          </div>
+          <div></div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 3: Invoice TO left, Date/No right, Total Due far right
+    case 'invoice_to_left_date_no_right_total_far_right':
+      return `
+      <section class="section">
+        <div class="three-column">
+          <div class="customer-card">
+            <div class="customer-label">INVOICE TO:</div>
+            <div class="customer-name">${escapeHtml(customerName)}</div>
+          </div>
+          <div class="invoice-meta-right">
+            <div>Date: ${escapeHtml(invoice?.issue_date || '')}</div>
+            <div>Invoice No: ${escapeHtml(invoice?.invoice_number || '')}</div>
+          </div>
+          <div class="invoice-total-due-far">
+            <div class="total-due-label">TOTAL DUE:</div>
+            <div class="total-due-amount">USD: $ ${Number(invoice?.total || 0).toLocaleString()}</div>
           </div>
         </div>
       </section>
@@ -1784,6 +2024,65 @@ function renderTotalsBlock(config = {}, { invoice, currency, tokens = {} }) {
       </section>
       `.trim();
     
+    // Image 1: Blue total box right-aligned
+    case 'blue_total_box_right':
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: flex-end;">
+          <div class="totals-card totals-card--blue-box">
+            <div class="totals-row">
+              <span>Sub-total:</span>
+              <span>${currency} ${subtotal.toFixed(2)}</span>
+            </div>
+            <div class="totals-row">
+              <span>Tax:</span>
+              <span>${currency} ${tax.toFixed(2)}</span>
+            </div>
+            <div class="totals-row total totals-row--blue-box">
+              <span>Total:</span>
+              <span>${currency} ${total.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 2: Total left, amount right
+    case 'total_left_amount_right':
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: space-between; border-top: 1px solid ${border}; padding-top: 12px;">
+          <div style="font-weight: 600; font-size: 14px;">TOTAL</div>
+          <div style="font-weight: 700; font-size: 18px;">${currency} ${total.toFixed(2)}</div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 3: Subtotal, Tax, Total box right
+    case 'subtotal_tax_total_box_right':
+      return `
+      <section class="section">
+        <div class="totals" style="justify-content: flex-end;">
+          <div class="totals-card">
+            <div class="totals-row">
+              <span>Sub-total:</span>
+              <span>${currency} ${subtotal.toFixed(2)}</span>
+            </div>
+            <div class="totals-row">
+              <span>Tax:</span>
+              <span>${currency} ${tax.toFixed(2)}</span>
+            </div>
+            <div class="totals-card totals-card--dark-box">
+              <div class="totals-row total" style="color: #ffffff;">
+                <span>Total:</span>
+                <span>${currency} ${total.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
     default:
       // Determine totals card class based on variant
       let totalsCardClass = 'totals-card';
@@ -1921,6 +2220,56 @@ function renderPaymentBlock(config = {}, { invoice, store }) {
             <div class="payment-notes">${escapeHtml(notes)}</div>
           </div>
           <div></div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 1: Payment Method left
+    case 'payment_method_left':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div>
+            <div class="payment-label">Payment Method</div>
+            <div class="payment-notes">${escapeHtml(notes)}</div>
+          </div>
+          <div></div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 2: Payment box left, Thank you right
+    case 'payment_box_left_thankyou_right':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div class="payment-box payment-box--gray">
+            <div class="payment-label">Pay to: ${escapeHtml(store?.name || 'Bank')}</div>
+            ${notes ? `<div class="payment-notes">${escapeHtml(notes)}</div>` : ''}
+          </div>
+          <div style="text-align: right; padding-top: 16px;">
+            <div style="font-size: 14px; color: ${tokens.text || '#1F2937'}; font-style: italic;">Thank you for your business!</div>
+          </div>
+        </div>
+      </section>
+      `.trim();
+    
+    // Image 3: Payment Method and Terms left, Signature right
+    case 'payment_terms_left_signature_right':
+      return `
+      <section class="section">
+        <div class="two-column">
+          <div>
+            <div class="payment-label" style="margin-bottom: 8px;">Payment Method</div>
+            <div class="payment-notes" style="margin-bottom: 16px;">${escapeHtml(notes)}</div>
+            <div class="payment-label" style="margin-bottom: 8px;">Terms and Conditions</div>
+            <div class="payment-notes" style="font-size: 11px;">Please send payment within 30 days of receiving this invoice. There will be 10% Interest charge per month on late invoice.</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="margin-bottom: 40px;"></div>
+            <div style="border-top: 1px solid ${border}; padding-top: 4px; margin-bottom: 4px; width: 200px; margin-left: auto;"></div>
+            <div style="font-size: 12px; color: ${text};">Administrator</div>
+          </div>
         </div>
       </section>
       `.trim();
