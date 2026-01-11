@@ -60,10 +60,12 @@ function renderInvoiceHtml({ invoice, template, brandColors }) {
 
   // Get logo URL from invoice context (passed from controller)
   const logoUrl = invoice.logoUrl || null;
+  // Get currency from invoice (currency_symbol or currency, with fallback)
+  const currencySymbol = invoice.currency_symbol || (invoice.currency === 'USD' ? '$' : invoice.currency === 'GBP' ? '£' : invoice.currency === 'EUR' ? '€' : invoice.currency === 'NGN' ? '₦' : invoice.currency || '₦');
   const headerHtml = renderHeaderBlock(layoutMap.Header, { invoice, store, logoUrl, customer });
   const customerHtml = renderCustomerBlock(layoutMap.CustomerInfo, { customer, invoice, store });
-  const itemsHtml = renderItemsBlock(layoutMap.ItemsTable, { items, currency: '₦', tokens });
-  const totalsHtml = renderTotalsBlock(layoutMap.Totals, { invoice, currency: '₦', tokens });
+  const itemsHtml = renderItemsBlock(layoutMap.ItemsTable, { items, currency: currencySymbol, tokens });
+  const totalsHtml = renderTotalsBlock(layoutMap.Totals, { invoice, currency: currencySymbol, tokens });
   const paymentHtml = renderPaymentBlock(layoutMap.Payment, { invoice, store, tokens });
   const footerHtml = renderFooterBlock(layoutMap.Footer, { invoice, store });
 
@@ -1638,6 +1640,8 @@ function renderCustomerBlock(config = {}, { customer = {}, invoice, store }) {
 
   const showLabel = config.show_label !== false;
   const variant = config.variant || 'left';
+  // Get currency symbol from invoice
+  const currencySymbol = invoice?.currency_symbol || (invoice?.currency === 'USD' ? '$' : invoice?.currency === 'GBP' ? '£' : invoice?.currency === 'EUR' ? '€' : invoice?.currency === 'NGN' ? '₦' : '₦');
 
   // Safely access customer properties
   const customerName = (customer && customer.name) ? customer.name : 'Customer';
@@ -1758,7 +1762,7 @@ function renderCustomerBlock(config = {}, { customer = {}, invoice, store }) {
           </div>
           <div class="invoice-total-due">
             <div class="total-due-label">TOTAL DUE:</div>
-            <div class="total-due-amount">USD: $ ${Number(invoice?.total || 0).toLocaleString()}</div>
+            <div class="total-due-amount">${currencySymbol} ${Number(invoice?.total || 0).toLocaleString()}</div>
           </div>
         </div>
         <div class="invoice-meta-left" style="margin-top: 12px;">
@@ -1799,7 +1803,7 @@ function renderCustomerBlock(config = {}, { customer = {}, invoice, store }) {
           </div>
           <div class="invoice-total-due-far">
             <div class="total-due-label">TOTAL DUE:</div>
-            <div class="total-due-amount">USD: $ ${Number(invoice?.total || 0).toLocaleString()}</div>
+            <div class="total-due-amount">${currencySymbol} ${Number(invoice?.total || 0).toLocaleString()}</div>
           </div>
         </div>
       </section>
@@ -1854,14 +1858,14 @@ function renderItemsBlock(config = {}, { items, currency, tokens = {} }) {
 
   // Determine column headers based on variant
   let headers = `
-    <th>Description</th>
-    <th class="col-qty">Qty</th>
+    <th>Name</th>
+    <th class="col-qty">Quantity</th>
     <th class="col-price">Unit Price</th>
     <th class="col-total">Total</th>
   `;
   
   if (variant === 'colorful_alternating_headers') {
-    // Template 4: Alternating colored headers
+    // Template 2: Alternating colored headers (Yellow DESCRIPTION, Dark PRICE/QTY/AMOUNT)
     headers = `
       <th class="col-desc-yellow">DESCRIPTION</th>
       <th class="col-price-dark">PRICE</th>
@@ -1870,10 +1874,10 @@ function renderItemsBlock(config = {}, { items, currency, tokens = {} }) {
     `;
   } else if (variant === 'blue_header' || variant === 'blue_header_bordered' || variant === 'blue_header_zebra') {
     headers = `
-      <th>ITEM</th>
       <th>DESCRIPTION</th>
-      <th class="col-price">RATE</th>
-      <th class="col-total">AMOUNT</th>
+      <th class="col-qty">QTY</th>
+      <th class="col-price">PRICE</th>
+      <th class="col-total">TOTAL</th>
     `;
   }
 

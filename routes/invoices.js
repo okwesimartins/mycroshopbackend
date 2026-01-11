@@ -28,6 +28,14 @@ router.post('/',
       .isInt({ min: 1 })
       .withMessage('Customer ID must be a positive integer if provided'),
     body('issue_date').notEmpty().withMessage('Issue date is required'),
+    body('currency')
+      .optional()
+      .isIn(['USD', 'EUR', 'GBP', 'NGN', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'ZAR'])
+      .withMessage('Currency must be a valid currency code'),
+    body('currency_symbol')
+      .optional()
+      .isString()
+      .withMessage('Currency symbol must be a string'),
     body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
     body('items.*.item_name').notEmpty().withMessage('Item name is required'),
     body('items.*.quantity').isFloat({ min: 0.01 }).withMessage('Quantity must be positive'),

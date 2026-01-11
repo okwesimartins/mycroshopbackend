@@ -1017,6 +1017,10 @@ async function createInvoice(req, res) {
 
     // Create invoice
     const isFreePlan = tenant && tenant.subscription_plan === 'free';
+    // Get currency and currency_symbol from request body
+    const currency = req.body.currency || 'NGN';
+    const currency_symbol = req.body.currency_symbol || (currency === 'USD' ? '$' : currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : currency === 'NGN' ? '₦' : '₦');
+    
     const invoice = await req.db.models.Invoice.create({
       tenant_id: isFreePlan ? tenantId : null, // Set tenant_id for free users (shared DB)
       invoice_number: generateInvoiceNumber(),
@@ -1024,6 +1028,8 @@ async function createInvoice(req, res) {
       customer_id: validCustomerId, // Use validated customer_id (null if not provided)
       issue_date,
       due_date: due_date || null,
+      currency: currency,
+      currency_symbol: currency_symbol,
       subtotal,
       tax_amount: calculatedTax,
       vat_amount: taxBreakdown.vat || 0,
@@ -1710,7 +1716,6 @@ async function deleteInvoice(req, res) {
     });
   }
 }
-
 
 module.exports = {
   getAllInvoices,
