@@ -1,31 +1,51 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { getAvailableTemplates } = require('./invoiceHtmlTemplates');
+const { generateAITemplateOptions } = require('./aiInvoiceTemplateGenerator');
 
-// Initialize Gemini AI (used for logo color extraction, not template generation)
+// Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 /**
- * Generate invoice template options - returns template metadata
- * Templates are HTML/CSS templates with inline styles
+ * Generate invoice template options - uses AI to create beautiful, dynamic templates
  * 
- * @param {Object} invoiceData - Invoice data (not used, kept for API consistency)
+ * @param {Object} invoiceData - Invoice data for AI generation
  * @param {Object} brandColors - Brand color palette extracted from user's logo
- * @returns {Promise<Array>} Array of template metadata objects
+ * @returns {Promise<Array>} Array of template metadata objects with AI-generated HTML
  */
 async function generateTemplateOptions(invoiceData, brandColors) {
-  // Get available HTML templates
-  console.log('🎨 Using HTML/CSS template library');
-  const templates = getAvailableTemplates();
-  console.log(`✅ Loaded ${templates.length} HTML templates from library`);
-  
-  // Return template metadata (the actual HTML will be generated when rendering)
-  return templates.map(template => ({
-    id: template.id,
-    name: template.name,
-    description: template.description,
-    source: 'html_template_library',
-    generated_at: new Date().toISOString()
-  }));
+  try {
+    console.log('🤖 Generating beautiful AI-powered invoice templates...');
+    
+    // Use AI to generate beautiful, dynamic templates
+    const aiTemplates = await generateAITemplateOptions(invoiceData, brandColors);
+    
+    if (aiTemplates && aiTemplates.length > 0) {
+      console.log(`✅ Generated ${aiTemplates.length} AI-powered templates`);
+      return aiTemplates;
+    }
+    
+    // Fallback to static templates if AI generation fails
+    console.log('⚠️ AI generation failed, falling back to static templates');
+    const templates = getAvailableTemplates();
+    return templates.map(template => ({
+      id: template.id,
+      name: template.name,
+      description: template.description,
+      source: 'html_template_library',
+      generated_at: new Date().toISOString()
+    }));
+  } catch (error) {
+    console.error('Error generating AI templates, using fallback:', error);
+    // Fallback to static templates
+    const templates = getAvailableTemplates();
+    return templates.map(template => ({
+      id: template.id,
+      name: template.name,
+      description: template.description,
+      source: 'html_template_library',
+      generated_at: new Date().toISOString()
+    }));
+  }
 }
 
 module.exports = {
