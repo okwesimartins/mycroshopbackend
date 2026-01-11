@@ -344,10 +344,14 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       
       try {
         console.log(`    - Rendering HTML for template ${template.id}...`);
-        const html = renderInvoiceHtml({
+        // Use HTML template library instead of JSON recipe renderer
+        const html = getInvoiceTemplate(template.id, {
           invoice: invoiceWithLogo,
-          template,
-          brandColors
+          customer: customer || {},
+          store: store || {},
+          items: items,
+          logoUrl: logoDataUri || logoUrl || null,
+          colors: brandColors
         });
         
         console.log(`    - HTML rendered (${html.length} chars). Generating PDF and preview...`);
@@ -1065,9 +1069,9 @@ async function createInvoice(req, res) {
     try {
       // Fetch invoice with relations (within transaction) for template generation
       const invoiceWithRelations = await req.db.models.Invoice.findByPk(invoice.id, {
-        include: [
-          {
-            model: req.db.models.Store,
+      include: [
+        {
+          model: req.db.models.Store,
             required: false,
             attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'email', 'phone']
           },
@@ -1090,8 +1094,8 @@ async function createInvoice(req, res) {
           invoice_id: invoice.id,
           ...(isFreePlan ? { tenant_id: tenantId } : {})
         },
-        include: [
-          {
+          include: [
+            {
             model: req.db.models.Product,
             required: false,
             // Explicitly specify attributes - exclude store_id which doesn't exist in products table
@@ -1439,9 +1443,9 @@ async function createInvoice(req, res) {
     }
 
     try {
-      res.status(201).json({
-        success: true,
-        message: 'Invoice created successfully',
+    res.status(201).json({
+      success: true,
+      message: 'Invoice created successfully',
         data: {
           invoice: safeInvoice,
           templates: templateData.templates || [],
