@@ -64,7 +64,7 @@ function renderInvoiceHtml({ invoice, template, brandColors }) {
   const customerHtml = renderCustomerBlock(layoutMap.CustomerInfo, { customer, invoice, store });
   const itemsHtml = renderItemsBlock(layoutMap.ItemsTable, { items, currency: '₦', tokens });
   const totalsHtml = renderTotalsBlock(layoutMap.Totals, { invoice, currency: '₦', tokens });
-  const paymentHtml = renderPaymentBlock(layoutMap.Payment, { invoice, store });
+  const paymentHtml = renderPaymentBlock(layoutMap.Payment, { invoice, store, tokens });
   const footerHtml = renderFooterBlock(layoutMap.Footer, { invoice, store });
 
   return `
@@ -2149,7 +2149,7 @@ function renderTotalsBlock(config = {}, { invoice, currency, tokens = {} }) {
   }
 }
 
-function renderPaymentBlock(config = {}, { invoice, store }) {
+function renderPaymentBlock(config = {}, { invoice, store, tokens = {} }) {
   const variant = config.variant || 'minimal';
   const notes = invoice?.notes || '';
   const businessPhone = store?.phone || '';
@@ -2241,7 +2241,6 @@ function renderPaymentBlock(config = {}, { invoice, store }) {
     
     // Image 2: Payment box left, Thank you right
     case 'payment_box_left_thankyou_right':
-      const textColor2 = tokens.text || '#1F2937';
       return `
       <section class="section">
         <div class="two-column">
@@ -2250,7 +2249,7 @@ function renderPaymentBlock(config = {}, { invoice, store }) {
             ${notes ? `<div class="payment-notes">${escapeHtml(notes)}</div>` : ''}
           </div>
           <div style="text-align: right; padding-top: 16px;">
-            <div style="font-size: 14px; color: ${textColor2}; font-style: italic;">Thank you for your business!</div>
+            <div style="font-size: 14px; color: ${tokens.text || '#1F2937'}; font-style: italic;">Thank you for your business!</div>
           </div>
         </div>
       </section>
