@@ -363,11 +363,11 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       }
     }
 
-    // Extract colors from logo if available
+    // Extract colors from logo if available (with timeout to prevent blocking)
     // Logo URL might be relative (/uploads/logos/...) so we need to convert it to absolute URL or read the file
-    if (logoUrl) {
+    if (logoUrl && process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== '') {
       try {
-        console.log(`Extracting brand colors from logo: ${logoUrl}`);
+        console.log(`Extracting brand colors from logo: ${logoUrl} (with 10s timeout)`);
         
         // Convert relative URL to absolute URL or read file as buffer for color extraction
         let logoForColorExtraction = logoUrl;
@@ -391,10 +391,18 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           }
         }
         
-        const extractedColors = await extractColorsFromLogo(logoForColorExtraction);
+        // Wrap color extraction in a timeout (10 seconds max - non-blocking)
+        const colorExtractionPromise = (async () => {
+          const extractedColors = await extractColorsFromLogo(logoForColorExtraction);
+          const fullPalette = await generateColorPalette(extractedColors);
+          return fullPalette;
+        })();
         
-        // Generate full color palette from extracted colors
-        const fullPalette = await generateColorPalette(extractedColors);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Color extraction timeout after 10 seconds')), 10000)
+        );
+        
+        const fullPalette = await Promise.race([colorExtractionPromise, timeoutPromise]);
         
         brandColors = {
           primary: fullPalette.primary || defaultBrandColors.primary,
@@ -409,11 +417,15 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         
         console.log('✅ Successfully extracted brand colors from logo:', brandColors);
       } catch (error) {
-        console.warn('⚠️ Failed to extract colors from logo, using defaults:', error.message);
-        // Continue with default colors
+        console.warn('⚠️ Failed to extract colors from logo (timeout or error), using defaults:', error.message);
+        // Continue with default colors - don't block invoice creation
       }
     } else {
-      console.log('ℹ️ No logo found, using default brand colors');
+      if (!logoUrl) {
+        console.log('ℹ️ No logo found, using default brand colors');
+      } else {
+        console.log('ℹ️ GEMINI_API_KEY not configured, skipping color extraction, using default brand colors');
+      }
     }
 
     // Generate templates using AI (or defaults if AI fails)
@@ -1532,12 +1544,13 @@ async function createInvoice(req, res) {
     try {
       console.log(`Generating templates for invoice ${invoice.id} with ${completeInvoiceForTemplates.InvoiceItems.length} items...`);
       
-      // Set timeout for template generation (30 seconds)
+      // Set timeout for template generation (60 seconds - increased since we're not using AI for templates)
+      // Color extraction has its own 10s timeout, so this gives plenty of time for PDF generation
       const templatePromise = generateTemplatesForInvoice(completeInvoiceForTemplates, tenantId, req);
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => {
-          reject(new Error('Template generation timeout after 30 seconds'));
-        }, 30000)
+          reject(new Error('Template generation timeout after 60 seconds'));
+        }, 60000)
       );
       
       templateData = await Promise.race([templatePromise, timeoutPromise]);
