@@ -103,6 +103,7 @@ async function getAllInvoices(req, res) {
         }
         
         console.log(`Fetching preview URLs for ${invoiceIds.length} invoices (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
+        console.log(`Invoice IDs to query: ${invoiceIds.join(', ')}`);
         
         // Query invoice_templates to get preview URLs
         // Free plan: shared database, need tenant_id filter
@@ -120,11 +121,40 @@ async function getAllInvoices(req, res) {
              ORDER BY invoice_id, is_selected DESC, created_at DESC`;
         
         const queryParams = isFreePlan ? [tenantId, ...invoiceIds] : invoiceIds;
+        console.log(`Query params: ${JSON.stringify(queryParams)}`);
+        console.log(`Executing query: ${templateQuery.replace(/\?/g, (match, offset) => {
+          const idx = templateQuery.substring(0, offset).match(/\?/g)?.length || 0;
+          return queryParams[idx] !== undefined ? `'${queryParams[idx]}'` : '?';
+        })}`);
+        
         const [templateResults] = await req.db.sequelize.query(templateQuery, {
           replacements: queryParams
         });
         
-      console.log(`Found ${templateResults.length} template records with preview URLs`);
+        console.log(`Found ${templateResults.length} template records with preview URLs`);
+        if (templateResults.length > 0) {
+          console.log(`Sample template results:`, templateResults.slice(0, 3).map(r => ({
+            invoice_id: r.invoice_id,
+            preview_url: r.preview_url ? r.preview_url.substring(0, 50) + '...' : 'NULL',
+            is_selected: r.is_selected
+          })));
+        } else {
+          // Debug: Check if templates exist at all for these invoices
+          const debugQuery = isFreePlan
+            ? `SELECT invoice_id, preview_url, tenant_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')})`
+            : `SELECT invoice_id, preview_url FROM invoice_templates WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`;
+          const [debugResults] = await req.db.sequelize.query(debugQuery, {
+            replacements: queryParams
+          });
+          console.log(`⚠️ DEBUG: Found ${debugResults.length} total template records (including NULL preview_url)`);
+          if (debugResults.length > 0) {
+            console.log(`DEBUG results:`, debugResults.map(r => ({
+              invoice_id: r.invoice_id,
+              preview_url: r.preview_url || 'NULL',
+              tenant_id: r.tenant_id
+            })));
+          }
+        }
       
       // Group by invoice_id and get the first (selected or most recent) preview URL
       templateResults.forEach(result => {
@@ -582,6 +612,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           
           // Build query based on whether we're on free plan (needs tenant_id) or enterprise
           if (isFreePlan && tenantId) {
+            console.log(`    - Saving template to database (Free plan): invoice_id=${invoice.id}, tenant_id=${tenantId}, template_id=${template.id}, preview_url=${previewUrl}`);
             await req.db.query(`
               INSERT INTO invoice_templates (
                 tenant_id, invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
@@ -608,8 +639,10 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
               },
               type: QueryTypes.INSERT
             });
+            console.log(`    - ✅ Template saved successfully to database`);
           } else {
             // Enterprise users (no tenant_id)
+            console.log(`    - Saving template to database (Enterprise): invoice_id=${invoice.id}, template_id=${template.id}, preview_url=${previewUrl}`);
             await req.db.query(`
               INSERT INTO invoice_templates (
                 invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
@@ -635,6 +668,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
               },
               type: QueryTypes.INSERT
             });
+            console.log(`    - ✅ Template saved successfully to database`);
           }
           
           console.log(`    - Saved template ${template.id} to database`);
@@ -849,23 +883,48 @@ async function getInvoiceById(req, res) {
       
       // Query invoice_templates to get preview URL (prefer selected template)
       const templateQuery = isFreePlan
-        ? `SELECT preview_url FROM invoice_templates 
+        ? `SELECT preview_url, is_selected, created_at FROM invoice_templates 
            WHERE tenant_id = ? AND invoice_id = ? 
            AND preview_url IS NOT NULL AND preview_url != ''
            ORDER BY is_selected DESC, created_at DESC 
            LIMIT 1`
-        : `SELECT preview_url FROM invoice_templates 
+        : `SELECT preview_url, is_selected, created_at FROM invoice_templates 
            WHERE invoice_id = ? 
            AND preview_url IS NOT NULL AND preview_url != ''
            ORDER BY is_selected DESC, created_at DESC 
            LIMIT 1`;
       
       const queryParams = isFreePlan ? [tenantId, invoice.id] : [invoice.id];
+      console.log(`Query params for invoice ${invoice.id}: ${JSON.stringify(queryParams)}`);
+      console.log(`Executing query: ${templateQuery.replace(/\?/g, (match, offset) => {
+        const idx = templateQuery.substring(0, offset).match(/\?/g)?.length || 0;
+        return queryParams[idx] !== undefined ? `'${queryParams[idx]}'` : '?';
+      })}`);
+      
       const [templateResults] = await req.db.sequelize.query(templateQuery, {
         replacements: queryParams
       });
       
       console.log(`Found ${templateResults.length} template records for invoice ${invoice.id}`);
+      
+      // Debug: Check all templates for this invoice
+      if (templateResults.length === 0) {
+        const debugQuery = isFreePlan
+          ? `SELECT invoice_id, preview_url, tenant_id, is_selected FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ?`
+          : `SELECT invoice_id, preview_url, is_selected FROM invoice_templates WHERE invoice_id = ?`;
+        const [debugResults] = await req.db.sequelize.query(debugQuery, {
+          replacements: queryParams
+        });
+        console.log(`⚠️ DEBUG: Found ${debugResults.length} total template records for invoice ${invoice.id} (including NULL preview_url)`);
+        if (debugResults.length > 0) {
+          console.log(`DEBUG results:`, debugResults.map(r => ({
+            invoice_id: r.invoice_id,
+            preview_url: r.preview_url || 'NULL',
+            tenant_id: r.tenant_id,
+            is_selected: r.is_selected
+          })));
+        }
+      }
       
       if (templateResults && templateResults.length > 0 && templateResults[0].preview_url) {
         const foundUrl = templateResults[0].preview_url.trim();
