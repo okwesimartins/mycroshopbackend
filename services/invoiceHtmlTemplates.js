@@ -19,15 +19,43 @@ function getInvoiceTemplate(templateId, data) {
     colors = {}
   } = data;
 
-  // Extract color tokens from user's logo colors or use defaults
-  const primary = colors.primary || '#151b3f'; // Dark blue/navy
-  const secondary = colors.secondary || '#64748b'; // Gray
-  const accent = colors.accent || '#f2c94c'; // Yellow/gold
-  const text = colors.text || '#111827'; // Dark gray/black
-  const background = '#ffffff';
-  const border = colors.border || '#e5e7eb';
-  const tableHeader = primary;
-  const tableRowAlt = '#f3f4f6';
+  // Extract color tokens from user's logo colors - USE ONLY LOGO COLORS
+  // If colors are not provided, templates won't render (user must have logo)
+  const primary = colors.primary;
+  const secondary = colors.secondary || colors.primary; // Fallback to primary if no secondary
+  const accent = colors.accent || colors.primary; // Fallback to primary if no accent
+  const text = colors.text || colors.primary; // Fallback to primary if no text color
+  const background = colors.background || '#ffffff'; // Only white is allowed as default for background
+  const border = colors.border || (colors.secondary ? adjustColorBrightness(colors.secondary, 0.85) : colors.primary);
+  const tableHeader = colors.table_header || primary;
+  const tableRowAlt = colors.table_row_alt || (background !== '#ffffff' ? adjustColorBrightness(background, 0.95) : '#f9fafb');
+  
+  // Generate color variations from logo colors
+  const muted = colors.secondary || adjustColorBrightness(text || primary, 0.6);
+  const lightText = colors.text ? adjustColorBrightness(colors.text, 1.3) : '#ffffff';
+  const darkText = colors.text || adjustColorBrightness(primary, 0.3);
+  
+  // Helper function to adjust color brightness
+  function adjustColorBrightness(color, factor) {
+    if (!color) return '#000000';
+    const hex = color.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    const newR = Math.round(Math.min(255, Math.max(0, r * factor)));
+    const newG = Math.round(Math.min(255, Math.max(0, g * factor)));
+    const newB = Math.round(Math.min(255, Math.max(0, b * factor)));
+    return '#' + [newR, newG, newB].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+  
+  // Helper function to get rgba from hex
+  function hexToRgba(hex, alpha = 1) {
+    if (!hex) return `rgba(0,0,0,${alpha})`;
+    const r = parseInt(hex.substr(1, 2), 16);
+    const g = parseInt(hex.substr(3, 2), 16);
+    const b = parseInt(hex.substr(5, 2), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
 
   // Currency symbol
   const currency = invoice?.currency_symbol || (invoice?.currency === 'USD' ? '$' : invoice?.currency === 'GBP' ? '£' : invoice?.currency === 'EUR' ? '€' : invoice?.currency === 'NGN' ? '₦' : '$');
@@ -71,25 +99,31 @@ function getInvoiceTemplate(templateId, data) {
   const notes = invoice?.notes || '';
   const paymentNotes = notes.split('\n').filter(line => line.trim()).join('<br>') || '';
 
+  // Pass all color variations to templates
+  const colorVars = {
+    primary, secondary, accent, text, background, border, tableHeader, tableRowAlt,
+    muted, lightText, darkText, adjustColorBrightness, hexToRgba
+  };
+
   switch (templateId) {
     case 'template_1':
     case 'thyx_geometric':
-      return getTemplate1({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes });
+      return getTemplate1({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, currency, subtotal, tax, invoiceTotal, itemsRows, paymentNotes, ...colorVars });
     
     case 'template_2':
     case 'salford_yellow':
-      return getTemplate2({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, discount, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes });
+      return getTemplate2({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, discount, itemsRows, paymentNotes, ...colorVars });
     
     case 'template_3':
     case 'salford_olive':
-      return getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes });
+      return getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, itemsRows, paymentNotes, ...colorVars });
     
     case 'template_4':
     case 'studio_shodwe':
-      return getTemplate4({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes });
+      return getTemplate4({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, itemsRows, paymentNotes, ...colorVars });
     
     default:
-      return getTemplate1({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes });
+      return getTemplate1({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, currency, subtotal, tax, invoiceTotal, itemsRows, paymentNotes, ...colorVars });
   }
 }
 
@@ -97,7 +131,22 @@ function getInvoiceTemplate(templateId, data) {
  * Template 1: THYX Style - Dark blue with yellow accent, geometric header
  * Exact HTML from user's first template
  */
-function getTemplate1({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes }) {
+function getTemplate1({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, currency, subtotal, tax, invoiceTotal, itemsRows, paymentNotes, primary, secondary, accent, text, background, border, tableHeader, tableRowAlt, muted, lightText, darkText, adjustColorBrightness, hexToRgba }) {
+  // Use ONLY logo colors - create all color variations from logo
+  const bgLight = background !== '#ffffff' ? adjustColorBrightness(background, 1.02) : adjustColorBrightness(primary, 0.98);
+  const navy = primary;
+  const yellow = accent || primary;
+  const ink = text || primary;
+  const mutedColor = muted;
+  const lineColor = border;
+  const rowColor = tableRowAlt;
+  const whiteText = lightText || '#ffffff';
+  const pageBg = background;
+  const pageBorder = border;
+  const grayText = muted || adjustColorBrightness(text || primary, 0.6);
+  const darkGray = adjustColorBrightness(text || primary, 0.4);
+  const veryDark = text || primary;
+  
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -106,19 +155,19 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
   <title>Invoice ${escapeHtml(invoice?.invoice_number || '')}</title>
   <style>
     :root{
-      --navy:${primary};
-      --yellow:${accent};
-      --ink:${text};
-      --muted:#6b7280;
-      --line:${border};
-      --row:${tableRowAlt};
+      --navy:${navy};
+      --yellow:${yellow};
+      --ink:${ink};
+      --muted:${mutedColor};
+      --line:${lineColor};
+      --row:${rowColor};
     }
 
     *{box-sizing:border-box}
     body{
       margin:0;
       padding:32px;
-      background:#f6f7fb;
+      background:${bgLight};
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--ink);
     }
@@ -128,8 +177,8 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
       width: 820px;
       max-width: 100%;
       margin: 0 auto;
-      background:#fff;
-      border:1px solid #d7dbe3;
+      background:${pageBg};
+      border:1px solid ${pageBorder};
       border-radius:10px;
       overflow:hidden;
     }
@@ -139,7 +188,7 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
       position:relative;
       padding:28px 34px 18px;
       min-height:120px;
-      background:#fff;
+      background:${pageBg};
     }
 
     /* Dark shape on the right with diagonal edge */
@@ -169,7 +218,7 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
       position:absolute;
       right:44px;
       top:34px;
-      color:#fff;
+      color:${whiteText};
       font-weight:800;
       letter-spacing:.04em;
       font-size:28px;
@@ -261,13 +310,13 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
 
     thead th{
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       padding:10px 12px;
       text-align:left;
       font-weight:800;
       font-size:12px;
     }
-    thead th + th{border-left:3px solid #fff;} /* white dividers like the image */
+    thead th + th{border-left:3px solid ${whiteText};} /* white dividers like the image */
 
     tbody td{
       padding:10px 12px;
@@ -305,7 +354,7 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
     .payment p{
       margin:2px 0;
       font-size:12px;
-      color:#374151;
+      color:${grayText};
     }
 
     .summary{
@@ -320,11 +369,11 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
       justify-content:space-between;
       padding:6px 0;
       border-bottom:1px solid var(--line);
-      color:#111827;
+      color:${veryDark};
       font-weight:700;
     }
     .summary-row span:first-child{
-      color:#374151;
+      color:${grayText};
       font-weight:700;
     }
 
@@ -335,7 +384,7 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
     }
     .grand .box{
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       font-weight:900;
       padding:10px 16px;
       border-radius:2px;
@@ -352,7 +401,7 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
 
     /* Print friendly */
     @media print{
-      body{background:#fff; padding:0}
+      body{background:${pageBg}; padding:0}
       .invoice-page{border:none; border-radius:0}
     }
   </style>
@@ -433,12 +482,30 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
  * Template 2: Salford & Co. Style - Yellow and navy with top strip
  * Exact HTML from user's second template
  */
-function getTemplate2({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, discount, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes }) {
+function getTemplate2({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, discount, itemsRows, paymentNotes, primary, secondary, accent, text, background, border, tableHeader, tableRowAlt, muted, lightText, darkText, adjustColorBrightness, hexToRgba }) {
   // Extract payment details from notes - only use actual data
   const paymentLines = paymentNotes.split('<br>').filter(l => l.trim());
   const accountNo = paymentLines.find(l => l.toLowerCase().includes('account'))?.split(':')[1]?.trim() || '';
   const accountName = customerName || '';
   const branchName = businessName || '';
+
+  // Use ONLY logo colors - create all color variations from logo
+  const navy = primary;
+  const yellow = accent || primary;
+  const ink = text || primary;
+  const mutedColor = muted;
+  const lineColor = border;
+  const softColor = tableRowAlt;
+  const bgLight = background !== '#ffffff' ? adjustColorBrightness(background, 1.02) : adjustColorBrightness(primary, 0.98);
+  const pageBg = background;
+  const pageBorder = border;
+  const grayText = muted || adjustColorBrightness(text || primary, 0.6);
+  const whiteText = lightText || '#ffffff';
+  // Pre-compute rgba values
+  const whiteRgba08 = hexToRgba(pageBg, 0.08);
+  const whiteRgba65 = hexToRgba(whiteText, 0.65);
+  const whiteRgba75 = hexToRgba(whiteText, 0.75);
+  const whiteRgba85 = hexToRgba(whiteText, 0.85);
 
   return `<!doctype html>
 <html lang="en">
@@ -448,19 +515,19 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
   <title>Invoice ${escapeHtml(invoice?.invoice_number || '')}</title>
   <style>
     :root{
-      --navy:${primary};
-      --yellow:${accent};
-      --ink:${text};
-      --muted:#6b7280;
-      --line:${border};
-      --soft:${tableRowAlt};
+      --navy:${navy};
+      --yellow:${yellow};
+      --ink:${ink};
+      --muted:${mutedColor};
+      --line:${lineColor};
+      --soft:${softColor};
     }
 
     *{box-sizing:border-box}
     body{
       margin:0;
       padding:32px;
-      background:#f5f6fb;
+      background:${bgLight};
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--ink);
     }
@@ -470,8 +537,8 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       width: 860px;
       max-width: 100%;
       margin: 0 auto;
-      background:#fff;
-      border:1px solid #d7dbe3;
+      background:${pageBg};
+      border:1px solid ${pageBorder};
       border-radius:14px;
       overflow:hidden;
     }
@@ -498,7 +565,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
     /* Header navy area */
     .header{
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       padding:22px 30px 18px;
       position:relative;
     }
@@ -520,7 +587,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       width:42px;
       height:42px;
       border-radius:10px;
-      background:rgba(255,255,255,.08);
+      background:${whiteRgba08};
       display:grid;
       place-items:center;
     }
@@ -537,7 +604,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
     .brand-sub{
       margin-top:4px;
       font-size:11px;
-      color:rgba(255,255,255,.75);
+      color:${whiteRgba75};
       line-height:1.3;
     }
 
@@ -554,14 +621,14 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
     .invoice-meta{
       font-size:11px;
       line-height:1.55;
-      color:rgba(255,255,255,.85);
+      color:${whiteRgba85};
     }
     .invoice-meta b{color:#fff}
 
     /* Address band */
     .address-band{
       background:var(--yellow);
-      color:#111827;
+      color:${veryDark || darkText};
       padding:10px 30px;
       font-size:12px;
       font-weight:800;
@@ -621,7 +688,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       padding:10px 12px;
       border:1px solid var(--line);
       border-radius:10px;
-      background:#fff;
+      background:${pageBg};
     }
 
     .k-title{
@@ -629,7 +696,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       font-weight:900;
       letter-spacing:.05em;
       text-transform:uppercase;
-      color:#374151;
+      color:${grayText};
       margin-bottom:8px;
     }
 
@@ -638,7 +705,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       grid-template-columns: 90px 1fr;
       gap:6px 10px;
       font-size:12px;
-      color:#111827;
+      color:${veryDark || darkText};
       align-items:center;
     }
     .kv .k{color:var(--muted); font-weight:700}
@@ -654,7 +721,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
     }
     thead th{
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       padding:9px 10px;
       text-align:left;
       font-weight:900;
@@ -666,7 +733,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
     tbody td{
       padding:9px 10px;
       border-bottom:1px solid var(--line);
-      background:#fff;
+      background:${pageBg};
     }
     tbody tr:nth-child(even) td{background:var(--soft)}
     .num{text-align:right; white-space:nowrap;}
@@ -683,7 +750,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
     .terms p{
       margin:0 0 8px;
       font-size:11px;
-      color:#374151;
+      color:${grayText};
       line-height:1.45;
     }
     .thanks{
@@ -695,7 +762,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
     .contact-mini{
       margin-top:8px;
       font-size:11px;
-      color:#374151;
+      color:${grayText};
       line-height:1.55;
     }
 
@@ -709,7 +776,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       justify-content:space-between;
       padding:9px 12px;
       font-size:12px;
-      background:#fff;
+      background:${pageBg};
       border-bottom:1px solid var(--line);
       font-weight:800;
     }
@@ -717,7 +784,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
     .totals .row:last-child{border-bottom:none}
     .totals .row.total{
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       font-weight:900;
     }
 
@@ -727,7 +794,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       display:flex;
       justify-content:flex-end;
       font-size:11px;
-      color:#374151;
+      color:${grayText};
     }
     .signature b{color:#111827}
 
@@ -874,10 +941,10 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
  * Template 3: Salford & Co. Olive Style - Dark gray with olive green
  * Exact HTML from user's third template
  */
-function getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes }) {
-  // Use olive green as accent if available, otherwise use accent color
-  const olive = accent || '#9bb42f';
-  const dark = primary || '#2f2f2f';
+function getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, itemsRows, paymentNotes, primary, secondary, accent, text, background, border, tableHeader, tableRowAlt, muted, lightText, darkText, adjustColorBrightness, hexToRgba }) {
+  // Use ONLY logo colors - create variations
+  const olive = accent || primary; // Use accent or fallback to primary
+  const dark = primary; // Use primary from logo
 
   // Extract payment details - only use actual data
   const paymentLines = paymentNotes.split('<br>').filter(l => l.trim());
@@ -907,7 +974,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       --dark:${dark};
       --olive:${olive};
       --ink:${text};
-      --muted:#6b7280;
+      --muted:${mutedColor};
       --line:${border};
       --soft:${tableRowAlt};
     }
@@ -916,7 +983,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     body{
       margin:0;
       padding:32px;
-      background:#f5f6fb;
+      background:${bgLight};
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--ink);
     }
@@ -925,8 +992,8 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       width: 860px;
       max-width: 100%;
       margin: 0 auto;
-      background:#fff;
-      border:1px solid #d7dbe3;
+      background:${pageBg};
+      border:1px solid ${pageBorder};
       border-radius:16px;
       overflow:hidden;
       position:relative;
@@ -936,7 +1003,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     .top-band{
       position:relative;
       height:86px;
-      background:#fff;
+      background:${pageBg};
     }
 
     .brand-pill{
@@ -951,14 +1018,14 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       align-items:center;
       gap:12px;
       padding:14px 16px;
-      color:#fff;
+      color:${whiteText};
     }
 
     .leaf{
       width:34px;
       height:34px;
       border-radius:10px;
-      background:rgba(255,255,255,.08);
+      background:${whiteRgba08};
       display:grid;
       place-items:center;
       flex:0 0 auto;
@@ -973,7 +1040,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     }
     .brand-text .tag{
       font-size:9px;
-      color:rgba(255,255,255,.65);
+      color:${whiteRgba65};
       letter-spacing:.12em;
       text-transform:uppercase;
       margin-top:3px;
@@ -986,7 +1053,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       top:10px;
       width: 280px;
       height:70px;
-      background:#fff;
+      background:${pageBg};
       border:1px solid #eef0f4;
       border-radius:18px;
       display:flex;
@@ -995,7 +1062,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       font-size:28px;
       font-weight:900;
       letter-spacing:.06em;
-      color:#111827;
+      color:${veryDark || darkText};
       box-shadow: 0 8px 16px rgba(17,24,39,.06);
     }
 
@@ -1016,13 +1083,13 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       font-size:11px;
       letter-spacing:.06em;
       text-transform:uppercase;
-      color:#374151;
+      color:${grayText};
       font-weight:900;
     }
 
     .meta .small{
       font-size:11px;
-      color:#374151;
+      color:${grayText};
       line-height:1.55;
     }
     .meta .small b{color:#111827}
@@ -1030,7 +1097,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     .meta-left .invno{
       margin-top:8px;
       font-size:12px;
-      color:#111827;
+      color:${veryDark || darkText};
       font-weight:900;
       letter-spacing:.03em;
     }
@@ -1055,7 +1122,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
 
     thead th{
       background:var(--olive);
-      color:#111827;
+      color:${veryDark || darkText};
       padding:9px 10px;
       text-align:left;
       font-weight:900;
@@ -1066,8 +1133,8 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     tbody td{
       padding:9px 10px;
       border-top:1px solid #eef0f4;
-      background:#fff;
-      color:#111827;
+      background:${pageBg};
+      color:${veryDark || darkText};
     }
     tbody tr:nth-child(even) td{background:#fafafa}
 
@@ -1090,7 +1157,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       font-size:11px;
       letter-spacing:.06em;
       text-transform:uppercase;
-      color:#374151;
+      color:${grayText};
       font-weight:900;
     }
 
@@ -1099,7 +1166,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       grid-template-columns: 92px 1fr;
       gap:6px 10px;
       font-size:11px;
-      color:#374151;
+      color:${grayText};
       line-height:1.35;
     }
     .notes .grid .k{color:var(--muted); font-weight:800}
@@ -1120,7 +1187,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       width: 100%;
       max-width: 300px;
       margin-left:auto;
-      background:#fff;
+      background:${pageBg};
     }
 
     .totals .row{
@@ -1141,7 +1208,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     .totals .due strong{color:#111827}
     .totals .due .amount{
       font-weight:1000;
-      color:#111827;
+      color:${veryDark || darkText};
     }
 
     /* Signature */
@@ -1174,7 +1241,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     }
     .sig .name{
       font-size:11px;
-      color:#374151;
+      color:${grayText};
       text-align:right;
       line-height:1.2;
     }
@@ -1184,7 +1251,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     .footer{
       margin-top:16px;
       background:var(--dark);
-      color:#fff;
+      color:${whiteText};
       padding:14px 26px;
       text-align:center;
       font-size:11px;
@@ -1201,7 +1268,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       margin:0;
       display:block;
       font-size:10.5px;
-      color:rgba(255,255,255,.75);
+      color:${whiteRgba75};
     }
 
     @media print{
@@ -1306,11 +1373,24 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
  * Template 4: Studio Shodwe Style - Red and navy with curved header
  * Exact HTML from user's fourth template
  */
-function getTemplate4({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes }) {
-  // Use red as accent, navy as primary
-  const navy = primary || '#0f2b46';
-  const navy2 = '#0b2238';
-  const red = accent || '#e3212b';
+function getTemplate4({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, itemsRows, paymentNotes, primary, secondary, accent, text, background, border, tableHeader, tableRowAlt, muted, lightText, darkText, adjustColorBrightness, hexToRgba }) {
+  // Use ONLY logo colors - create all color variations from logo
+  const navy = primary; // Use primary from logo
+  const navy2 = adjustColorBrightness(primary, 0.7); // Darker variation of primary
+  const red = accent || primary; // Use accent or fallback to primary
+  const bgLight = background !== '#ffffff' ? adjustColorBrightness(background, 1.02) : adjustColorBrightness(primary, 0.98);
+  const pageBg = background;
+  const pageBorder = border;
+  const grayText = muted || adjustColorBrightness(text || primary, 0.6);
+  const whiteText = lightText || '#ffffff';
+  const mutedColor = muted;
+  const veryDark = text || primary;
+  // Pre-compute rgba values
+  const whiteRgba08 = hexToRgba(pageBg, 0.08);
+  const whiteRgba10 = hexToRgba(pageBg, 0.10);
+  const whiteRgba65 = hexToRgba(whiteText, 0.65);
+  const whiteRgba75 = hexToRgba(whiteText, 0.75);
+  const whiteRgba85 = hexToRgba(whiteText, 0.85);
 
   // Extract payment details - only use actual data
   const paymentLines = paymentNotes.split('<br>').filter(l => l.trim());
@@ -1340,16 +1420,16 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       --navy2:${navy2};
       --red:${red};
       --ink:${text};
-      --muted:#6b7280;
-      --line:#e7ebf3;
-      --soft:#f6f8fc;
+      --muted:${mutedColor};
+      --line:${border};
+      --soft:${tableRowAlt};
     }
 
     *{box-sizing:border-box}
     body{
       margin:0;
       padding:32px;
-      background:#f4f6fb;
+      background:${bgLight};
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       color:var(--ink);
     }
@@ -1359,8 +1439,8 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       width:860px;
       max-width:100%;
       margin:0 auto;
-      background:#fff;
-      border:1px solid #d7dbe3;
+      background:${pageBg};
+      border:1px solid ${pageBorder};
       border-radius:16px;
       overflow:hidden;
     }
@@ -1380,7 +1460,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       width:290px;
       height:112px;
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       padding:22px 22px;
       display:flex;
       align-items:flex-start;
@@ -1389,7 +1469,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
     .brandbar .logo{
       width:36px;height:36px;
       border-radius:50%;
-      background:rgba(255,255,255,.10);
+      background:${whiteRgba10};
       display:grid;
       place-items:center;
       flex:0 0 auto;
@@ -1422,13 +1502,13 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       font-weight:1000;
       letter-spacing:.05em;
       line-height:1;
-      color:#fff;
+      color:${whiteText};
     }
 
     .redbar .underline{
       height:3px;
       width:92px;
-      background:#fff;
+      background:${pageBg};
       border-radius:999px;
       margin:12px 0 14px;
       opacity:.95;
@@ -1439,7 +1519,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       grid-template-columns: 1fr 1fr;
       gap:10px 26px;
       max-width: 390px;
-      color:#fff;
+      color:${whiteText};
       font-size:11px;
       opacity:.95;
     }
@@ -1463,7 +1543,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       right:26px;
       bottom:18px;
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       border-radius:999px;
       padding:10px 18px;
       min-width:240px;
@@ -1540,7 +1620,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
     }
     .thead div{
       padding:10px 14px;
-      color:#fff;
+      color:${whiteText};
       font-size:11px;
       font-weight:900;
       letter-spacing:.05em;
@@ -1562,7 +1642,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       padding:10px 14px;
       border-top:1px solid #eef1f6;
       font-size:12px;
-      background:#fff;
+      background:${pageBg};
       align-items:center;
     }
     .row:first-child{border-top:none;}
@@ -1581,7 +1661,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
 
     .bullets{
       font-size:11px;
-      color:#374151;
+      color:${grayText};
     }
     .bullet{
       display:flex;
@@ -1601,7 +1681,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       font-weight:900;
       letter-spacing:.06em;
       text-transform:uppercase;
-      color:#111827;
+      color:${veryDark || darkText};
     }
     .bullets b{font-weight:900; color:#111827;}
 
@@ -1616,7 +1696,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       border-radius:12px;
       overflow:hidden;
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       box-shadow:0 10px 20px rgba(15,23,42,.12);
     }
     .totals .r{
@@ -1648,7 +1728,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
     /* bottom navy footer */
     .footer{
       background:var(--navy);
-      color:#fff;
+      color:${whiteText};
       padding:14px 22px;
       display:flex;
       justify-content:space-between;
