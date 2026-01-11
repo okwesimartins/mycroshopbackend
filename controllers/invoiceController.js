@@ -193,17 +193,23 @@ async function getAllInvoices(req, res) {
       };
     });
 
-    // Calculate pagination metadata
-    const totalPages = Math.ceil(count / limit);
+    // Filter out invoices where both preview_url and pdf_url are null
+    const validInvoices = invoicesWithPreview.filter(invoice => {
+      return invoice.preview_url !== null || invoice.pdf_url !== null;
+    });
+
+    // Calculate pagination metadata based on valid invoices
+    const validCount = validInvoices.length;
+    const totalPages = Math.ceil(validCount / limit);
     const hasNextPage = page < totalPages;
     const hasPrevPage = page > 1;
 
     res.json({
       success: true,
       data: {
-        invoices: invoicesWithPreview,
+        invoices: validInvoices,
         pagination: {
-          total: count,
+          total: validCount,
           page: page,
           limit: limit,
           totalPages: totalPages,
@@ -1004,6 +1010,15 @@ async function getInvoiceById(req, res) {
       console.error('Error fetching preview URL and PDF URL:', previewError);
       console.error('Preview error stack:', previewError.stack);
       // Continue without preview URL if query fails
+    }
+
+    // Check if both preview_url and pdf_url are null - if so, return error
+    if (previewUrl === null && pdfUrl === null) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invoice templates not found. Preview and PDF URLs are not available for this invoice.',
+        error: 'Both preview_url and pdf_url are null. The invoice template may not have been generated yet.'
+      });
     }
 
     // Add preview URL and PDF URL to invoice object
