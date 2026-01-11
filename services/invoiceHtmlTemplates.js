@@ -32,10 +32,10 @@ function getInvoiceTemplate(templateId, data) {
   // Currency symbol
   const currency = invoice?.currency_symbol || (invoice?.currency === 'USD' ? '$' : invoice?.currency === 'GBP' ? '£' : invoice?.currency === 'EUR' ? '€' : invoice?.currency === 'NGN' ? '₦' : '$');
 
-  // Business info
-  const businessName = store?.name || 'Company Name';
-  const businessTagline = store?.description || 'Creative Company';
-  const customerName = customer?.name || 'Customer';
+  // Business info - ONLY use actual data, no defaults
+  const businessName = store?.name || '';
+  const businessTagline = store?.description || '';
+  const customerName = customer?.name || '';
   const customerAddress = [customer?.address, customer?.city, customer?.state, customer?.country].filter(Boolean).join(', ');
   const customerEmail = customer?.email || '';
   const customerPhone = customer?.phone || '';
@@ -60,16 +60,16 @@ function getInvoiceTemplate(templateId, data) {
   // Generate items rows
   const itemsRows = items.map(item => `
     <tr>
-      <td>${escapeHtml(item.item_name || 'Item')}</td>
+      <td>${escapeHtml(item.item_name || item.name || '')}</td>
       <td class="col-qty">${Number(item.quantity || 0).toLocaleString()}</td>
       <td class="col-price">${currency} ${Number(item.unit_price || 0).toFixed(2)}</td>
       <td class="col-total">${currency} ${Number(item.total || 0).toFixed(2)}</td>
     </tr>
   `).join('');
 
-  // Payment notes
+  // Payment notes - only use actual notes, no defaults
   const notes = invoice?.notes || '';
-  const paymentNotes = notes.split('\n').filter(line => line.trim()).join('<br>') || `Bank Name: ${escapeHtml(store?.name || 'Bank Name')}<br>Account No: 1234567890`;
+  const paymentNotes = notes.split('\n').filter(line => line.trim()).join('<br>') || '';
 
   switch (templateId) {
     case 'template_1':
@@ -366,20 +366,20 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
         <div class="title">INVOICE</div>
       </div>
 
-      <div class="brand">
-        ${logoHtml}
-        <div>
-          <div class="brand-name">${escapeHtml(businessName)}</div>
-          <div class="brand-tag">${escapeHtml(businessTagline)}</div>
+        <div class="brand">
+          ${logoHtml}
+          ${(businessName || businessTagline) ? `<div>
+            ${businessName ? `<div class="brand-name">${escapeHtml(businessName)}</div>` : ''}
+            ${businessTagline ? `<div class="brand-tag">${escapeHtml(businessTagline)}</div>` : ''}
+          </div>` : ''}
         </div>
-      </div>
     </div>
 
     <div class="content">
       <div class="meta">
         <div>
           <div class="label">Invoice to :</div>
-          <div class="big">${escapeHtml(customerName)}</div>
+          ${customerName ? `<div class="big">${escapeHtml(customerName)}</div>` : '<div class="big"></div>'}
         </div>
 
         <div class="right">
@@ -408,10 +408,10 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
       </table>
 
       <div class="bottom">
-        <div class="payment">
+        ${paymentNotes ? `<div class="payment">
           <h4>Payment Method</h4>
           <p>${paymentNotes}</p>
-        </div>
+        </div>` : '<div></div>'}
 
         <div class="summary">
           <div class="summary-row"><span>Sub-total :</span><span>${currency} ${subtotal.toLocaleString()}</span></div>
@@ -434,11 +434,11 @@ function getTemplate1({ invoice, customer, store, items, logoHtml, businessName,
  * Exact HTML from user's second template
  */
 function getTemplate2({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, discount, primary, accent, text, tableHeader, tableRowAlt, border, itemsRows, paymentNotes }) {
-  // Extract payment details from notes
-  const paymentLines = paymentNotes.split('<br>');
-  const accountNo = paymentLines.find(l => l.toLowerCase().includes('account'))?.split(':')[1]?.trim() || '123-456-7890';
-  const accountName = customerName;
-  const branchName = businessName;
+  // Extract payment details from notes - only use actual data
+  const paymentLines = paymentNotes.split('<br>').filter(l => l.trim());
+  const accountNo = paymentLines.find(l => l.toLowerCase().includes('account'))?.split(':')[1]?.trim() || '';
+  const accountName = customerName || '';
+  const branchName = businessName || '';
 
   return `<!doctype html>
 <html lang="en">
@@ -766,14 +766,13 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       <div class="header-grid">
         <div class="brand">
           ${logoHtml}
-          <div>
-            <div class="brand-name">${escapeHtml(businessName)}</div>
-            <div class="brand-sub">
-              Invoice To<br>
-              <b>${escapeHtml(customerName)}</b><br>
-              ${escapeHtml(businessTagline)}
-            </div>
-          </div>
+          ${(businessName || customerName || businessTagline) ? `<div>
+            ${businessName ? `<div class="brand-name">${escapeHtml(businessName)}</div>` : ''}
+            ${(customerName || businessTagline) ? `<div class="brand-sub">
+              ${customerName ? `Invoice To<br><b>${escapeHtml(customerName)}</b>` : ''}${customerName && businessTagline ? '<br>' : ''}
+              ${businessTagline ? escapeHtml(businessTagline) : ''}
+            </div>` : ''}
+          </div>` : ''}
         </div>
 
         <div class="invoice-title">
@@ -791,7 +790,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
       <div class="left">
         <div class="pin">📍</div>
         <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-          ${escapeHtml(customerAddress || '123 Anywhere St., Any City, ST 12345')}
+          ${customerAddress ? escapeHtml(customerAddress) : ''}
         </div>
       </div>
       <div class="slashes" aria-hidden="true"><span></span><span></span><span></span></div>
@@ -802,18 +801,19 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
         <div class="card">
           <div class="k-title">Contact</div>
           <div class="kv">
-            <div class="k">Phone:</div><div class="v">${escapeHtml(customerPhone || '+123-456-7890')}</div>
-            <div class="k">Email:</div><div class="v">${escapeHtml(customerEmail || 'hello@realyfreestate.com')}</div>
-            <div class="k">Address:</div><div class="v">${escapeHtml(customerAddress || '123 Anywhere St., Any City')}</div>
+            ${customerPhone ? `<div class="k">Phone:</div><div class="v">${escapeHtml(customerPhone)}</div>` : ''}
+            ${customerEmail ? `<div class="k">Email:</div><div class="v">${escapeHtml(customerEmail)}</div>` : ''}
+            ${customerAddress ? `<div class="k">Address:</div><div class="v">${escapeHtml(customerAddress)}</div>` : ''}
           </div>
         </div>
 
         <div class="card">
           <div class="k-title">Payment Method</div>
           <div class="kv">
-            <div class="k">Account No:</div><div class="v">${escapeHtml(accountNo)}</div>
-            <div class="k">Account Name:</div><div class="v">${escapeHtml(accountName)}</div>
-            <div class="k">Branch Name:</div><div class="v">${escapeHtml(branchName)}</div>
+            ${accountNo ? `<div class="k">Account No:</div><div class="v">${escapeHtml(accountNo)}</div>` : ''}
+            ${accountName ? `<div class="k">Account Name:</div><div class="v">${escapeHtml(accountName)}</div>` : ''}
+            ${branchName ? `<div class="k">Branch Name:</div><div class="v">${escapeHtml(branchName)}</div>` : ''}
+            ${!accountNo && !accountName && !branchName && paymentNotes ? `<div class="v">${paymentNotes}</div>` : ''}
           </div>
         </div>
       </div>
@@ -841,9 +841,9 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
           <div class="thanks">THANK YOU FOR YOUR BUSINESS</div>
 
           <div class="contact-mini">
-            📞 ${escapeHtml(customerPhone || '+123-456-7890')}<br>
-            🌐 ${escapeHtml(store?.website || 'www.realyfreestate.com')}<br>
-            📍 ${escapeHtml(customerAddress || '123 Anywhere St., Any City, ST 12345')}
+            ${customerPhone ? `📞 ${escapeHtml(customerPhone)}<br>` : ''}
+            ${store?.website ? `🌐 ${escapeHtml(store.website)}<br>` : ''}
+            ${customerAddress ? `📍 ${escapeHtml(customerAddress)}` : ''}
           </div>
         </div>
 
@@ -855,12 +855,11 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
             <div class="row total"><span>Total:</span><span>${currency} ${invoiceTotal.toFixed(2)}</span></div>
           </div>
 
-          <div class="signature">
+          ${customerName ? `<div class="signature">
             <div>
-              <b>${escapeHtml(customerName || 'Marceline Anderson')}</b><br>
-              Administrator
+              ${customerName ? `<b>${escapeHtml(customerName)}</b>` : ''}
             </div>
-          </div>
+          </div>` : ''}
         </div>
       </div>
     </div>
@@ -880,17 +879,17 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
   const olive = accent || '#9bb42f';
   const dark = primary || '#2f2f2f';
 
-  // Extract payment details
-  const paymentLines = paymentNotes.split('<br>');
-  const bankName = paymentLines.find(l => l.toLowerCase().includes('bank'))?.split(':')[1]?.trim() || `${businessName} Bank`;
-  const accountName = paymentLines.find(l => l.toLowerCase().includes('account name'))?.split(':')[1]?.trim() || customerName;
-  const accountNumber = paymentLines.find(l => l.toLowerCase().includes('account no') || l.toLowerCase().includes('account number'))?.split(':')[1]?.trim() || '123456789';
+  // Extract payment details - only use actual data
+  const paymentLines = paymentNotes.split('<br>').filter(l => l.trim());
+  const bankName = paymentLines.find(l => l.toLowerCase().includes('bank'))?.split(':')[1]?.trim() || '';
+  const accountName = paymentLines.find(l => l.toLowerCase().includes('account name'))?.split(':')[1]?.trim() || customerName || '';
+  const accountNumber = paymentLines.find(l => l.toLowerCase().includes('account no') || l.toLowerCase().includes('account number'))?.split(':')[1]?.trim() || '';
 
   // Generate numbered items rows
   const numberedItemsRows = items.map((item, index) => `
     <tr>
       <td class="no">${index + 1}</td>
-      <td class="desc">${escapeHtml(item.item_name || 'ITEM/SERVICE')}<br><span class="muted">${escapeHtml(item.description || 'Description here')}</span></td>
+      <td class="desc">${escapeHtml(item.item_name || item.name || '')}${item.description ? `<br><span class="muted">${escapeHtml(item.description)}</span>` : ''}</td>
       <td class="num">${currency} ${Number(item.unit_price || 0).toFixed(2)}</td>
       <td class="num">${Number(item.quantity || 0).toLocaleString()}</td>
       <td class="num">${currency} ${Number(item.total || 0).toFixed(2)}</td>
@@ -1215,13 +1214,13 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
 <body>
   <div class="page">
     <div class="top-band">
-      <div class="brand-pill">
-        ${logoHtml}
-        <div class="brand-text">
-          <div class="name">${escapeHtml(businessName.toUpperCase())}</div>
-          <div class="tag">${escapeHtml(businessTagline)}</div>
-        </div>
-      </div>
+      ${(logoHtml || businessName || businessTagline) ? `<div class="brand-pill">
+        ${logoHtml || '<div style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.08);display:grid;place-items:center;flex:0 0 auto;"></div>'}
+        ${(businessName || businessTagline) ? `<div class="brand-text">
+          ${businessName ? `<div class="name">${escapeHtml(businessName.toUpperCase())}</div>` : ''}
+          ${businessTagline ? `<div class="tag">${escapeHtml(businessTagline)}</div>` : ''}
+        </div>` : ''}
+      </div>` : ''}
 
       <div class="invoice-pill">INVOICE</div>
     </div>
@@ -1229,7 +1228,7 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
     <div class="content">
       <div class="meta">
         <div class="meta-left">
-          <div class="invno">INVOICE # &nbsp;${escapeHtml(invoice?.invoice_number || '001')}</div>
+          <div class="invno">INVOICE # &nbsp;${escapeHtml(invoice?.invoice_number || '')}</div>
 
           <div class="small" style="margin-top:8px;">
             <div><b>INVOICE DATE</b> &nbsp;&nbsp;|&nbsp;&nbsp; ${escapeHtml(invoice?.issue_date || '')}</div>
@@ -1240,9 +1239,9 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
         <div class="meta-right">
           <h4>Bill To</h4>
           <div class="small">
-            <b>${escapeHtml(customerName)}</b><br>
-            ${escapeHtml(customerAddress || '123 Anywhere St., Any City, ST 12345')}<br>
-            ${escapeHtml(customerPhone || '123-456-7890')}
+            ${customerName ? `<b>${escapeHtml(customerName)}</b><br>` : ''}
+            ${customerAddress ? escapeHtml(customerAddress) + '<br>' : ''}
+            ${customerPhone ? escapeHtml(customerPhone) : ''}
           </div>
         </div>
       </div>
@@ -1265,11 +1264,12 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
       <div class="lower">
         <div class="notes">
           <h4>Payment Method</h4>
-          <div class="grid">
-            <div class="k">Bank</div><div class="v">${escapeHtml(bankName)}</div>
-            <div class="k">Account Name</div><div class="v">${escapeHtml(accountName)}</div>
-            <div class="k">Account Number</div><div class="v">${escapeHtml(accountNumber)}</div>
-          </div>
+          ${(bankName || accountName || accountNumber || paymentNotes) ? `<div class="grid">
+            ${bankName ? `<div class="k">Bank</div><div class="v">${escapeHtml(bankName)}</div>` : ''}
+            ${accountName ? `<div class="k">Account Name</div><div class="v">${escapeHtml(accountName)}</div>` : ''}
+            ${accountNumber ? `<div class="k">Account Number</div><div class="v">${escapeHtml(accountNumber)}</div>` : ''}
+            ${paymentNotes && !bankName && !accountName && !accountNumber ? `<div class="v">${paymentNotes}</div>` : ''}
+          </div>` : ''}
 
           <h4 style="margin-top:12px;">Term and Conditions</h4>
           <div class="terms">
@@ -1293,9 +1293,9 @@ function getTemplate3({ invoice, customer, store, items, logoHtml, businessName,
 
     <div class="footer">
       <div class="thanks">THANK YOU FOR YOUR BUSINESS</div>
-      <div class="meta">
-        ${escapeHtml(customerAddress || '123 Anywhere St., Any City')} • ${escapeHtml(customerPhone || '123-456-7890')} • ${escapeHtml(customerEmail || 'hello@reallygreatsite.com')}
-      </div>
+      ${(customerAddress || customerPhone || customerEmail) ? `<div class="meta">
+        ${[customerAddress, customerPhone, customerEmail].filter(Boolean).join(' • ')}
+      </div>` : ''}
     </div>
   </div>
 </body>
@@ -1312,18 +1312,18 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
   const navy2 = '#0b2238';
   const red = accent || '#e3212b';
 
-  // Extract payment details
-  const paymentLines = paymentNotes.split('<br>');
-  const bankName = paymentLines.find(l => l.toLowerCase().includes('bank'))?.split(':')[1]?.trim() || 'Reallygreatsite';
-  const accountNo = paymentLines.find(l => l.toLowerCase().includes('account no') || l.toLowerCase().includes('account number'))?.split(':')[1]?.trim() || '1234567890';
+  // Extract payment details - only use actual data
+  const paymentLines = paymentNotes.split('<br>').filter(l => l.trim());
+  const bankName = paymentLines.find(l => l.toLowerCase().includes('bank'))?.split(':')[1]?.trim() || '';
+  const accountNo = paymentLines.find(l => l.toLowerCase().includes('account no') || l.toLowerCase().includes('account number'))?.split(':')[1]?.trim() || '';
 
-  // Generate items rows for this template format
+  // Generate items rows for this template format - only use actual item data
   const itemRows = items.map((item, index) => `
     <div class="row">
-      <div class="desc">Item ${String(index + 1).padStart(2, '0')}</div>
+      <div class="desc">${escapeHtml(item.item_name || item.name || '')}</div>
       <div class="num">${Number(item.quantity || 0).toLocaleString()}</div>
-      <div class="num">${currency} ${Number(item.unit_price || 0).toFixed(2)}</div>
-      <div class="num money">${currency} ${Number(item.total || 0).toFixed(2)}</div>
+      <div class="num">${currency} ${Number(item.unit_price || item.price || 0).toFixed(2)}</div>
+      <div class="num money">${currency} ${Number(item.total || (item.quantity || 0) * (item.unit_price || item.price || 0)).toFixed(2)}</div>
     </div>
   `).join('');
 
@@ -1683,10 +1683,10 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
 
     <!-- HEADER -->
     <div class="header-row">
-      <div class="brandbar">
-        ${logoHtml}
-        <div class="name">${escapeHtml(businessName.toUpperCase())}</div>
-      </div>
+      ${(logoHtml || businessName) ? `<div class="brandbar">
+        ${logoHtml || '<div style="width:36px;height:36px;"></div>'}
+        ${businessName ? `<div class="name">${escapeHtml(businessName.toUpperCase())}</div>` : ''}
+      </div>` : '<div class="brandbar"></div>'}
 
       <div class="redbar">
         <h1>INVOICE</h1>
@@ -1695,7 +1695,7 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
         <div class="meta-grid">
           <div>
             <div class="k">Invoice No</div>
-            <div class="v">${escapeHtml(invoice?.invoice_number || 'INV-1234567890')}</div>
+            <div class="v">${escapeHtml(invoice?.invoice_number || '')}</div>
           </div>
           <div>
             <div class="k">Invoice Date</div>
@@ -1714,11 +1714,11 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
     <div class="content">
       <div class="invoice-to">
         <div class="label">Invoice to:</div>
-        <div class="who">${escapeHtml(customerName)}</div>
-        <div class="muted">
-          Phone: ${escapeHtml(customerPhone || '+123-456-7890')}<br>
-          Email: ${escapeHtml(customerEmail || 'hello@reallygreatsite.com')}
-        </div>
+        ${customerName ? `<div class="who">${escapeHtml(customerName)}</div>` : ''}
+        ${(customerPhone || customerEmail) ? `<div class="muted">
+          ${customerPhone ? `Phone: ${escapeHtml(customerPhone)}` : ''}${customerPhone && customerEmail ? '<br>' : ''}
+          ${customerEmail ? `Email: ${escapeHtml(customerEmail)}` : ''}
+        </div>` : ''}
       </div>
 
       <div class="thead">
@@ -1734,14 +1734,15 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
 
       <div class="mid">
         <div class="bullets">
-          <div class="bullet">
+          ${(bankName || accountNo || paymentNotes) ? `<div class="bullet">
             <span class="dot"></span>
             <div>
               <h4>Payment Method:</h4>
-              <div><b>Bank Name:</b> ${escapeHtml(bankName)}</div>
-              <div><b>Account No:</b> ${escapeHtml(accountNo)}</div>
+              ${bankName ? `<div><b>Bank Name:</b> ${escapeHtml(bankName)}</div>` : ''}
+              ${accountNo ? `<div><b>Account No:</b> ${escapeHtml(accountNo)}</div>` : ''}
+              ${paymentNotes && !bankName && !accountNo ? `<div>${paymentNotes}</div>` : ''}
             </div>
-          </div>
+          </div>` : ''}
 
           <div class="bullet">
             <span class="dot"></span>
@@ -1767,11 +1768,11 @@ function getTemplate4({ invoice, customer, store, items, logoHtml, businessName,
       </div>
     </div>
 
-    <div class="footer">
-      <div class="item"><span class="ficon">📞</span><span>${escapeHtml(customerPhone || '+123-456-7890')}</span></div>
-      <div class="item"><span class="ficon">🌐</span><span>${escapeHtml(store?.website || 'reallygreatsite.com')}</span></div>
-      <div class="item"><span class="ficon">✉</span><span>${escapeHtml(customerEmail || 'hello@reallygreatsite.com')}</span></div>
-    </div>
+    ${(customerPhone || store?.website || customerEmail) ? `<div class="footer">
+      ${customerPhone ? `<div class="item"><span class="ficon">📞</span><span>${escapeHtml(customerPhone)}</span></div>` : ''}
+      ${store?.website ? `<div class="item"><span class="ficon">🌐</span><span>${escapeHtml(store.website)}</span></div>` : ''}
+      ${customerEmail ? `<div class="item"><span class="ficon">✉</span><span>${escapeHtml(customerEmail)}</span></div>` : ''}
+    </div>` : ''}
   </div>
 </body>
 </html>`;
