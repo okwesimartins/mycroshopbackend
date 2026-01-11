@@ -345,33 +345,16 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       try {
         console.log(`    - Rendering HTML for template ${template.id}...`);
         
-        let html;
-        // Use AI-generated templates for better, dynamic designs
-        if (template.source === 'ai_generated' && template.html) {
-          // Use pre-generated AI template
-          html = template.html;
-        } else if (template.id && template.id.startsWith('ai_template_')) {
-          // Generate AI template on the fly
-          const aiTemplateGenerator = require('../services/aiInvoiceTemplateGenerator');
-          html = await aiTemplateGenerator.generateAITemplate({
-            invoice: invoiceWithLogo,
-            customer: customer || {},
-            store: store || {},
-            items: items,
-            logoUrl: logoDataUri || logoUrl || null,
-            colors: brandColors
-          });
-        } else {
-          // Fallback to static HTML templates
-          html = invoiceHtmlTemplates.getInvoiceTemplate(template.id, {
-            invoice: invoiceWithLogo,
-            customer: customer || {},
-            store: store || {},
-            items: items,
-            logoUrl: logoDataUri || logoUrl || null,
-            colors: brandColors
-          });
-        }
+        // Use default template with logo colors
+        const defaultTemplate = require('../services/defaultInvoiceTemplate');
+        const html = defaultTemplate.generateDefaultTemplate({
+          invoice: invoiceWithLogo,
+          customer: customer || {},
+          store: store || {},
+          items: items,
+          logoUrl: logoDataUri || logoUrl || null,
+          colors: brandColors
+        });
         
         console.log(`    - HTML rendered (${html.length} chars). Generating PDF and preview...`);
         
