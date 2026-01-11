@@ -501,6 +501,7 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
   const pageBorder = border;
   const grayText = muted || adjustColorBrightness(text || primary, 0.6);
   const whiteText = lightText || '#ffffff';
+  const veryDark = text || primary;
   // Pre-compute rgba values
   const whiteRgba08 = hexToRgba(pageBg, 0.08);
   const whiteRgba65 = hexToRgba(whiteText, 0.65);
