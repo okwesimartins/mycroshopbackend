@@ -130,7 +130,7 @@ async function getAllInvoices(req, res) {
           return queryParams[idx] !== undefined ? `'${queryParams[idx]}'` : '?';
         })}`);
         
-        const [templateResults] = await req.db.sequelize.query(templateQuery, {
+        const [templateResults] = await req.db.query(templateQuery, {
           replacements: queryParams
         });
         
@@ -147,7 +147,7 @@ async function getAllInvoices(req, res) {
           const debugQuery = isFreePlan
             ? `SELECT invoice_id, preview_url, pdf_url, tenant_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')})`
             : `SELECT invoice_id, preview_url, pdf_url FROM invoice_templates WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`;
-          const [debugResults] = await req.db.sequelize.query(debugQuery, {
+          const [debugResults] = await req.db.query(debugQuery, {
             replacements: queryParams
           });
           console.log(`⚠️ DEBUG: Found ${debugResults.length} total template records (including NULL preview_url)`);
@@ -936,7 +936,7 @@ async function getInvoiceById(req, res) {
         return queryParams[idx] !== undefined ? `'${queryParams[idx]}'` : '?';
       })}`);
       
-      const [templateResults] = await req.db.sequelize.query(templateQuery, {
+      const [templateResults] = await req.db.query(templateQuery, {
         replacements: queryParams
       });
       
@@ -947,7 +947,7 @@ async function getInvoiceById(req, res) {
         const debugQuery = isFreePlan
           ? `SELECT invoice_id, preview_url, pdf_url, tenant_id, is_selected FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ?`
           : `SELECT invoice_id, preview_url, pdf_url, is_selected FROM invoice_templates WHERE invoice_id = ?`;
-        const [debugResults] = await req.db.sequelize.query(debugQuery, {
+        const [debugResults] = await req.db.query(debugQuery, {
           replacements: queryParams
         });
         console.log(`⚠️ DEBUG: Found ${debugResults.length} total template records for invoice ${invoice.id} (including NULL preview_url)`);
@@ -1011,7 +1011,7 @@ async function getInvoiceById(req, res) {
                LIMIT 1`;
           
           const retryParams = isFreePlan ? [tenantId, invoice.id] : [invoice.id];
-          const [retryResults] = await req.db.sequelize.query(retryQuery, {
+          const [retryResults] = await req.db.query(retryQuery, {
             replacements: retryParams
           });
           
