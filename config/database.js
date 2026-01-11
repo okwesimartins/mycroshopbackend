@@ -415,9 +415,9 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     // If there's an error, try to fix the template_data column specifically
     console.warn('Invoice template columns setup error:', error.message);
     // Try to modify template_data to be nullable (it might exist with NOT NULL constraint)
-    try {
-      await connection.query(`
-        ALTER TABLE invoices 
+  try {
+    await connection.query(`
+      ALTER TABLE invoices 
         MODIFY COLUMN template_data JSON NULL
       `);
       console.log('Modified template_data to nullable');
@@ -960,6 +960,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       template_name VARCHAR(255),
       template_data JSON NOT NULL,
       preview_url VARCHAR(500),
+      pdf_url VARCHAR(500),
       is_selected BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       ${invoiceTemplateTenantIndex}
@@ -967,9 +968,32 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       INDEX idx_invoice_id (invoice_id),
       INDEX idx_template_id (template_id),
       INDEX idx_is_selected (is_selected),
-      UNIQUE KEY unique_invoice_template (invoice_id, template_id)
+      UNIQUE KEY unique_invoice_template (invoice_id, template_id${isSharedDb ? ', tenant_id' : ''})
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  // Add pdf_url column if it doesn't exist (for existing databases)
+  try {
+    const [columns] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'invoice_templates' 
+      AND COLUMN_NAME = 'pdf_url'
+    `);
+    
+    if (!columns || columns.length === 0) {
+      console.log('Adding pdf_url column to invoice_templates table...');
+      await connection.query(`
+        ALTER TABLE invoice_templates 
+        ADD COLUMN pdf_url VARCHAR(500) NULL AFTER preview_url
+      `);
+      console.log('✅ pdf_url column added to invoice_templates table');
+    }
+  } catch (alterError) {
+    console.warn('Could not add pdf_url column to invoice_templates:', alterError.message);
+    // Continue - column might already exist or there might be a permission issue
+  }
 
   // All online store tables are now complete!
   // Note: Additional enterprise-only tables (roles, suppliers, purchase_orders, pos_transactions, etc.)
@@ -1091,7 +1115,6 @@ async function migrateFreeUserToEnterprise(tenantId) {
     throw error;
   }
 }
-
 
 module.exports = {
   mainSequelize,

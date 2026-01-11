@@ -105,6 +105,29 @@ async function getAllInvoices(req, res) {
           console.warn('Could not determine subscription plan, defaulting to enterprise', err);
         }
         
+        // Ensure pdf_url column exists (for existing databases)
+        try {
+          const [pdfUrlColumn] = await req.db.query(`
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = 'invoice_templates' 
+            AND COLUMN_NAME = 'pdf_url'
+          `);
+          
+          if (!pdfUrlColumn || pdfUrlColumn.length === 0) {
+            console.log('Adding pdf_url column to invoice_templates table...');
+            await req.db.query(`
+              ALTER TABLE invoice_templates 
+              ADD COLUMN pdf_url VARCHAR(500) NULL AFTER preview_url
+            `);
+            console.log('✅ pdf_url column added to invoice_templates table');
+          }
+        } catch (alterError) {
+          console.warn('Could not check/add pdf_url column:', alterError.message);
+          // Continue - column might already exist
+        }
+        
         console.log(`Fetching preview URLs and PDF URLs for ${invoiceIds.length} invoices (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
         console.log(`Invoice IDs to query: ${invoiceIds.join(', ')}`);
         
@@ -912,6 +935,29 @@ async function getInvoiceById(req, res) {
       } catch (err) {
         urlError = `Failed to determine subscription plan: ${err.message}`;
         console.warn('Could not determine subscription plan, defaulting to enterprise', err);
+      }
+      
+      // Ensure pdf_url column exists (for existing databases)
+      try {
+        const [pdfUrlColumn] = await req.db.query(`
+          SELECT COLUMN_NAME 
+          FROM INFORMATION_SCHEMA.COLUMNS 
+          WHERE TABLE_SCHEMA = DATABASE() 
+          AND TABLE_NAME = 'invoice_templates' 
+          AND COLUMN_NAME = 'pdf_url'
+        `);
+        
+        if (!pdfUrlColumn || pdfUrlColumn.length === 0) {
+          console.log('Adding pdf_url column to invoice_templates table...');
+          await req.db.query(`
+            ALTER TABLE invoice_templates 
+            ADD COLUMN pdf_url VARCHAR(500) NULL AFTER preview_url
+          `);
+          console.log('✅ pdf_url column added to invoice_templates table');
+        }
+      } catch (alterError) {
+        console.warn('Could not check/add pdf_url column:', alterError.message);
+        // Continue - column might already exist
       }
       
       console.log(`Fetching preview URL and PDF URL for invoice ${invoice.id} (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
