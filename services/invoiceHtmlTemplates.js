@@ -943,9 +943,21 @@ function getTemplate2({ invoice, customer, store, items, logoHtml, businessName,
  * Exact HTML from user's third template
  */
 function getTemplate3({ invoice, customer, store, items, logoHtml, businessName, businessTagline, customerName, customerAddress, customerEmail, customerPhone, currency, subtotal, tax, invoiceTotal, itemsRows, paymentNotes, primary, secondary, accent, text, background, border, tableHeader, tableRowAlt, muted, lightText, darkText, adjustColorBrightness, hexToRgba }) {
-  // Use ONLY logo colors - create variations
+  // Use ONLY logo colors - create all color variations from logo
   const olive = accent || primary; // Use accent or fallback to primary
   const dark = primary; // Use primary from logo
+  const bgLight = background !== '#ffffff' ? adjustColorBrightness(background, 1.02) : adjustColorBrightness(primary, 0.98);
+  const pageBg = background;
+  const pageBorder = border;
+  const grayText = muted || adjustColorBrightness(text || primary, 0.6);
+  const whiteText = lightText || '#ffffff';
+  const mutedColor = muted;
+  const veryDark = text || primary;
+  // Pre-compute rgba values
+  const whiteRgba08 = hexToRgba(pageBg, 0.08);
+  const whiteRgba65 = hexToRgba(whiteText, 0.65);
+  const whiteRgba75 = hexToRgba(whiteText, 0.75);
+  const whiteRgba85 = hexToRgba(whiteText, 0.85);
 
   // Extract payment details - only use actual data
   const paymentLines = paymentNotes.split('<br>').filter(l => l.trim());
