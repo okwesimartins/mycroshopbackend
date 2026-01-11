@@ -374,7 +374,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         const fs = require('fs');
         const path = require('path');
         
-        // If logoUrl is relative, try to read the file and convert to absolute URL
+        // If logoUrl is relative, try to read the file locally (preferred - no DNS lookup)
         if (logoUrl.startsWith('/uploads/') || logoUrl.startsWith('uploads/')) {
           const logoFilename = logoUrl.split('/').pop();
           const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
@@ -384,11 +384,18 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
             logoForColorExtraction = fs.readFileSync(logoFilePath);
             console.log(`✅ Read logo file for color extraction: ${logoFilePath} (${fs.statSync(logoFilePath).size} bytes)`);
           } else {
-            // Fallback: construct absolute URL
-            const baseUrl = process.env.BASE_URL || process.env.API_URL || process.env.BACKEND_URL || 'http://backend.mycroshop.com';
-            logoForColorExtraction = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
-            console.log(`⚠️ Logo file not found, using absolute URL for color extraction: ${logoForColorExtraction}`);
+            // File not found locally - skip color extraction to avoid DNS lookup issues
+            console.warn(`⚠️ Logo file not found at ${logoFilePath}, skipping color extraction to avoid DNS lookup`);
+            throw new Error('Logo file not found locally - skipping color extraction');
           }
+        } else if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
+          // Already an absolute URL - use as is (but this may cause DNS lookup)
+          console.log(`Using absolute URL for color extraction: ${logoUrl}`);
+          logoForColorExtraction = logoUrl;
+        } else {
+          // Invalid logo URL format - skip
+          console.warn(`⚠️ Invalid logo URL format: ${logoUrl}, skipping color extraction`);
+          throw new Error('Invalid logo URL format - skipping color extraction');
         }
         
         // Wrap color extraction in a timeout (10 seconds max - non-blocking)
@@ -483,7 +490,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       };
     }
 
-    // Convert logo URL to absolute URL or base64 data URI for Puppeteer
+    // Convert logo URL to base64 data URI for Puppeteer (prefer local file reading)
     let logoDataUri = null;
     if (logoUrl) {
       try {
@@ -494,7 +501,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         const logoFilename = logoUrl.split('/').pop();
         const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
         
-        // Check if file exists and read it as base64
+        // Check if file exists and read it as base64 (preferred - no DNS lookup)
         if (fs.existsSync(logoFilePath)) {
           const logoBuffer = fs.readFileSync(logoFilePath);
           const logoMimeType = logoUrl.endsWith('.png') ? 'image/png' :
@@ -504,17 +511,41 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           
           logoDataUri = `data:${logoMimeType};base64,${logoBuffer.toString('base64')}`;
           console.log(`✅ Converted logo to base64 data URI (${logoBuffer.length} bytes)`);
+        } else if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
+          // Already an absolute URL - use as is (may cause DNS lookup but it's already a URL)
+          logoDataUri = logoUrl;
+          console.log(`⚠️ Logo file not found locally, using absolute URL: ${logoDataUri}`);
         } else {
-          // Fallback: try to construct absolute URL if file doesn't exist locally
-          const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://backend.mycroshop.com';
-          logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
-          console.log(`⚠️ Logo file not found at ${logoFilePath}, using absolute URL: ${logoDataUri}`);
+          // Try to construct URL using request host if available, otherwise skip
+          let baseUrl = null;
+          
+          // Try to get from request headers first (most reliable)
+          if (req && req.get && req.get('host')) {
+            const protocol = req.protocol || (req.secure ? 'https' : 'http');
+            baseUrl = `${protocol}://${req.get('host')}`;
+          } else if (req && req.headers && req.headers.host) {
+            const protocol = (req.headers['x-forwarded-proto'] || 'http');
+            baseUrl = `${protocol}://${req.headers.host}`;
+          }
+          
+          // Fallback to environment variables or localhost
+          if (!baseUrl) {
+            baseUrl = process.env.BASE_URL || process.env.API_URL || process.env.BACKEND_URL || 'http://localhost:3000';
+          }
+          
+          logoDataUri = `${baseUrl}${logoUrl.startsWith('/') ? logoUrl : '/' + logoUrl}`;
+          console.log(`⚠️ Logo file not found locally, constructed URL: ${logoDataUri}`);
         }
       } catch (logoError) {
-        console.warn('Failed to convert logo to base64, using absolute URL:', logoError.message);
-        // Fallback to absolute URL
-        const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://backend.mycroshop.com';
-        logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
+        console.warn('Failed to convert logo to base64:', logoError.message);
+        // If it's already a full URL, use it; otherwise skip
+        if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
+          logoDataUri = logoUrl;
+        } else {
+          // Skip logo if we can't process it
+          logoDataUri = null;
+          console.warn('Skipping logo due to processing error');
+        }
       }
     }
 
