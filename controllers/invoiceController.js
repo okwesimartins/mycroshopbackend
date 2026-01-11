@@ -4,7 +4,7 @@ const { calculateTax, getTaxInfo } = require('../services/taxCalculator');
 const { getTenantById } = require('../config/tenant');
 const { extractColorsFromLogo, generateColorPalette } = require('../services/colorExtractionService');
 const { generateTemplateOptions } = require('../services/invoiceTemplateGenerator');
-const { renderInvoiceHtml } = require('../services/invoiceHtmlRenderer');
+const invoiceHtmlTemplates = require('../services/invoiceHtmlTemplates');
 const { generateInvoicePdfAndPreview } = require('../services/invoicePdfService');
 
 /**
@@ -345,7 +345,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       try {
         console.log(`    - Rendering HTML for template ${template.id}...`);
         // Use HTML template library instead of JSON recipe renderer
-        const html = getInvoiceTemplate(template.id, {
+        const html = invoiceHtmlTemplates.getInvoiceTemplate(template.id, {
           invoice: invoiceWithLogo,
           customer: customer || {},
           store: store || {},
