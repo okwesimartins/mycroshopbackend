@@ -2049,9 +2049,10 @@ function renderTotalsBlock(config = {}, { invoice, currency, tokens = {} }) {
     
     // Image 2: Total left, amount right
     case 'total_left_amount_right':
+      const borderColor = tokens.border || '#E5E7EB';
       return `
       <section class="section">
-        <div class="totals" style="justify-content: space-between; border-top: 1px solid ${border}; padding-top: 12px;">
+        <div class="totals" style="justify-content: space-between; border-top: 1px solid ${borderColor}; padding-top: 12px;">
           <div style="font-weight: 600; font-size: 14px;">TOTAL</div>
           <div style="font-weight: 700; font-size: 18px;">${currency} ${total.toFixed(2)}</div>
         </div>
@@ -2240,6 +2241,7 @@ function renderPaymentBlock(config = {}, { invoice, store }) {
     
     // Image 2: Payment box left, Thank you right
     case 'payment_box_left_thankyou_right':
+      const textColor2 = tokens.text || '#1F2937';
       return `
       <section class="section">
         <div class="two-column">
@@ -2248,7 +2250,7 @@ function renderPaymentBlock(config = {}, { invoice, store }) {
             ${notes ? `<div class="payment-notes">${escapeHtml(notes)}</div>` : ''}
           </div>
           <div style="text-align: right; padding-top: 16px;">
-            <div style="font-size: 14px; color: ${tokens.text || '#1F2937'}; font-style: italic;">Thank you for your business!</div>
+            <div style="font-size: 14px; color: ${textColor2}; font-style: italic;">Thank you for your business!</div>
           </div>
         </div>
       </section>
@@ -2256,6 +2258,8 @@ function renderPaymentBlock(config = {}, { invoice, store }) {
     
     // Image 3: Payment Method and Terms left, Signature right
     case 'payment_terms_left_signature_right':
+      const borderColor3 = tokens.border || '#E5E7EB';
+      const textColor3 = tokens.text || '#1F2937';
       return `
       <section class="section">
         <div class="two-column">
@@ -2267,8 +2271,8 @@ function renderPaymentBlock(config = {}, { invoice, store }) {
           </div>
           <div style="text-align: right;">
             <div style="margin-bottom: 40px;"></div>
-            <div style="border-top: 1px solid ${border}; padding-top: 4px; margin-bottom: 4px; width: 200px; margin-left: auto;"></div>
-            <div style="font-size: 12px; color: ${text};">Administrator</div>
+            <div style="border-top: 1px solid ${borderColor3}; padding-top: 4px; margin-bottom: 4px; width: 200px; margin-left: auto;"></div>
+            <div style="font-size: 12px; color: ${textColor3};">Administrator</div>
           </div>
         </div>
       </section>
