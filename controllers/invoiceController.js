@@ -92,34 +92,57 @@ async function getAllInvoices(req, res) {
     if (invoiceIds.length > 0) {
       try {
         const tenantId = req.user.tenantId;
-        const isFreePlan = req.user.subscription_plan === 'free';
+        // Get subscription plan from tenant
+        let isFreePlan = false;
+        try {
+          const tenant = await getTenantById(tenantId);
+          isFreePlan = tenant && tenant.subscription_plan === 'free';
+        } catch (err) {
+          // Default to enterprise if can't determine
+          console.warn('Could not determine subscription plan, defaulting to enterprise');
+        }
+        
+        console.log(`Fetching preview URLs for ${invoiceIds.length} invoices (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
         
         // Query invoice_templates to get preview URLs
+        // Free plan: shared database, need tenant_id filter
+        // Enterprise: separate database, no tenant_id needed
         const templateQuery = isFreePlan
           ? `SELECT invoice_id, preview_url, is_selected, created_at 
              FROM invoice_templates 
-             WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
-             AND preview_url IS NOT NULL
+             WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
+             AND preview_url IS NOT NULL AND preview_url != ''
              ORDER BY invoice_id, is_selected DESC, created_at DESC`
           : `SELECT invoice_id, preview_url, is_selected, created_at 
              FROM invoice_templates 
-             WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
-             AND preview_url IS NOT NULL
+             WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
+             AND preview_url IS NOT NULL AND preview_url != ''
              ORDER BY invoice_id, is_selected DESC, created_at DESC`;
         
-        const queryParams = isFreePlan ? invoiceIds : [tenantId, ...invoiceIds];
+        const queryParams = isFreePlan ? [tenantId, ...invoiceIds] : invoiceIds;
         const [templateResults] = await req.db.sequelize.query(templateQuery, {
           replacements: queryParams
         });
         
-        // Group by invoice_id and get the first (selected or most recent) preview URL
-        templateResults.forEach(result => {
-          if (result.preview_url && !previewUrls[result.invoice_id]) {
-            previewUrls[result.invoice_id] = result.preview_url;
-          }
-        });
+      console.log(`Found ${templateResults.length} template records with preview URLs`);
+      
+      // Group by invoice_id and get the first (selected or most recent) preview URL
+      templateResults.forEach(result => {
+        if (result.preview_url && result.preview_url.trim() !== '' && !previewUrls[result.invoice_id]) {
+          previewUrls[result.invoice_id] = result.preview_url.trim();
+        }
+      });
+      
+      console.log(`Mapped ${Object.keys(previewUrls).length} preview URLs to invoices`);
+      
+      // Log which invoices don't have preview URLs for debugging
+      const invoicesWithoutPreview = invoiceIds.filter(id => !previewUrls[id]);
+      if (invoicesWithoutPreview.length > 0) {
+        console.log(`⚠️ ${invoicesWithoutPreview.length} invoices without preview URLs: ${invoicesWithoutPreview.join(', ')}`);
+      }
       } catch (previewError) {
-        console.warn('Error fetching preview URLs:', previewError.message);
+        console.error('Error fetching preview URLs:', previewError);
+        console.error('Preview error stack:', previewError.stack);
         // Continue without preview URLs if query fails
       }
     }
@@ -813,31 +836,87 @@ async function getInvoiceById(req, res) {
     let previewUrl = null;
     try {
       const tenantId = req.user.tenantId;
-      const isFreePlan = req.user.subscription_plan === 'free';
+      // Get subscription plan from tenant
+      let isFreePlan = false;
+      try {
+        const tenant = await getTenantById(tenantId);
+        isFreePlan = tenant && tenant.subscription_plan === 'free';
+      } catch (err) {
+        console.warn('Could not determine subscription plan, defaulting to enterprise');
+      }
+      
+      console.log(`Fetching preview URL for invoice ${invoice.id} (Free plan: ${isFreePlan}, Tenant: ${tenantId})`);
       
       // Query invoice_templates to get preview URL (prefer selected template)
       const templateQuery = isFreePlan
         ? `SELECT preview_url FROM invoice_templates 
-           WHERE invoice_id = ? 
-           AND (is_selected = 1 OR is_selected IS NULL)
+           WHERE tenant_id = ? AND invoice_id = ? 
+           AND preview_url IS NOT NULL AND preview_url != ''
            ORDER BY is_selected DESC, created_at DESC 
            LIMIT 1`
         : `SELECT preview_url FROM invoice_templates 
-           WHERE tenant_id = ? AND invoice_id = ? 
-           AND (is_selected = 1 OR is_selected IS NULL)
+           WHERE invoice_id = ? 
+           AND preview_url IS NOT NULL AND preview_url != ''
            ORDER BY is_selected DESC, created_at DESC 
            LIMIT 1`;
       
-      const queryParams = isFreePlan ? [invoice.id] : [tenantId, invoice.id];
+      const queryParams = isFreePlan ? [tenantId, invoice.id] : [invoice.id];
       const [templateResults] = await req.db.sequelize.query(templateQuery, {
         replacements: queryParams
       });
       
+      console.log(`Found ${templateResults.length} template records for invoice ${invoice.id}`);
+      
       if (templateResults && templateResults.length > 0 && templateResults[0].preview_url) {
-        previewUrl = templateResults[0].preview_url;
+        const foundUrl = templateResults[0].preview_url.trim();
+        if (foundUrl !== '') {
+          previewUrl = foundUrl;
+          console.log(`✅ Preview URL found: ${previewUrl}`);
+        } else {
+          console.log(`⚠️ Preview URL exists but is empty for invoice ${invoice.id}`);
+        }
+      } else {
+        console.log(`⚠️ No preview URL found for invoice ${invoice.id} - attempting to generate preview on-the-fly...`);
+        
+        // Fallback: Try to generate preview if it doesn't exist
+        try {
+          const tenantId = req.user.tenantId;
+          console.log(`Generating preview for invoice ${invoice.id} on-the-fly...`);
+          await generateTemplatesForInvoice(invoice, tenantId, req);
+          
+          // Query again after generation
+          const retryQuery = isFreePlan
+            ? `SELECT preview_url FROM invoice_templates 
+               WHERE tenant_id = ? AND invoice_id = ? 
+               AND preview_url IS NOT NULL AND preview_url != ''
+               ORDER BY is_selected DESC, created_at DESC 
+               LIMIT 1`
+            : `SELECT preview_url FROM invoice_templates 
+               WHERE invoice_id = ? 
+               AND preview_url IS NOT NULL AND preview_url != ''
+               ORDER BY is_selected DESC, created_at DESC 
+               LIMIT 1`;
+          
+          const retryParams = isFreePlan ? [tenantId, invoice.id] : [invoice.id];
+          const [retryResults] = await req.db.sequelize.query(retryQuery, {
+            replacements: retryParams
+          });
+          
+          if (retryResults && retryResults.length > 0 && retryResults[0].preview_url) {
+            const foundUrl = retryResults[0].preview_url.trim();
+            if (foundUrl !== '') {
+              previewUrl = foundUrl;
+              console.log(`✅ Preview URL generated and found: ${previewUrl}`);
+            }
+          }
+        } catch (generateError) {
+          console.error('Error generating preview on-the-fly:', generateError);
+          // Continue without preview URL
+        }
       }
     } catch (previewError) {
-      console.warn('Error fetching preview URL:', previewError.message);
+      console.error('Error fetching preview URL:', previewError);
+      console.error('Preview error stack:', previewError.stack);
       // Continue without preview URL if query fails
     }
 
