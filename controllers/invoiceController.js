@@ -19,11 +19,23 @@ function generateInvoiceNumber() {
 
 /**
  * Get all invoices (store-specific or all stores)
+ * Supports pagination with page and limit query parameters
  */
 async function getAllInvoices(req, res) {
   try {
-    const { page = 1, limit = 50, status, customer_id, store_id, start_date, end_date, all_stores } = req.query;
+    // Parse and validate pagination parameters
+    let page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 50;
+    
+    // Validate and constrain pagination values
+    if (page < 1) page = 1;
+    if (limit < 1) limit = 50;
+    if (limit > 100) limit = 100; // Max limit to prevent performance issues
+    
     const offset = (page - 1) * limit;
+
+    // Extract filter parameters
+    const { status, customer_id, store_id, start_date, end_date, all_stores } = req.query;
 
     const where = {};
     
@@ -44,6 +56,7 @@ async function getAllInvoices(req, res) {
       if (end_date) where.issue_date[Sequelize.Op.lte] = end_date;
     }
 
+    // Fetch invoices with pagination
     const { count, rows } = await req.db.models.Invoice.findAndCountAll({
       where,
       include: [
@@ -67,10 +80,15 @@ async function getAllInvoices(req, res) {
           ]
         }
       ],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+      limit: limit,
+      offset: offset,
       order: [['created_at', 'DESC']]
     });
+
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(count / limit);
+    const hasNextPage = page < totalPages;
+    const hasPrevPage = page > 1;
 
     res.json({
       success: true,
@@ -78,9 +96,13 @@ async function getAllInvoices(req, res) {
         invoices: rows,
         pagination: {
           total: count,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          totalPages: Math.ceil(count / limit)
+          page: page,
+          limit: limit,
+          totalPages: totalPages,
+          hasNextPage: hasNextPage,
+          hasPrevPage: hasPrevPage,
+          nextPage: hasNextPage ? page + 1 : null,
+          prevPage: hasPrevPage ? page - 1 : null
         }
       }
     });
@@ -88,7 +110,8 @@ async function getAllInvoices(req, res) {
     console.error('Error getting invoices:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get invoices'
+      message: 'Failed to get invoices',
+      error: error.message
     });
   }
 }
