@@ -847,17 +847,22 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
             }
           }
         } catch (saveError) {
-          console.error(`    - ❌ Failed to save template ${template.id} to database:`, saveError.message);
-          console.error(`    Save error stack:`, saveError.stack?.split('\n').slice(0, 5).join('\n'));
+          console.error(`    - ❌ CRITICAL: Failed to save template ${template.id} to database:`, saveError.message);
+          console.error(`    Save error stack:`, saveError.stack?.split('\n').slice(0, 10).join('\n'));
           console.error(`    Save error details:`, {
             invoice_id: invoice.id,
             template_id: template.id,
             tenant_id: isFreePlan ? tenantId : 'N/A',
             preview_url: previewUrl,
             pdf_url: pdfUrl,
-            error: saveError.message
+            error: saveError.message,
+            error_code: saveError.code,
+            sql_state: saveError.sqlState
           });
-          // Don't throw - continue so invoice is still created, but log the error
+          
+          // CRITICAL: Throw error to prevent invoice creation if template cannot be saved
+          // This will cause the transaction to rollback and invoice creation to fail
+          throw new Error(`Failed to save template to database: ${saveError.message}. Invoice creation aborted.`);
         }
 
         // Validate URLs are not null before adding to results
