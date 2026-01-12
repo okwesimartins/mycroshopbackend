@@ -727,43 +727,68 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           }
           
           // Build query based on whether we're on free plan (needs tenant_id) or enterprise
-          // Use positional parameters (?) instead of named parameters for consistency with SELECT queries
+          // Use a simpler approach: Check if exists, then INSERT or UPDATE to avoid lock timeout
           if (isFreePlan && tenantId) {
             console.log(`    - Saving template to database (Free plan): invoice_id=${invoice.id}, tenant_id=${tenantId}, template_id=${template.id}`);
             console.log(`    - Values: preview_url=${previewUrl.substring(0, 50)}..., pdf_url=${pdfUrl.substring(0, 50)}...`);
             
-            const saveQuery = `
-              INSERT INTO invoice_templates (
-                tenant_id, invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
-              ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, NOW()
-              )
-              ON DUPLICATE KEY UPDATE
-                template_data = VALUES(template_data),
-                preview_url = VALUES(preview_url),
-                pdf_url = VALUES(pdf_url),
-                is_selected = VALUES(is_selected)
-            `;
+            // First, check if template already exists
+            const [existing] = await req.db.query(
+              `SELECT id FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ? AND template_id = ? LIMIT 1`,
+              { replacements: [tenantId, invoice.id, template.id] }
+            );
             
-            const saveParams = [
-              tenantId,
-              invoice.id,
-              template.id,
-              templateName,
-              templateDataJson,
-              previewUrl,
-              pdfUrl,
-              0 // is_selected
-            ];
-            
-            console.log(`    - Executing INSERT with params: tenant_id=${tenantId}, invoice_id=${invoice.id}, template_id=${template.id}`);
-            
-            const [insertResult] = await req.db.query(saveQuery, {
-              replacements: saveParams
-            });
-            
-            console.log(`    - ✅ INSERT executed successfully. Affected rows: ${insertResult?.affectedRows || 'unknown'}`);
-            console.log(`    - ✅ Template saved successfully to database (Free plan)`);
+            if (existing && existing.length > 0) {
+              // Update existing template
+              console.log(`    - Template exists, updating...`);
+              const updateQuery = `
+                UPDATE invoice_templates 
+                SET template_name = ?,
+                    template_data = ?,
+                    preview_url = ?,
+                    pdf_url = ?,
+                    is_selected = ?
+                WHERE tenant_id = ? AND invoice_id = ? AND template_id = ?
+              `;
+              
+              await req.db.query(updateQuery, {
+                replacements: [
+                  templateName,
+                  templateDataJson,
+                  previewUrl,
+                  pdfUrl,
+                  0, // is_selected
+                  tenantId,
+                  invoice.id,
+                  template.id
+                ]
+              });
+              console.log(`    - ✅ Template updated successfully`);
+            } else {
+              // Insert new template
+              console.log(`    - Template does not exist, inserting...`);
+              const insertQuery = `
+                INSERT INTO invoice_templates (
+                  tenant_id, invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, NOW()
+                )
+              `;
+              
+              await req.db.query(insertQuery, {
+                replacements: [
+                  tenantId,
+                  invoice.id,
+                  template.id,
+                  templateName,
+                  templateDataJson,
+                  previewUrl,
+                  pdfUrl,
+                  0 // is_selected
+                ]
+              });
+              console.log(`    - ✅ Template inserted successfully`);
+            }
             
             // Verify the save immediately
             const [verifyResults] = await req.db.query(
@@ -781,6 +806,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
               if (!saved.preview_url || !saved.pdf_url) {
                 console.error(`    - ❌ WARNING: Template saved but URLs are NULL in database!`);
                 console.error(`       This will cause issues when fetching invoices.`);
+                throw new Error(`Template saved but URLs are NULL in database`);
               }
             } else {
               console.error(`    - ❌ CRITICAL: Template verification failed - template not found after save!`);
@@ -792,37 +818,61 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
             console.log(`    - Saving template to database (Enterprise): invoice_id=${invoice.id}, template_id=${template.id}`);
             console.log(`    - Values: preview_url=${previewUrl.substring(0, 50)}..., pdf_url=${pdfUrl.substring(0, 50)}...`);
             
-            const saveQuery = `
-              INSERT INTO invoice_templates (
-                invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
-              ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, NOW()
-              )
-              ON DUPLICATE KEY UPDATE
-                template_data = VALUES(template_data),
-                preview_url = VALUES(preview_url),
-                pdf_url = VALUES(pdf_url),
-                is_selected = VALUES(is_selected)
-            `;
+            // First, check if template already exists
+            const [existing] = await req.db.query(
+              `SELECT id FROM invoice_templates WHERE invoice_id = ? AND template_id = ? LIMIT 1`,
+              { replacements: [invoice.id, template.id] }
+            );
             
-            const saveParams = [
-              invoice.id,
-              template.id,
-              templateName,
-              templateDataJson,
-              previewUrl,
-              pdfUrl,
-              0 // is_selected
-            ];
-            
-            console.log(`    - Executing INSERT with params: invoice_id=${invoice.id}, template_id=${template.id}`);
-            
-            const [insertResult] = await req.db.query(saveQuery, {
-              replacements: saveParams
-            });
-            
-            console.log(`    - ✅ INSERT executed successfully. Affected rows: ${insertResult?.affectedRows || 'unknown'}`);
-            console.log(`    - ✅ Template saved successfully to database (Enterprise)`);
+            if (existing && existing.length > 0) {
+              // Update existing template
+              console.log(`    - Template exists, updating...`);
+              const updateQuery = `
+                UPDATE invoice_templates 
+                SET template_name = ?,
+                    template_data = ?,
+                    preview_url = ?,
+                    pdf_url = ?,
+                    is_selected = ?
+                WHERE invoice_id = ? AND template_id = ?
+              `;
+              
+              await req.db.query(updateQuery, {
+                replacements: [
+                  templateName,
+                  templateDataJson,
+                  previewUrl,
+                  pdfUrl,
+                  0, // is_selected
+                  invoice.id,
+                  template.id
+                ]
+              });
+              console.log(`    - ✅ Template updated successfully`);
+            } else {
+              // Insert new template
+              console.log(`    - Template does not exist, inserting...`);
+              const insertQuery = `
+                INSERT INTO invoice_templates (
+                  invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, NOW()
+                )
+              `;
+              
+              await req.db.query(insertQuery, {
+                replacements: [
+                  invoice.id,
+                  template.id,
+                  templateName,
+                  templateDataJson,
+                  previewUrl,
+                  pdfUrl,
+                  0 // is_selected
+                ]
+              });
+              console.log(`    - ✅ Template inserted successfully`);
+            }
             
             // Verify the save immediately
             const [verifyResults] = await req.db.query(
@@ -839,6 +889,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
               if (!saved.preview_url || !saved.pdf_url) {
                 console.error(`    - ❌ WARNING: Template saved but URLs are NULL in database!`);
                 console.error(`       This will cause issues when fetching invoices.`);
+                throw new Error(`Template saved but URLs are NULL in database`);
               }
             } else {
               console.error(`    - ❌ CRITICAL: Template verification failed - template not found after save!`);
