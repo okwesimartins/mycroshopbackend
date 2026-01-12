@@ -958,7 +958,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       invoice_id INT NOT NULL,
       template_id VARCHAR(100) NOT NULL,
       template_name VARCHAR(255),
-      template_data JSON NOT NULL,
+      template_data JSON NULL,
       preview_url VARCHAR(500),
       pdf_url VARCHAR(500),
       is_selected BOOLEAN DEFAULT FALSE,
@@ -971,6 +971,29 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       UNIQUE KEY unique_invoice_template (invoice_id, template_id${isSharedDb ? ', tenant_id' : ''})
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  // Make template_data nullable if it's currently NOT NULL (for existing databases)
+  try {
+    const [columns] = await connection.query(`
+      SELECT COLUMN_NAME, IS_NULLABLE 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'invoice_templates' 
+      AND COLUMN_NAME = 'template_data'
+    `);
+    
+    if (columns && columns.length > 0 && columns[0].IS_NULLABLE === 'NO') {
+      console.log('Making template_data column nullable in invoice_templates table...');
+      await connection.query(`
+        ALTER TABLE invoice_templates 
+        MODIFY COLUMN template_data JSON NULL
+      `);
+      console.log('✅ template_data column made nullable');
+    }
+  } catch (alterError) {
+    console.warn('Could not modify template_data column to nullable:', alterError.message);
+    // Continue - column might already be nullable
+  }
 
   // Add pdf_url column if it doesn't exist (for existing databases)
   try {

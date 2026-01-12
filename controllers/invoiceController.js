@@ -722,7 +722,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
             throw new Error(`Cannot save template: preview_url or pdf_url is missing. previewUrl=${previewUrl || 'NULL'}, pdfUrl=${pdfUrl || 'NULL'}`);
           }
           
-          // Simple, fast INSERT - only save essential fields (no template_data JSON)
+          // Simple, fast INSERT - only save essential URLs (template_data is now nullable)
           // Use INSERT IGNORE to avoid errors if template already exists, then UPDATE
           if (isFreePlan && tenantId) {
             // Free plan: use INSERT IGNORE then UPDATE for simplicity and speed
