@@ -707,137 +707,8 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           throw pdfError;
         }
 
-        // Save template URLs to invoice_templates table (minimal data - just URLs)
-        // Since we're using a single default template, we don't need to save template_data
-        try {
-          console.log(`    - Saving template URLs: invoice_id=${invoice.id}, template_id=${template.id}`);
-          console.log(`    - Preview URL: ${previewUrl ? previewUrl.substring(0, 50) + '...' : 'NULL'}`);
-          console.log(`    - PDF URL: ${pdfUrl ? pdfUrl.substring(0, 50) + '...' : 'NULL'}`);
-          
-          // Validate URLs before saving
-          if (!previewUrl || !pdfUrl) {
-            console.error(`    - ❌ CRITICAL: Cannot save template - URLs are missing!`);
-            console.error(`       previewUrl: ${previewUrl || 'NULL'}`);
-            console.error(`       pdfUrl: ${pdfUrl || 'NULL'}`);
-            throw new Error(`Cannot save template: preview_url or pdf_url is missing. previewUrl=${previewUrl || 'NULL'}, pdfUrl=${pdfUrl || 'NULL'}`);
-          }
-          
-          // Simple, fast INSERT - only save essential URLs (template_data is now nullable)
-          // Use INSERT IGNORE to avoid errors if template already exists, then UPDATE
-          if (isFreePlan && tenantId) {
-            // Free plan: use INSERT IGNORE then UPDATE for simplicity and speed
-            const insertQuery = `
-              INSERT IGNORE INTO invoice_templates (
-                tenant_id, invoice_id, template_id, template_name, preview_url, pdf_url, is_selected, created_at
-              ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, NOW()
-              )
-            `;
-            
-            await req.db.query(insertQuery, {
-              replacements: [
-                tenantId,
-                invoice.id,
-                template.id,
-                'Default Template', // Simple name
-                previewUrl,
-                pdfUrl,
-                0 // is_selected
-              ]
-            });
-            
-            // Update if it already existed (INSERT IGNORE didn't insert)
-            const updateQuery = `
-              UPDATE invoice_templates 
-              SET preview_url = ?,
-                  pdf_url = ?
-              WHERE tenant_id = ? AND invoice_id = ? AND template_id = ?
-            `;
-            
-            await req.db.query(updateQuery, {
-              replacements: [
-                previewUrl,
-                pdfUrl,
-                tenantId,
-                invoice.id,
-                template.id
-              ]
-            });
-            
-            console.log(`    - ✅ Template URLs saved successfully (Free plan)`);
-          } else {
-            // Enterprise: use INSERT IGNORE then UPDATE
-            const insertQuery = `
-              INSERT IGNORE INTO invoice_templates (
-                invoice_id, template_id, template_name, preview_url, pdf_url, is_selected, created_at
-              ) VALUES (
-                ?, ?, ?, ?, ?, ?, NOW()
-              )
-            `;
-            
-            await req.db.query(insertQuery, {
-              replacements: [
-                invoice.id,
-                template.id,
-                'Default Template', // Simple name
-                previewUrl,
-                pdfUrl,
-                0 // is_selected
-              ]
-            });
-            
-            // Update if it already existed
-            const updateQuery = `
-              UPDATE invoice_templates 
-              SET preview_url = ?,
-                  pdf_url = ?
-              WHERE invoice_id = ? AND template_id = ?
-            `;
-            
-            await req.db.query(updateQuery, {
-              replacements: [
-                previewUrl,
-                pdfUrl,
-                invoice.id,
-                template.id
-              ]
-            });
-            
-            console.log(`    - ✅ Template URLs saved successfully (Enterprise)`);
-          }
-          
-          // Quick verification (no need for detailed logging - just check it exists)
-          const verifyQuery = isFreePlan && tenantId
-            ? `SELECT preview_url, pdf_url FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ? AND template_id = ? LIMIT 1`
-            : `SELECT preview_url, pdf_url FROM invoice_templates WHERE invoice_id = ? AND template_id = ? LIMIT 1`;
-          
-          const verifyParams = isFreePlan && tenantId
-            ? [tenantId, invoice.id, template.id]
-            : [invoice.id, template.id];
-          
-          const [verifyResults] = await req.db.query(verifyQuery, {
-            replacements: verifyParams
-          });
-          
-          if (!verifyResults || verifyResults.length === 0 || !verifyResults[0].preview_url || !verifyResults[0].pdf_url) {
-            throw new Error(`Template URLs were not saved correctly - verification failed`);
-          }
-          
-          console.log(`    - ✅ Verified: Template URLs saved correctly`);
-        } catch (saveError) {
-          console.error(`    - ❌ CRITICAL: Failed to save template URLs:`, saveError.message);
-          console.error(`    Save error details:`, {
-            invoice_id: invoice.id,
-            template_id: template.id,
-            tenant_id: isFreePlan ? tenantId : 'N/A',
-            preview_url: previewUrl,
-            pdf_url: pdfUrl,
-            error: saveError.message
-          });
-          
-          // CRITICAL: Throw error to prevent invoice creation if template cannot be saved
-          throw new Error(`Failed to save template URLs to database: ${saveError.message}. Invoice creation aborted.`);
-        }
+        // Note: Template URLs will be saved AFTER transaction commits to avoid lock timeouts
+        // We just collect the URLs here and save them later
 
         // Validate URLs are not null before adding to results
         if (!previewUrl || !pdfUrl) {
@@ -907,6 +778,12 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         generated_at: t.generated_at || new Date().toISOString()
       })),
       previews: results.map((r) => ({
+        template_id: r.template.id,
+        preview_url: r.preview_url,
+        pdf_url: r.pdf_url
+      })),
+      // Store full results for template saving after transaction
+      _templateResults: results.map((r) => ({
         template_id: r.template.id,
         preview_url: r.preview_url,
         pdf_url: r.pdf_url
@@ -1828,7 +1705,112 @@ async function createInvoice(req, res) {
     
     // Only commit transaction if template AND preview/PDF generation succeeded
     await transaction.commit();
-    console.log(`✅ Invoice created successfully with ${createdInvoiceItems.length} invoice items, ${templateData.templates.length} templates, and ${templateData.previews.length} previews/PDFs`);
+    console.log(`✅ Invoice transaction committed successfully with ${createdInvoiceItems.length} invoice items, ${templateData.templates.length} templates, and ${templateData.previews.length} previews/PDFs`);
+    
+    // CRITICAL: Save template URLs AFTER transaction commits (using separate connection to avoid lock timeouts)
+    // If this fails, we need to delete the invoice to maintain data consistency
+    try {
+      console.log(`\n💾 Saving template URLs to database (outside transaction)...`);
+      
+      if (!templateData._templateResults || templateData._templateResults.length === 0) {
+        throw new Error('No template results to save');
+      }
+      
+      for (const templateResult of templateData._templateResults) {
+        const { template_id, preview_url, pdf_url } = templateResult;
+        
+        // Validate URLs
+        if (!preview_url || !pdf_url) {
+          throw new Error(`Template ${template_id} has missing URLs: preview_url=${preview_url || 'NULL'}, pdf_url=${pdf_url || 'NULL'}`);
+        }
+        
+        console.log(`  - Saving template ${template_id}: invoice_id=${invoice.id}`);
+        
+        // Use a single INSERT ... ON DUPLICATE KEY UPDATE for atomicity and speed
+        // This uses a separate connection (not part of the transaction) to avoid lock conflicts
+        if (isFreePlan && tenantId) {
+          const saveQuery = `
+            INSERT INTO invoice_templates (
+              tenant_id, invoice_id, template_id, template_name, preview_url, pdf_url, is_selected, created_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, NOW()
+            )
+            ON DUPLICATE KEY UPDATE
+              preview_url = VALUES(preview_url),
+              pdf_url = VALUES(pdf_url),
+              is_selected = VALUES(is_selected)
+          `;
+          
+          await req.db.query(saveQuery, {
+            replacements: [
+              tenantId,
+              invoice.id,
+              template_id,
+              'Default Template',
+              preview_url,
+              pdf_url,
+              0 // is_selected
+            ]
+          });
+        } else {
+          const saveQuery = `
+            INSERT INTO invoice_templates (
+              invoice_id, template_id, template_name, preview_url, pdf_url, is_selected, created_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, NOW()
+            )
+            ON DUPLICATE KEY UPDATE
+              preview_url = VALUES(preview_url),
+              pdf_url = VALUES(pdf_url),
+              is_selected = VALUES(is_selected)
+          `;
+          
+          await req.db.query(saveQuery, {
+            replacements: [
+              invoice.id,
+              template_id,
+              'Default Template',
+              preview_url,
+              pdf_url,
+              0 // is_selected
+            ]
+          });
+        }
+        
+        console.log(`  - ✅ Template ${template_id} URLs saved successfully`);
+      }
+      
+      console.log(`✅ All template URLs saved successfully`);
+    } catch (templateSaveError) {
+      // CRITICAL: Template save failed after invoice was created
+      // Delete the invoice to maintain data consistency
+      console.error(`❌ CRITICAL: Failed to save template URLs after invoice creation:`, templateSaveError.message);
+      console.error(`   Attempting to delete invoice ${invoice.id} to maintain data consistency...`);
+      
+      try {
+        await req.db.models.Invoice.destroy({
+          where: { id: invoice.id },
+          force: true // Hard delete
+        });
+        console.error(`   ✅ Invoice ${invoice.id} deleted due to template save failure`);
+      } catch (deleteError) {
+        console.error(`   ❌ Failed to delete invoice ${invoice.id} after template save failure:`, deleteError.message);
+        // Continue - we'll return the error anyway
+      }
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create invoice: Template URLs could not be saved to database',
+        error: `Template save failed: ${templateSaveError.message}. Invoice was created but has been deleted to maintain data consistency.`,
+        errorType: 'TemplateSaveFailed',
+        debug: {
+          errorMessage: templateSaveError.message,
+          errorType: templateSaveError.name,
+          invoiceId: invoice.id,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
 
     // Fetch complete invoice with relations after transaction commit (for response)
     let completeInvoice = null;
