@@ -166,21 +166,38 @@ async function getAllInvoices(req, res) {
             is_selected: r.is_selected
           })));
         } else {
-          // Debug: Check if templates exist at all for these invoices
+          // Debug: Check if templates exist at all for these invoices (without preview_url filter)
           const debugQuery = isFreePlan
-            ? `SELECT invoice_id, preview_url, pdf_url, tenant_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')})`
-            : `SELECT invoice_id, preview_url, pdf_url FROM invoice_templates WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`;
+            ? `SELECT invoice_id, preview_url, pdf_url, tenant_id, template_id, is_selected FROM invoice_templates WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')})`
+            : `SELECT invoice_id, preview_url, pdf_url, template_id, is_selected FROM invoice_templates WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`;
           const [debugResults] = await req.db.query(debugQuery, {
             replacements: queryParams
           });
-          console.log(`⚠️ DEBUG: Found ${debugResults.length} total template records (including NULL preview_url)`);
+          console.log(`⚠️ DEBUG: Found ${debugResults.length} total template records (including NULL preview_url) for ${invoiceIds.length} invoices`);
           if (debugResults.length > 0) {
-            console.log(`DEBUG results:`, debugResults.map(r => ({
+            console.log(`DEBUG results (first 5):`, debugResults.slice(0, 5).map(r => ({
               invoice_id: r.invoice_id,
+              template_id: r.template_id,
               preview_url: r.preview_url || 'NULL',
               pdf_url: r.pdf_url || 'NULL',
-              tenant_id: r.tenant_id
+              tenant_id: r.tenant_id,
+              is_selected: r.is_selected
             })));
+            
+            // Check if templates exist but preview_url is NULL
+            const templatesWithNullPreview = debugResults.filter(r => !r.preview_url || r.preview_url.trim() === '');
+            if (templatesWithNullPreview.length > 0) {
+              console.log(`⚠️ WARNING: ${templatesWithNullPreview.length} templates have NULL or empty preview_url but may have pdf_url`);
+              templatesWithNullPreview.forEach(t => {
+                if (t.pdf_url && t.pdf_url.trim() !== '') {
+                  console.log(`   - Invoice ${t.invoice_id} has pdf_url but no preview_url: ${t.pdf_url.substring(0, 50)}...`);
+                }
+              });
+            }
+          } else {
+            console.log(`⚠️ No templates found in database for invoice IDs: ${invoiceIds.join(', ')}`);
+            console.log(`   Query used: ${debugQuery}`);
+            console.log(`   Query params: ${JSON.stringify(queryParams)}`);
           }
         }
       
@@ -374,7 +391,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         const fs = require('fs');
         const path = require('path');
         
-        // If logoUrl is relative, try to read the file locally (preferred - no DNS lookup)
+        // If logoUrl is relative, try to read the file and convert to absolute URL
         if (logoUrl.startsWith('/uploads/') || logoUrl.startsWith('uploads/')) {
           const logoFilename = logoUrl.split('/').pop();
           const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
@@ -384,18 +401,11 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
             logoForColorExtraction = fs.readFileSync(logoFilePath);
             console.log(`✅ Read logo file for color extraction: ${logoFilePath} (${fs.statSync(logoFilePath).size} bytes)`);
           } else {
-            // File not found locally - skip color extraction to avoid DNS lookup issues
-            console.warn(`⚠️ Logo file not found at ${logoFilePath}, skipping color extraction to avoid DNS lookup`);
-            throw new Error('Logo file not found locally - skipping color extraction');
+            // Fallback: construct absolute URL
+            const baseUrl = process.env.BASE_URL || process.env.API_URL || process.env.BACKEND_URL || 'http://backend.mycroshop.com';
+            logoForColorExtraction = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
+            console.log(`⚠️ Logo file not found, using absolute URL for color extraction: ${logoForColorExtraction}`);
           }
-        } else if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
-          // Already an absolute URL - use as is (but this may cause DNS lookup)
-          console.log(`Using absolute URL for color extraction: ${logoUrl}`);
-          logoForColorExtraction = logoUrl;
-        } else {
-          // Invalid logo URL format - skip
-          console.warn(`⚠️ Invalid logo URL format: ${logoUrl}, skipping color extraction`);
-          throw new Error('Invalid logo URL format - skipping color extraction');
         }
         
         // Wrap color extraction in a timeout (10 seconds max - non-blocking)
@@ -435,17 +445,12 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       }
     }
 
-    // Generate templates using AI (or defaults if AI fails)
-    console.log('Calling AI template generator with data:', {
-      business_name: invoiceDataForAi.business_name,
-      items_count: invoiceDataForAi.items_count,
-      total_amount: invoiceDataForAi.total_amount,
-      hasApiKey: !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== '')
-    });
+    // Generate default template (single template, no AI)
+    console.log('Using default template with logo colors');
     
     const templates = await generateTemplateOptions(invoiceDataForAi, brandColors);
     
-    console.log(`Received ${templates.length} templates from AI generator`);
+    console.log(`Received ${templates.length} template(s) from generator`);
 
     // Attach logo URL to invoice object for rendering
     // Safely convert invoice to JSON - handle null associations
@@ -490,7 +495,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       };
     }
 
-    // Convert logo URL to base64 data URI for Puppeteer (prefer local file reading)
+    // Convert logo URL to absolute URL or base64 data URI for Puppeteer
     let logoDataUri = null;
     if (logoUrl) {
       try {
@@ -501,7 +506,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         const logoFilename = logoUrl.split('/').pop();
         const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
         
-        // Check if file exists and read it as base64 (preferred - no DNS lookup)
+        // Check if file exists and read it as base64
         if (fs.existsSync(logoFilePath)) {
           const logoBuffer = fs.readFileSync(logoFilePath);
           const logoMimeType = logoUrl.endsWith('.png') ? 'image/png' :
@@ -511,41 +516,17 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           
           logoDataUri = `data:${logoMimeType};base64,${logoBuffer.toString('base64')}`;
           console.log(`✅ Converted logo to base64 data URI (${logoBuffer.length} bytes)`);
-        } else if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
-          // Already an absolute URL - use as is (may cause DNS lookup but it's already a URL)
-          logoDataUri = logoUrl;
-          console.log(`⚠️ Logo file not found locally, using absolute URL: ${logoDataUri}`);
         } else {
-          // Try to construct URL using request host if available, otherwise skip
-          let baseUrl = null;
-          
-          // Try to get from request headers first (most reliable)
-          if (req && req.get && req.get('host')) {
-            const protocol = req.protocol || (req.secure ? 'https' : 'http');
-            baseUrl = `${protocol}://${req.get('host')}`;
-          } else if (req && req.headers && req.headers.host) {
-            const protocol = (req.headers['x-forwarded-proto'] || 'http');
-            baseUrl = `${protocol}://${req.headers.host}`;
-          }
-          
-          // Fallback to environment variables or localhost
-          if (!baseUrl) {
-            baseUrl = process.env.BASE_URL || process.env.API_URL || process.env.BACKEND_URL || 'http://localhost:3000';
-          }
-          
-          logoDataUri = `${baseUrl}${logoUrl.startsWith('/') ? logoUrl : '/' + logoUrl}`;
-          console.log(`⚠️ Logo file not found locally, constructed URL: ${logoDataUri}`);
+          // Fallback: try to construct absolute URL if file doesn't exist locally
+          const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://backend.mycroshop.com';
+          logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
+          console.log(`⚠️ Logo file not found at ${logoFilePath}, using absolute URL: ${logoDataUri}`);
         }
       } catch (logoError) {
-        console.warn('Failed to convert logo to base64:', logoError.message);
-        // If it's already a full URL, use it; otherwise skip
-        if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
-          logoDataUri = logoUrl;
-        } else {
-          // Skip logo if we can't process it
-          logoDataUri = null;
-          console.warn('Skipping logo due to processing error');
-        }
+        console.warn('Failed to convert logo to base64, using absolute URL:', logoError.message);
+        // Fallback to absolute URL
+        const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://backend.mycroshop.com';
+        logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
       }
     }
 
@@ -707,71 +688,105 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           const templateDataJson = JSON.stringify(template);
           const templateName = template.name || template.id || `Template ${template.id}`;
           
+          console.log(`    - Preparing to save template: invoice_id=${invoice.id}, template_id=${template.id}, preview_url=${previewUrl ? 'YES' : 'NO'}, pdf_url=${pdfUrl ? 'YES' : 'NO'}`);
+          
           // Build query based on whether we're on free plan (needs tenant_id) or enterprise
+          // Use positional parameters (?) instead of named parameters for consistency with SELECT queries
           if (isFreePlan && tenantId) {
-            console.log(`    - Saving template to database (Free plan): invoice_id=${invoice.id}, tenant_id=${tenantId}, template_id=${template.id}, preview_url=${previewUrl}`);
-            await req.db.query(`
+            console.log(`    - Saving template to database (Free plan): invoice_id=${invoice.id}, tenant_id=${tenantId}, template_id=${template.id}`);
+            
+            const saveQuery = `
               INSERT INTO invoice_templates (
                 tenant_id, invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
               ) VALUES (
-                :tenant_id, :invoice_id, :template_id, :template_name, :template_data, :preview_url, :pdf_url, :is_selected, NOW()
+                ?, ?, ?, ?, ?, ?, ?, ?, NOW()
               )
               ON DUPLICATE KEY UPDATE
-                template_data = :template_data_update,
-                preview_url = :preview_url_update,
-                pdf_url = :pdf_url_update
-            `, {
-              replacements: {
-                tenant_id: tenantId,
-                invoice_id: invoice.id,
-                template_id: template.id,
-                template_name: templateName,
-                template_data: templateDataJson,
-                preview_url: previewUrl,
-                pdf_url: pdfUrl,
-                is_selected: 0, // false
-                template_data_update: templateDataJson,
-                preview_url_update: previewUrl,
-                pdf_url_update: pdfUrl
-              },
-              type: QueryTypes.INSERT
+                template_data = VALUES(template_data),
+                preview_url = VALUES(preview_url),
+                pdf_url = VALUES(pdf_url),
+                is_selected = VALUES(is_selected)
+            `;
+            
+            await req.db.query(saveQuery, {
+              replacements: [
+                tenantId,
+                invoice.id,
+                template.id,
+                templateName,
+                templateDataJson,
+                previewUrl,
+                pdfUrl,
+                0 // is_selected
+              ]
             });
-            console.log(`    - ✅ Template saved successfully to database`);
+            
+            console.log(`    - ✅ Template saved successfully to database (Free plan)`);
+            
+            // Verify the save immediately
+            const [verifyResults] = await req.db.query(
+              `SELECT preview_url, pdf_url, template_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ? AND template_id = ?`,
+              { replacements: [tenantId, invoice.id, template.id] }
+            );
+            if (verifyResults && verifyResults.length > 0) {
+              console.log(`    - ✅ Verified: Template exists in database - preview_url=${verifyResults[0].preview_url ? 'YES' : 'NO'}, pdf_url=${verifyResults[0].pdf_url ? 'YES' : 'NO'}`);
+            } else {
+              console.error(`    - ❌ WARNING: Template verification failed - template not found after save!`);
+            }
           } else {
             // Enterprise users (no tenant_id)
-            console.log(`    - Saving template to database (Enterprise): invoice_id=${invoice.id}, template_id=${template.id}, preview_url=${previewUrl}`);
-            await req.db.query(`
+            console.log(`    - Saving template to database (Enterprise): invoice_id=${invoice.id}, template_id=${template.id}`);
+            
+            const saveQuery = `
               INSERT INTO invoice_templates (
                 invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
               ) VALUES (
-                :invoice_id, :template_id, :template_name, :template_data, :preview_url, :pdf_url, :is_selected, NOW()
+                ?, ?, ?, ?, ?, ?, ?, NOW()
               )
               ON DUPLICATE KEY UPDATE
-                template_data = :template_data_update,
-                preview_url = :preview_url_update,
-                pdf_url = :pdf_url_update
-            `, {
-              replacements: {
-                invoice_id: invoice.id,
-                template_id: template.id,
-                template_name: templateName,
-                template_data: templateDataJson,
-                preview_url: previewUrl,
-                pdf_url: pdfUrl,
-                is_selected: 0, // false
-                template_data_update: templateDataJson,
-                preview_url_update: previewUrl,
-                pdf_url_update: pdfUrl
-              },
-              type: QueryTypes.INSERT
+                template_data = VALUES(template_data),
+                preview_url = VALUES(preview_url),
+                pdf_url = VALUES(pdf_url),
+                is_selected = VALUES(is_selected)
+            `;
+            
+            await req.db.query(saveQuery, {
+              replacements: [
+                invoice.id,
+                template.id,
+                templateName,
+                templateDataJson,
+                previewUrl,
+                pdfUrl,
+                0 // is_selected
+              ]
             });
-            console.log(`    - ✅ Template saved successfully to database`);
+            
+            console.log(`    - ✅ Template saved successfully to database (Enterprise)`);
+            
+            // Verify the save immediately
+            const [verifyResults] = await req.db.query(
+              `SELECT preview_url, pdf_url, template_id FROM invoice_templates WHERE invoice_id = ? AND template_id = ?`,
+              { replacements: [invoice.id, template.id] }
+            );
+            if (verifyResults && verifyResults.length > 0) {
+              console.log(`    - ✅ Verified: Template exists in database - preview_url=${verifyResults[0].preview_url ? 'YES' : 'NO'}, pdf_url=${verifyResults[0].pdf_url ? 'YES' : 'NO'}`);
+            } else {
+              console.error(`    - ❌ WARNING: Template verification failed - template not found after save!`);
+            }
           }
-          
-          console.log(`    - Saved template ${template.id} to database`);
         } catch (saveError) {
-          console.error(`    - Failed to save template ${template.id} to database:`, saveError.message);
-          // Continue even if saving fails - templates are still returned to user
+          console.error(`    - ❌ Failed to save template ${template.id} to database:`, saveError.message);
+          console.error(`    Save error stack:`, saveError.stack?.split('\n').slice(0, 5).join('\n'));
+          console.error(`    Save error details:`, {
+            invoice_id: invoice.id,
+            template_id: template.id,
+            tenant_id: isFreePlan ? tenantId : 'N/A',
+            preview_url: previewUrl,
+            pdf_url: pdfUrl,
+            error: saveError.message
+          });
+          // Don't throw - continue so invoice is still created, but log the error
         }
 
         // Validate URLs are not null before adding to results

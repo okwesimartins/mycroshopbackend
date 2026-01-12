@@ -10,11 +10,11 @@ const { generateDefaultTemplate } = require('./defaultInvoiceTemplate');
 async function generateTemplateOptions(invoiceData, brandColors) {
   console.log('📄 Using default invoice template with logo colors');
   
-  // Return single default template
+  // Return single default template - use consistent ID that matches what we query for
   return [{
-    id: 'default',
-    name: 'Default Invoice',
-    description: 'Clean, professional invoice template',
+    id: 'default_template',
+    name: 'Default Professional Invoice',
+    description: 'Clean, professional invoice template with dynamic branding',
     source: 'default_template',
     generated_at: new Date().toISOString()
   }];
