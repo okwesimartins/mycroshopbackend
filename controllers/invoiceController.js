@@ -153,29 +153,35 @@ async function getAllInvoices(req, res) {
           return queryParams[idx] !== undefined ? `'${queryParams[idx]}'` : '?';
         })}`);
         
-        const [templateResults] = await req.db.query(templateQuery, {
+        let [templateResults] = await req.db.query(templateQuery, {
           replacements: queryParams
         });
         
         console.log(`Found ${templateResults.length} template records with preview URLs`);
-        if (templateResults.length > 0) {
-          console.log(`Sample template results:`, templateResults.slice(0, 3).map(r => ({
-            invoice_id: r.invoice_id,
-            preview_url: r.preview_url ? r.preview_url.substring(0, 50) + '...' : 'NULL',
-            pdf_url: r.pdf_url ? r.pdf_url.substring(0, 50) + '...' : 'NULL',
-            is_selected: r.is_selected
-          })));
-        } else {
-          // Debug: Check if templates exist at all for these invoices (without preview_url filter)
-          const debugQuery = isFreePlan
-            ? `SELECT invoice_id, preview_url, pdf_url, tenant_id, template_id, is_selected FROM invoice_templates WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')})`
-            : `SELECT invoice_id, preview_url, pdf_url, template_id, is_selected FROM invoice_templates WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')})`;
-          const [debugResults] = await req.db.query(debugQuery, {
+        
+        // If no results with preview_url, check for templates with pdf_url (or any templates)
+        if (templateResults.length === 0) {
+          console.log(`⚠️ No templates found with preview_url, checking for templates with pdf_url or any templates...`);
+          
+          // Check if templates exist at all for these invoices (without preview_url filter)
+          const fallbackQuery = isFreePlan
+            ? `SELECT invoice_id, preview_url, pdf_url, tenant_id, template_id, is_selected, created_at 
+               FROM invoice_templates 
+               WHERE tenant_id = ? AND invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
+               ORDER BY invoice_id, is_selected DESC, created_at DESC`
+            : `SELECT invoice_id, preview_url, pdf_url, template_id, is_selected, created_at 
+               FROM invoice_templates 
+               WHERE invoice_id IN (${invoiceIds.map(() => '?').join(',')}) 
+               ORDER BY invoice_id, is_selected DESC, created_at DESC`;
+          
+          const [fallbackResults] = await req.db.query(fallbackQuery, {
             replacements: queryParams
           });
-          console.log(`⚠️ DEBUG: Found ${debugResults.length} total template records (including NULL preview_url) for ${invoiceIds.length} invoices`);
-          if (debugResults.length > 0) {
-            console.log(`DEBUG results (first 5):`, debugResults.slice(0, 5).map(r => ({
+          
+          console.log(`⚠️ Found ${fallbackResults.length} total template records (including NULL preview_url)`);
+          
+          if (fallbackResults.length > 0) {
+            console.log(`DEBUG results (first 5):`, fallbackResults.slice(0, 5).map(r => ({
               invoice_id: r.invoice_id,
               template_id: r.template_id,
               preview_url: r.preview_url || 'NULL',
@@ -184,8 +190,11 @@ async function getAllInvoices(req, res) {
               is_selected: r.is_selected
             })));
             
+            // Use fallback results - they have templates even if preview_url is NULL
+            templateResults = fallbackResults;
+            
             // Check if templates exist but preview_url is NULL
-            const templatesWithNullPreview = debugResults.filter(r => !r.preview_url || r.preview_url.trim() === '');
+            const templatesWithNullPreview = fallbackResults.filter(r => !r.preview_url || r.preview_url.trim() === '');
             if (templatesWithNullPreview.length > 0) {
               console.log(`⚠️ WARNING: ${templatesWithNullPreview.length} templates have NULL or empty preview_url but may have pdf_url`);
               templatesWithNullPreview.forEach(t => {
@@ -195,17 +204,28 @@ async function getAllInvoices(req, res) {
               });
             }
           } else {
-            console.log(`⚠️ No templates found in database for invoice IDs: ${invoiceIds.join(', ')}`);
-            console.log(`   Query used: ${debugQuery}`);
+            console.log(`⚠️ No templates found in database at all for invoice IDs: ${invoiceIds.join(', ')}`);
+            console.log(`   Fallback query used: ${fallbackQuery}`);
             console.log(`   Query params: ${JSON.stringify(queryParams)}`);
           }
+        } else {
+          // Log successful results
+          console.log(`Sample template results:`, templateResults.slice(0, 3).map(r => ({
+            invoice_id: r.invoice_id,
+            preview_url: r.preview_url ? r.preview_url.substring(0, 50) + '...' : 'NULL',
+            pdf_url: r.pdf_url ? r.pdf_url.substring(0, 50) + '...' : 'NULL',
+            is_selected: r.is_selected
+          })));
         }
       
       // Group by invoice_id and get the first (selected or most recent) preview URL and PDF URL
+      // Use fallback results if main query returned nothing
       templateResults.forEach(result => {
+        // Get preview URL if available
         if (result.preview_url && result.preview_url.trim() !== '' && !previewUrls[result.invoice_id]) {
           previewUrls[result.invoice_id] = result.preview_url.trim();
         }
+        // Get PDF URL if available (even if preview URL is missing)
         if (result.pdf_url && result.pdf_url.trim() !== '' && !pdfUrls[result.invoice_id]) {
           pdfUrls[result.invoice_id] = result.pdf_url.trim();
         }
@@ -213,14 +233,20 @@ async function getAllInvoices(req, res) {
       
       console.log(`Mapped ${Object.keys(previewUrls).length} preview URLs and ${Object.keys(pdfUrls).length} PDF URLs to invoices`);
       
-      // Log which invoices don't have preview URLs for debugging
-      const invoicesWithoutPreview = invoiceIds.filter(id => !previewUrls[id] && !pdfUrls[id]);
-      if (invoicesWithoutPreview.length > 0) {
-        console.log(`⚠️ ${invoicesWithoutPreview.length} invoices without preview/PDF URLs: ${invoicesWithoutPreview.join(', ')}`);
-        // Store error message for invoices without URLs
-        invoicesWithoutPreview.forEach(id => {
+      // Log which invoices don't have ANY URLs (neither preview nor PDF)
+      const invoicesWithoutAnyUrl = invoiceIds.filter(id => !previewUrls[id] && !pdfUrls[id]);
+      if (invoicesWithoutAnyUrl.length > 0) {
+        console.log(`⚠️ ${invoicesWithoutAnyUrl.length} invoices without any URLs (no preview_url and no pdf_url): ${invoicesWithoutAnyUrl.join(', ')}`);
+        // Store error message only for invoices that have absolutely no URLs
+        invoicesWithoutAnyUrl.forEach(id => {
           urlErrors[id] = subscriptionError || 'No template found in database. Template may not have been generated during invoice creation.';
         });
+      }
+      
+      // Log invoices that have pdf_url but no preview_url (informational, not an error)
+      const invoicesWithPdfButNoPreview = invoiceIds.filter(id => !previewUrls[id] && pdfUrls[id]);
+      if (invoicesWithPdfButNoPreview.length > 0) {
+        console.log(`ℹ️ ${invoicesWithPdfButNoPreview.length} invoices have pdf_url but no preview_url: ${invoicesWithPdfButNoPreview.join(', ')}`);
       }
       } catch (previewError) {
         const errorMessage = `Error fetching preview URLs and PDF URLs: ${previewError.message}`;
@@ -688,12 +714,23 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           const templateDataJson = JSON.stringify(template);
           const templateName = template.name || template.id || `Template ${template.id}`;
           
-          console.log(`    - Preparing to save template: invoice_id=${invoice.id}, template_id=${template.id}, preview_url=${previewUrl ? 'YES' : 'NO'}, pdf_url=${pdfUrl ? 'YES' : 'NO'}`);
+          console.log(`    - Preparing to save template: invoice_id=${invoice.id}, template_id=${template.id}`);
+          console.log(`    - Preview URL to save: ${previewUrl || 'NULL'}`);
+          console.log(`    - PDF URL to save: ${pdfUrl || 'NULL'}`);
+          
+          // Validate URLs before saving
+          if (!previewUrl || !pdfUrl) {
+            console.error(`    - ❌ CRITICAL: Cannot save template - URLs are missing!`);
+            console.error(`       previewUrl: ${previewUrl || 'NULL'}`);
+            console.error(`       pdfUrl: ${pdfUrl || 'NULL'}`);
+            throw new Error(`Cannot save template: preview_url or pdf_url is missing. previewUrl=${previewUrl || 'NULL'}, pdfUrl=${pdfUrl || 'NULL'}`);
+          }
           
           // Build query based on whether we're on free plan (needs tenant_id) or enterprise
           // Use positional parameters (?) instead of named parameters for consistency with SELECT queries
           if (isFreePlan && tenantId) {
             console.log(`    - Saving template to database (Free plan): invoice_id=${invoice.id}, tenant_id=${tenantId}, template_id=${template.id}`);
+            console.log(`    - Values: preview_url=${previewUrl.substring(0, 50)}..., pdf_url=${pdfUrl.substring(0, 50)}...`);
             
             const saveQuery = `
               INSERT INTO invoice_templates (
@@ -708,34 +745,52 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
                 is_selected = VALUES(is_selected)
             `;
             
-            await req.db.query(saveQuery, {
-              replacements: [
-                tenantId,
-                invoice.id,
-                template.id,
-                templateName,
-                templateDataJson,
-                previewUrl,
-                pdfUrl,
-                0 // is_selected
-              ]
+            const saveParams = [
+              tenantId,
+              invoice.id,
+              template.id,
+              templateName,
+              templateDataJson,
+              previewUrl,
+              pdfUrl,
+              0 // is_selected
+            ];
+            
+            console.log(`    - Executing INSERT with params: tenant_id=${tenantId}, invoice_id=${invoice.id}, template_id=${template.id}`);
+            
+            const [insertResult] = await req.db.query(saveQuery, {
+              replacements: saveParams
             });
             
+            console.log(`    - ✅ INSERT executed successfully. Affected rows: ${insertResult?.affectedRows || 'unknown'}`);
             console.log(`    - ✅ Template saved successfully to database (Free plan)`);
             
             // Verify the save immediately
             const [verifyResults] = await req.db.query(
-              `SELECT preview_url, pdf_url, template_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ? AND template_id = ?`,
+              `SELECT preview_url, pdf_url, template_id, tenant_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ? AND template_id = ?`,
               { replacements: [tenantId, invoice.id, template.id] }
             );
             if (verifyResults && verifyResults.length > 0) {
-              console.log(`    - ✅ Verified: Template exists in database - preview_url=${verifyResults[0].preview_url ? 'YES' : 'NO'}, pdf_url=${verifyResults[0].pdf_url ? 'YES' : 'NO'}`);
+              const saved = verifyResults[0];
+              console.log(`    - ✅ Verified: Template exists in database`);
+              console.log(`       - template_id: ${saved.template_id}`);
+              console.log(`       - tenant_id: ${saved.tenant_id}`);
+              console.log(`       - preview_url: ${saved.preview_url ? saved.preview_url.substring(0, 50) + '...' : 'NULL'}`);
+              console.log(`       - pdf_url: ${saved.pdf_url ? saved.pdf_url.substring(0, 50) + '...' : 'NULL'}`);
+              
+              if (!saved.preview_url || !saved.pdf_url) {
+                console.error(`    - ❌ WARNING: Template saved but URLs are NULL in database!`);
+                console.error(`       This will cause issues when fetching invoices.`);
+              }
             } else {
-              console.error(`    - ❌ WARNING: Template verification failed - template not found after save!`);
+              console.error(`    - ❌ CRITICAL: Template verification failed - template not found after save!`);
+              console.error(`       Query: SELECT ... WHERE tenant_id=${tenantId} AND invoice_id=${invoice.id} AND template_id=${template.id}`);
+              throw new Error(`Template was not saved correctly - verification query returned no results`);
             }
           } else {
             // Enterprise users (no tenant_id)
             console.log(`    - Saving template to database (Enterprise): invoice_id=${invoice.id}, template_id=${template.id}`);
+            console.log(`    - Values: preview_url=${previewUrl.substring(0, 50)}..., pdf_url=${pdfUrl.substring(0, 50)}...`);
             
             const saveQuery = `
               INSERT INTO invoice_templates (
@@ -750,18 +805,23 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
                 is_selected = VALUES(is_selected)
             `;
             
-            await req.db.query(saveQuery, {
-              replacements: [
-                invoice.id,
-                template.id,
-                templateName,
-                templateDataJson,
-                previewUrl,
-                pdfUrl,
-                0 // is_selected
-              ]
+            const saveParams = [
+              invoice.id,
+              template.id,
+              templateName,
+              templateDataJson,
+              previewUrl,
+              pdfUrl,
+              0 // is_selected
+            ];
+            
+            console.log(`    - Executing INSERT with params: invoice_id=${invoice.id}, template_id=${template.id}`);
+            
+            const [insertResult] = await req.db.query(saveQuery, {
+              replacements: saveParams
             });
             
+            console.log(`    - ✅ INSERT executed successfully. Affected rows: ${insertResult?.affectedRows || 'unknown'}`);
             console.log(`    - ✅ Template saved successfully to database (Enterprise)`);
             
             // Verify the save immediately
@@ -770,9 +830,20 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
               { replacements: [invoice.id, template.id] }
             );
             if (verifyResults && verifyResults.length > 0) {
-              console.log(`    - ✅ Verified: Template exists in database - preview_url=${verifyResults[0].preview_url ? 'YES' : 'NO'}, pdf_url=${verifyResults[0].pdf_url ? 'YES' : 'NO'}`);
+              const saved = verifyResults[0];
+              console.log(`    - ✅ Verified: Template exists in database`);
+              console.log(`       - template_id: ${saved.template_id}`);
+              console.log(`       - preview_url: ${saved.preview_url ? saved.preview_url.substring(0, 50) + '...' : 'NULL'}`);
+              console.log(`       - pdf_url: ${saved.pdf_url ? saved.pdf_url.substring(0, 50) + '...' : 'NULL'}`);
+              
+              if (!saved.preview_url || !saved.pdf_url) {
+                console.error(`    - ❌ WARNING: Template saved but URLs are NULL in database!`);
+                console.error(`       This will cause issues when fetching invoices.`);
+              }
             } else {
-              console.error(`    - ❌ WARNING: Template verification failed - template not found after save!`);
+              console.error(`    - ❌ CRITICAL: Template verification failed - template not found after save!`);
+              console.error(`       Query: SELECT ... WHERE invoice_id=${invoice.id} AND template_id=${template.id}`);
+              throw new Error(`Template was not saved correctly - verification query returned no results`);
             }
           }
         } catch (saveError) {
