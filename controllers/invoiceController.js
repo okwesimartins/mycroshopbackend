@@ -707,16 +707,12 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           throw pdfError;
         }
 
-        // Save template to invoice_templates table using raw SQL
-        // Note: We use raw SQL because there's no InvoiceTemplate Sequelize model
+        // Save template URLs to invoice_templates table (minimal data - just URLs)
+        // Since we're using a single default template, we don't need to save template_data
         try {
-          const { QueryTypes } = require('sequelize');
-          const templateDataJson = JSON.stringify(template);
-          const templateName = template.name || template.id || `Template ${template.id}`;
-          
-          console.log(`    - Preparing to save template: invoice_id=${invoice.id}, template_id=${template.id}`);
-          console.log(`    - Preview URL to save: ${previewUrl || 'NULL'}`);
-          console.log(`    - PDF URL to save: ${pdfUrl || 'NULL'}`);
+          console.log(`    - Saving template URLs: invoice_id=${invoice.id}, template_id=${template.id}`);
+          console.log(`    - Preview URL: ${previewUrl ? previewUrl.substring(0, 50) + '...' : 'NULL'}`);
+          console.log(`    - PDF URL: ${pdfUrl ? pdfUrl.substring(0, 50) + '...' : 'NULL'}`);
           
           // Validate URLs before saving
           if (!previewUrl || !pdfUrl) {
@@ -726,194 +722,121 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
             throw new Error(`Cannot save template: preview_url or pdf_url is missing. previewUrl=${previewUrl || 'NULL'}, pdfUrl=${pdfUrl || 'NULL'}`);
           }
           
-          // Build query based on whether we're on free plan (needs tenant_id) or enterprise
-          // Use a simpler approach: Check if exists, then INSERT or UPDATE to avoid lock timeout
+          // Simple, fast INSERT - only save essential fields (no template_data JSON)
+          // Use INSERT IGNORE to avoid errors if template already exists, then UPDATE
           if (isFreePlan && tenantId) {
-            console.log(`    - Saving template to database (Free plan): invoice_id=${invoice.id}, tenant_id=${tenantId}, template_id=${template.id}`);
-            console.log(`    - Values: preview_url=${previewUrl.substring(0, 50)}..., pdf_url=${pdfUrl.substring(0, 50)}...`);
+            // Free plan: use INSERT IGNORE then UPDATE for simplicity and speed
+            const insertQuery = `
+              INSERT IGNORE INTO invoice_templates (
+                tenant_id, invoice_id, template_id, template_name, preview_url, pdf_url, is_selected, created_at
+              ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, NOW()
+              )
+            `;
             
-            // First, check if template already exists
-            const [existing] = await req.db.query(
-              `SELECT id FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ? AND template_id = ? LIMIT 1`,
-              { replacements: [tenantId, invoice.id, template.id] }
-            );
+            await req.db.query(insertQuery, {
+              replacements: [
+                tenantId,
+                invoice.id,
+                template.id,
+                'Default Template', // Simple name
+                previewUrl,
+                pdfUrl,
+                0 // is_selected
+              ]
+            });
             
-            if (existing && existing.length > 0) {
-              // Update existing template
-              console.log(`    - Template exists, updating...`);
-              const updateQuery = `
-                UPDATE invoice_templates 
-                SET template_name = ?,
-                    template_data = ?,
-                    preview_url = ?,
-                    pdf_url = ?,
-                    is_selected = ?
-                WHERE tenant_id = ? AND invoice_id = ? AND template_id = ?
-              `;
-              
-              await req.db.query(updateQuery, {
-                replacements: [
-                  templateName,
-                  templateDataJson,
-                  previewUrl,
-                  pdfUrl,
-                  0, // is_selected
-                  tenantId,
-                  invoice.id,
-                  template.id
-                ]
-              });
-              console.log(`    - ✅ Template updated successfully`);
-            } else {
-              // Insert new template
-              console.log(`    - Template does not exist, inserting...`);
-              const insertQuery = `
-                INSERT INTO invoice_templates (
-                  tenant_id, invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, NOW()
-                )
-              `;
-              
-              await req.db.query(insertQuery, {
-                replacements: [
-                  tenantId,
-                  invoice.id,
-                  template.id,
-                  templateName,
-                  templateDataJson,
-                  previewUrl,
-                  pdfUrl,
-                  0 // is_selected
-                ]
-              });
-              console.log(`    - ✅ Template inserted successfully`);
-            }
+            // Update if it already existed (INSERT IGNORE didn't insert)
+            const updateQuery = `
+              UPDATE invoice_templates 
+              SET preview_url = ?,
+                  pdf_url = ?
+              WHERE tenant_id = ? AND invoice_id = ? AND template_id = ?
+            `;
             
-            // Verify the save immediately
-            const [verifyResults] = await req.db.query(
-              `SELECT preview_url, pdf_url, template_id, tenant_id FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ? AND template_id = ?`,
-              { replacements: [tenantId, invoice.id, template.id] }
-            );
-            if (verifyResults && verifyResults.length > 0) {
-              const saved = verifyResults[0];
-              console.log(`    - ✅ Verified: Template exists in database`);
-              console.log(`       - template_id: ${saved.template_id}`);
-              console.log(`       - tenant_id: ${saved.tenant_id}`);
-              console.log(`       - preview_url: ${saved.preview_url ? saved.preview_url.substring(0, 50) + '...' : 'NULL'}`);
-              console.log(`       - pdf_url: ${saved.pdf_url ? saved.pdf_url.substring(0, 50) + '...' : 'NULL'}`);
-              
-              if (!saved.preview_url || !saved.pdf_url) {
-                console.error(`    - ❌ WARNING: Template saved but URLs are NULL in database!`);
-                console.error(`       This will cause issues when fetching invoices.`);
-                throw new Error(`Template saved but URLs are NULL in database`);
-              }
-            } else {
-              console.error(`    - ❌ CRITICAL: Template verification failed - template not found after save!`);
-              console.error(`       Query: SELECT ... WHERE tenant_id=${tenantId} AND invoice_id=${invoice.id} AND template_id=${template.id}`);
-              throw new Error(`Template was not saved correctly - verification query returned no results`);
-            }
+            await req.db.query(updateQuery, {
+              replacements: [
+                previewUrl,
+                pdfUrl,
+                tenantId,
+                invoice.id,
+                template.id
+              ]
+            });
+            
+            console.log(`    - ✅ Template URLs saved successfully (Free plan)`);
           } else {
-            // Enterprise users (no tenant_id)
-            console.log(`    - Saving template to database (Enterprise): invoice_id=${invoice.id}, template_id=${template.id}`);
-            console.log(`    - Values: preview_url=${previewUrl.substring(0, 50)}..., pdf_url=${pdfUrl.substring(0, 50)}...`);
+            // Enterprise: use INSERT IGNORE then UPDATE
+            const insertQuery = `
+              INSERT IGNORE INTO invoice_templates (
+                invoice_id, template_id, template_name, preview_url, pdf_url, is_selected, created_at
+              ) VALUES (
+                ?, ?, ?, ?, ?, ?, NOW()
+              )
+            `;
             
-            // First, check if template already exists
-            const [existing] = await req.db.query(
-              `SELECT id FROM invoice_templates WHERE invoice_id = ? AND template_id = ? LIMIT 1`,
-              { replacements: [invoice.id, template.id] }
-            );
+            await req.db.query(insertQuery, {
+              replacements: [
+                invoice.id,
+                template.id,
+                'Default Template', // Simple name
+                previewUrl,
+                pdfUrl,
+                0 // is_selected
+              ]
+            });
             
-            if (existing && existing.length > 0) {
-              // Update existing template
-              console.log(`    - Template exists, updating...`);
-              const updateQuery = `
-                UPDATE invoice_templates 
-                SET template_name = ?,
-                    template_data = ?,
-                    preview_url = ?,
-                    pdf_url = ?,
-                    is_selected = ?
-                WHERE invoice_id = ? AND template_id = ?
-              `;
-              
-              await req.db.query(updateQuery, {
-                replacements: [
-                  templateName,
-                  templateDataJson,
-                  previewUrl,
-                  pdfUrl,
-                  0, // is_selected
-                  invoice.id,
-                  template.id
-                ]
-              });
-              console.log(`    - ✅ Template updated successfully`);
-            } else {
-              // Insert new template
-              console.log(`    - Template does not exist, inserting...`);
-              const insertQuery = `
-                INSERT INTO invoice_templates (
-                  invoice_id, template_id, template_name, template_data, preview_url, pdf_url, is_selected, created_at
-                ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, NOW()
-                )
-              `;
-              
-              await req.db.query(insertQuery, {
-                replacements: [
-                  invoice.id,
-                  template.id,
-                  templateName,
-                  templateDataJson,
-                  previewUrl,
-                  pdfUrl,
-                  0 // is_selected
-                ]
-              });
-              console.log(`    - ✅ Template inserted successfully`);
-            }
+            // Update if it already existed
+            const updateQuery = `
+              UPDATE invoice_templates 
+              SET preview_url = ?,
+                  pdf_url = ?
+              WHERE invoice_id = ? AND template_id = ?
+            `;
             
-            // Verify the save immediately
-            const [verifyResults] = await req.db.query(
-              `SELECT preview_url, pdf_url, template_id FROM invoice_templates WHERE invoice_id = ? AND template_id = ?`,
-              { replacements: [invoice.id, template.id] }
-            );
-            if (verifyResults && verifyResults.length > 0) {
-              const saved = verifyResults[0];
-              console.log(`    - ✅ Verified: Template exists in database`);
-              console.log(`       - template_id: ${saved.template_id}`);
-              console.log(`       - preview_url: ${saved.preview_url ? saved.preview_url.substring(0, 50) + '...' : 'NULL'}`);
-              console.log(`       - pdf_url: ${saved.pdf_url ? saved.pdf_url.substring(0, 50) + '...' : 'NULL'}`);
-              
-              if (!saved.preview_url || !saved.pdf_url) {
-                console.error(`    - ❌ WARNING: Template saved but URLs are NULL in database!`);
-                console.error(`       This will cause issues when fetching invoices.`);
-                throw new Error(`Template saved but URLs are NULL in database`);
-              }
-            } else {
-              console.error(`    - ❌ CRITICAL: Template verification failed - template not found after save!`);
-              console.error(`       Query: SELECT ... WHERE invoice_id=${invoice.id} AND template_id=${template.id}`);
-              throw new Error(`Template was not saved correctly - verification query returned no results`);
-            }
+            await req.db.query(updateQuery, {
+              replacements: [
+                previewUrl,
+                pdfUrl,
+                invoice.id,
+                template.id
+              ]
+            });
+            
+            console.log(`    - ✅ Template URLs saved successfully (Enterprise)`);
           }
+          
+          // Quick verification (no need for detailed logging - just check it exists)
+          const verifyQuery = isFreePlan && tenantId
+            ? `SELECT preview_url, pdf_url FROM invoice_templates WHERE tenant_id = ? AND invoice_id = ? AND template_id = ? LIMIT 1`
+            : `SELECT preview_url, pdf_url FROM invoice_templates WHERE invoice_id = ? AND template_id = ? LIMIT 1`;
+          
+          const verifyParams = isFreePlan && tenantId
+            ? [tenantId, invoice.id, template.id]
+            : [invoice.id, template.id];
+          
+          const [verifyResults] = await req.db.query(verifyQuery, {
+            replacements: verifyParams
+          });
+          
+          if (!verifyResults || verifyResults.length === 0 || !verifyResults[0].preview_url || !verifyResults[0].pdf_url) {
+            throw new Error(`Template URLs were not saved correctly - verification failed`);
+          }
+          
+          console.log(`    - ✅ Verified: Template URLs saved correctly`);
         } catch (saveError) {
-          console.error(`    - ❌ CRITICAL: Failed to save template ${template.id} to database:`, saveError.message);
-          console.error(`    Save error stack:`, saveError.stack?.split('\n').slice(0, 10).join('\n'));
+          console.error(`    - ❌ CRITICAL: Failed to save template URLs:`, saveError.message);
           console.error(`    Save error details:`, {
             invoice_id: invoice.id,
             template_id: template.id,
             tenant_id: isFreePlan ? tenantId : 'N/A',
             preview_url: previewUrl,
             pdf_url: pdfUrl,
-            error: saveError.message,
-            error_code: saveError.code,
-            sql_state: saveError.sqlState
+            error: saveError.message
           });
           
           // CRITICAL: Throw error to prevent invoice creation if template cannot be saved
-          // This will cause the transaction to rollback and invoice creation to fail
-          throw new Error(`Failed to save template to database: ${saveError.message}. Invoice creation aborted.`);
+          throw new Error(`Failed to save template URLs to database: ${saveError.message}. Invoice creation aborted.`);
         }
 
         // Validate URLs are not null before adding to results
