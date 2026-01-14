@@ -1,16 +1,25 @@
 const express = require('express');
 const router = express.Router();
-const receiptController = require('../controllers/receiptController');
 const { authenticate } = require('../middleware/auth');
+const { attachTenantDb } = require('../middleware/tenant');
+const { initializeTenantModels } = require('../middleware/models');
+const receiptController = require('../controllers/receiptController');
 
-// All routes require authentication
+// All routes require authentication and tenant DB
 router.use(authenticate);
+router.use(attachTenantDb);
+router.use(initializeTenantModels);
 
-// Generate receipt HTML (for printing)
-router.get('/:id', receiptController.generateReceipt);
+// Generate receipt from invoice
+router.post('/invoices/:id/generate', receiptController.generateReceiptFromInvoice);
 
-// Generate receipt PDF
-router.get('/:id/pdf', receiptController.generateReceiptPDF);
+// Generate standalone receipt (walk-in customers, quick sales)
+router.post('/standalone', receiptController.generateStandaloneReceipt);
+
+// Get receipt by ID
+router.get('/:id', receiptController.getReceiptById);
+
+// Get all receipts for an invoice
+router.get('/invoices/:id/receipts', receiptController.getReceiptsByInvoice);
 
 module.exports = router;
-

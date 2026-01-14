@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { createPaystackSubaccount } = require('../services/paystackSubaccountService');
 
 /**
  * Get payment gateway configuration
@@ -64,6 +65,7 @@ async function addPaymentGateway(req, res) {
       );
     }
 
+    // Create payment gateway
     const gateway = await req.db.models.PaymentGateway.create({
       tenant_id: req.user.tenantId,
       gateway_name,
@@ -74,6 +76,47 @@ async function addPaymentGateway(req, res) {
       is_default: is_default || false,
       is_active: true
     });
+
+    // If Paystack, create subaccount and link to online store
+    let subaccountDetails = null;
+    if (gateway_name === 'paystack') {
+      try {
+        // Get user's online store
+        const onlineStore = await req.db.models.OnlineStore.findOne({
+          where: { tenant_id: req.user.tenantId },
+          order: [['created_at', 'DESC']] // Get most recent online store
+        });
+
+        if (onlineStore) {
+          console.log(`Creating Paystack subaccount for online store: ${onlineStore.id} (${onlineStore.store_name})`);
+
+          // Create Paystack subaccount
+          // Use MycroShop account details for settlement
+          subaccountDetails = await createPaystackSubaccount({
+            secretKey: secret_key, // Use unencrypted key for API call
+            businessName: onlineStore.store_name || 'MycroShop Store',
+            settlementBank: '101', // Providus Bank
+            accountNumber: '1307737031', // MycroShop account
+            testMode: test_mode
+          });
+
+          // Save subaccount code to online store
+          await onlineStore.update({
+            paystack_subaccount_code: subaccountDetails.subaccount_code
+          });
+
+          console.log(`✅ Paystack subaccount created and linked to online store ${onlineStore.id}`);
+          console.log(`   Subaccount Code: ${subaccountDetails.subaccount_code}`);
+          console.log(`   Account Name: ${subaccountDetails.account_name}`);
+        } else {
+          console.warn('No online store found for user. Subaccount created but not linked.');
+        }
+      } catch (subaccountError) {
+        console.error('Error creating Paystack subaccount:', subaccountError);
+        // Don't fail gateway creation if subaccount creation fails
+        // Gateway is still created, user can manually configure subaccount later
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -86,7 +129,16 @@ async function addPaymentGateway(req, res) {
           is_active: gateway.is_active,
           is_default: gateway.is_default,
           test_mode: gateway.test_mode
-        }
+        },
+        ...(subaccountDetails && {
+          subaccount: {
+            subaccount_code: subaccountDetails.subaccount_code,
+            account_name: subaccountDetails.account_name,
+            settlement_bank: subaccountDetails.settlement_bank,
+            account_number: subaccountDetails.account_number,
+            active: subaccountDetails.active
+          }
+        })
       }
     });
   } catch (error) {

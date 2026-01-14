@@ -684,6 +684,113 @@ function initializeModels(sequelize) {
     updatedAt: false
   });
 
+  // Receipt Model (can be standalone or linked to invoice)
+  const Receipt = sequelize.define('Receipt', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
+      comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+    },
+    invoice_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Nullable - receipts can be standalone (for walk-in customers)
+      references: {
+        model: 'invoices',
+        key: 'id'
+      },
+      onDelete: 'CASCADE'
+    },
+    store_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Optional - for enterprise users to link to physical store
+      references: {
+        model: 'stores',
+        key: 'id'
+      }
+    },
+    receipt_number: {
+      type: DataTypes.STRING(100),
+      allowNull: false
+    },
+    receipt_html: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    preview_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
+    pdf_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
+    esc_pos_commands: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'Base64 encoded ESC/POS commands for thermal printers'
+    },
+    digital_stamp_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
+    customer_name: {
+      type: DataTypes.STRING(255),
+      allowNull: true
+    },
+    customer_email: {
+      type: DataTypes.STRING(255),
+      allowNull: true
+    },
+    customer_phone: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
+    subtotal: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.00
+    },
+    tax_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.00
+    },
+    discount_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.00
+    },
+    total: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00
+    },
+    currency: {
+      type: DataTypes.STRING(10),
+      defaultValue: 'NGN'
+    },
+    currency_symbol: {
+      type: DataTypes.STRING(10),
+      defaultValue: '₦'
+    },
+    payment_method: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    }
+  }, {
+    tableName: 'receipts',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: false
+  });
+  console.log('Receipt model defined:', !!Receipt);
+
   // Store Service Model (tied to physical stores or online stores for free users)
   const StoreService = sequelize.define('StoreService', {
     id: {
@@ -1178,6 +1285,15 @@ function initializeModels(sequelize) {
     },
     social_links: {
       type: DataTypes.JSON,
+      allowNull: true
+    },
+    // Paystack subaccount details for split payments (enterprise and free users)
+    paystack_subaccount_code: {
+      type: DataTypes.STRING(255),
+      allowNull: true
+    },
+    paystack_subaccount_id: {
+      type: DataTypes.STRING(255),
       allowNull: true
     },
     is_published: {
@@ -2897,6 +3013,7 @@ function initializeModels(sequelize) {
       Customer,
       Invoice,
       InvoiceItem,
+      Receipt,
       StoreService,
       Booking,
       BookingAvailability,

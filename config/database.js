@@ -480,6 +480,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       show_location BOOLEAN DEFAULT TRUE,
       allow_delivery_datetime BOOLEAN DEFAULT FALSE,
       social_links JSON,
+      paystack_subaccount_code VARCHAR(100),
       is_published BOOLEAN DEFAULT FALSE,
       setup_completed BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -489,6 +490,29 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       INDEX idx_is_published (is_published)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  // Add paystack_subaccount_code column if it doesn't exist (for existing databases)
+  try {
+    const [columns] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'online_stores' 
+      AND COLUMN_NAME = 'paystack_subaccount_code'
+    `);
+    
+    if (!columns || columns.length === 0) {
+      console.log('Adding paystack_subaccount_code column to online_stores table...');
+      await connection.query(`
+        ALTER TABLE online_stores 
+        ADD COLUMN paystack_subaccount_code VARCHAR(100) NULL AFTER social_links
+      `);
+      console.log('✅ paystack_subaccount_code column added to online_stores table');
+    }
+  } catch (alterError) {
+    console.warn('Could not add paystack_subaccount_code column to online_stores:', alterError.message);
+    // Continue - column might already exist
+  }
 
   // Online Store Locations table (links online stores to physical stores)
   const onlineStoreLocationTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
@@ -1016,6 +1040,52 @@ async function runTenantMigrations(connection, isSharedDb = false) {
   } catch (alterError) {
     console.warn('Could not add pdf_url column to invoice_templates:', alterError.message);
     // Continue - column might already exist or there might be a permission issue
+  }
+
+  // Receipts table (stores generated receipts for invoices and standalone sales)
+  const receiptTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const receiptTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+  
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS receipts (
+      ${receiptTenantId}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      invoice_id INT NULL,
+      receipt_number VARCHAR(100) NOT NULL,
+      preview_url VARCHAR(500),
+      pdf_url VARCHAR(500),
+      esc_pos_commands LONGTEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      ${receiptTenantIndex}
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+      INDEX idx_invoice_id (invoice_id),
+      INDEX idx_receipt_number (receipt_number),
+      UNIQUE KEY unique_invoice_receipt (invoice_id, receipt_number${isSharedDb ? ', tenant_id' : ''})
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('✅ Receipts table created/verified');
+
+  // Make invoice_id nullable in receipts table for standalone receipts (for existing databases)
+  try {
+    const [receiptInvoiceColumns] = await connection.query(`
+      SELECT COLUMN_NAME, IS_NULLABLE 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'receipts' 
+      AND COLUMN_NAME = 'invoice_id'
+    `);
+
+    if (receiptInvoiceColumns && receiptInvoiceColumns.length > 0 && receiptInvoiceColumns[0].IS_NULLABLE === 'NO') {
+      console.log('Making invoice_id column nullable in receipts table...');
+      await connection.query(`
+        ALTER TABLE receipts 
+        MODIFY COLUMN invoice_id INT NULL
+      `);
+      console.log('✅ invoice_id column made nullable in receipts table');
+    }
+  } catch (alterError) {
+    console.warn('Could not modify invoice_id column to nullable in receipts table:', alterError.message);
+    // Continue - column might already be nullable
   }
 
   // All online store tables are now complete!

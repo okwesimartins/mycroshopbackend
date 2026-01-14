@@ -10,7 +10,11 @@ router.post('/initialize', authenticate, paymentController.initializePayment);
 router.get('/verify', paymentController.verifyPayment);
 
 // Payment webhook (public - called by payment gateway)
+// Supports online_store_id as query parameter: /api/v1/payments/webhook?online_store_id=123
 router.post('/webhook', paymentController.handlePaymentWebhook);
+
+// Get webhook URL for online store (for Paystack dashboard configuration)
+router.get('/webhook-url/:online_store_id', authenticate, paymentController.getWebhookUrl);
 
 module.exports = router;
 
