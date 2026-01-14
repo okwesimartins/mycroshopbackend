@@ -54,24 +54,65 @@ async function addPaymentGateway(req, res) {
       });
     }
 
+    // Encrypt secret key first (needed for duplicate check)
+    const encryptedSecretKey = encryptSecretKey(secret_key);
+
+    // Check for duplicate payment gateway (by gateway_name, public_key, or secret_key)
+    const { Op } = require('sequelize');
+    
     // Check if payment gateway with same name already exists for this tenant
-    const existingGateway = await req.db.models.PaymentGateway.findOne({
+    const existingGatewayByName = await req.db.models.PaymentGateway.findOne({
       where: {
         gateway_name: gateway_name,
         tenant_id: req.user.tenantId
       }
     });
 
-    if (existingGateway) {
+    if (existingGatewayByName) {
       return res.status(409).json({
         success: false,
         message: `Payment gateway '${gateway_name}' already exists. Please update the existing gateway or use a different gateway name.`,
-        existing_gateway_id: existingGateway.id
+        existing_gateway_id: existingGatewayByName.id,
+        duplicate_type: 'gateway_name'
       });
     }
 
-    // Encrypt secret key (simple encryption - in production use stronger encryption)
-    const encryptedSecretKey = encryptSecretKey(secret_key);
+    // Check if payment gateway with same public_key already exists for this tenant
+    const existingGatewayByPublicKey = await req.db.models.PaymentGateway.findOne({
+      where: {
+        public_key: public_key,
+        tenant_id: req.user.tenantId
+      }
+    });
+
+    if (existingGatewayByPublicKey) {
+      return res.status(409).json({
+        success: false,
+        message: `Payment gateway with this public key already exists. Please update the existing gateway or use a different public key.`,
+        existing_gateway_id: existingGatewayByPublicKey.id,
+        existing_gateway_name: existingGatewayByPublicKey.gateway_name,
+        duplicate_type: 'public_key'
+      });
+    }
+
+    // Check if payment gateway with same secret_key already exists for this tenant
+    // Note: We compare encrypted secret keys since they're stored encrypted
+    const existingGatewayBySecretKey = await req.db.models.PaymentGateway.findOne({
+      where: {
+        secret_key: encryptedSecretKey,
+        tenant_id: req.user.tenantId
+      }
+    });
+
+    if (existingGatewayBySecretKey) {
+      return res.status(409).json({
+        success: false,
+        message: `Payment gateway with this secret key already exists. Please update the existing gateway or use a different secret key.`,
+        existing_gateway_id: existingGatewayBySecretKey.id,
+        existing_gateway_name: existingGatewayBySecretKey.gateway_name,
+        duplicate_type: 'secret_key'
+      });
+    }
 
     // If setting as default, unset other defaults
     if (is_default) {
