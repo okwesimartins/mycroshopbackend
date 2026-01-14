@@ -54,6 +54,22 @@ async function addPaymentGateway(req, res) {
       });
     }
 
+    // Check if payment gateway with same name already exists for this tenant
+    const existingGateway = await req.db.models.PaymentGateway.findOne({
+      where: {
+        gateway_name: gateway_name,
+        tenant_id: req.user.tenantId
+      }
+    });
+
+    if (existingGateway) {
+      return res.status(409).json({
+        success: false,
+        message: `Payment gateway '${gateway_name}' already exists. Please update the existing gateway or use a different gateway name.`,
+        existing_gateway_id: existingGateway.id
+      });
+    }
+
     // Encrypt secret key (simple encryption - in production use stronger encryption)
     const encryptedSecretKey = encryptSecretKey(secret_key);
 
@@ -81,9 +97,20 @@ async function addPaymentGateway(req, res) {
     let subaccountDetails = null;
     if (gateway_name === 'paystack') {
       try {
+        // Get tenant to check subscription plan
+        const { getTenantById } = require('../config/tenant');
+        const tenant = await getTenantById(req.user.tenantId);
+        const isFreePlan = tenant && tenant.subscription_plan === 'free';
+
         // Get user's online store
+        // For free users: tenant_id is set in online_stores table
+        // For enterprise users: tenant_id is NULL (database isolation)
+        const onlineStoreWhere = isFreePlan
+          ? { tenant_id: req.user.tenantId }
+          : {}; // Enterprise users - all stores in their DB belong to them
+
         const onlineStore = await req.db.models.OnlineStore.findOne({
-          where: { tenant_id: req.user.tenantId },
+          where: onlineStoreWhere,
           order: [['created_at', 'DESC']] // Get most recent online store
         });
 
@@ -145,7 +172,7 @@ async function addPaymentGateway(req, res) {
     console.error('Error adding payment gateway:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Failed to add payment gateway'
     });
   }
 }
