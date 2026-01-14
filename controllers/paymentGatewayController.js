@@ -145,7 +145,7 @@ async function addPaymentGateway(req, res) {
     console.error('Error adding payment gateway:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to add payment gateway'
+      message: error
     });
   }
 }
