@@ -77,10 +77,20 @@ app.use('/api/v1/payment-gateways', require('./routes/paymentGateways')); // Pay
 app.use('/api/v1/payments', require('./routes/payments')); // Payment processing
 // AI Agent endpoints (for BMT to AI communication)
 app.use('/api/v1/ai-agent', require('./routes/aiAgent'));
+// AI Image Enhancement endpoints
+app.use('/api/v1/ai-image', require('./routes/aiImageEnhancement'));
 
-// Public store preview (no authentication required)
-const onlineStoreController = require('./controllers/onlineStoreController');
-app.get('/api/v1/stores/preview/:username', onlineStoreController.getPublicStorePreview);
+// Product Image Enhancement endpoints (with presets)
+app.use('/api/v1/products/image-enhancement', require('./routes/productImageEnhancement'));
+
+// Public store routes (no authentication required - for customers)
+app.use('/api/v1/public-store', require('./routes/publicStore'));
+
+// Public checkout routes (no authentication required - for customers)
+app.use('/api/v1/public-checkout', require('./routes/publicCheckout'));
+
+// Public booking routes (no authentication required - for customers)
+app.use('/api/v1/public-bookings', require('./routes/publicBookings'));
 
 // Health check
 app.get('/health', (req, res) => {

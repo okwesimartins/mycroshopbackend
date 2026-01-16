@@ -243,6 +243,34 @@ async function verifyPayment(req, res) {
         { payment_status: 'paid', status: 'confirmed' },
         { where: { id: transaction.order_id } }
       );
+
+      // Send order confirmation email after successful payment
+      try {
+        const order = await req.db.models.OnlineStoreOrder.findByPk(transaction.order_id, {
+          include: [
+            {
+              model: req.db.models.OnlineStoreOrderItem
+            }
+          ]
+        });
+
+        if (order && transaction.customer_email) {
+          const tenant = await getTenantById(req.user.tenantId);
+          if (tenant) {
+            const { sendOrderConfirmationEmail } = require('../services/emailService');
+            await sendOrderConfirmationEmail({
+              tenant,
+              order: order.toJSON(),
+              customerEmail: transaction.customer_email,
+              customerName: transaction.customer_name || order.customer_name || 'Customer',
+              items: order.OnlineStoreOrderItems || []
+            });
+          }
+        }
+      } catch (emailError) {
+        console.error('Error sending order confirmation email:', emailError);
+        // Don't fail payment verification if email fails
+      }
     }
 
     // Update invoice status if payment successful
@@ -478,7 +506,7 @@ async function handlePaymentWebhook(req, res) {
       });
 
       if (transaction) {
-        // Update transaction status
+    // Update transaction status
         await transaction.update({
           status: 'success',
           gateway_response: data,
@@ -488,14 +516,42 @@ async function handlePaymentWebhook(req, res) {
 
         // Update order status if payment successful
         if (transaction.order_id) {
-          await req.db.models.OnlineStoreOrder.update(
-            { 
-              payment_status: 'paid', 
+          const order = await req.db.models.OnlineStoreOrder.findByPk(transaction.order_id, {
+            include: [
+              {
+                model: req.db.models.OnlineStoreOrderItem
+              }
+            ]
+          });
+
+          if (order) {
+            await order.update({
+              payment_status: 'paid',
               status: 'confirmed',
               paid_at: new Date()
-            },
-            { where: { id: transaction.order_id } }
-          );
+            });
+
+            // Send order confirmation email after successful payment
+            try {
+              const tenantId = transaction.tenant_id;
+              if (tenantId) {
+                const tenant = await getTenantById(tenantId);
+                if (tenant && (transaction.customer_email || order.customer_email)) {
+                  const { sendOrderConfirmationEmail } = require('../services/emailService');
+                  await sendOrderConfirmationEmail({
+                    tenant,
+                    order: order.toJSON(),
+                    customerEmail: transaction.customer_email || order.customer_email,
+                    customerName: transaction.customer_name || order.customer_name || 'Customer',
+                    items: order.OnlineStoreOrderItems || []
+                  });
+                }
+              }
+            } catch (emailError) {
+              console.error('Error sending order confirmation email:', emailError);
+              // Don't fail webhook processing if email fails
+            }
+          }
         }
 
         // Update invoice status if payment successful

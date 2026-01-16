@@ -47,6 +47,26 @@ router.use(initializeTenantModels);
 // Check online store setup status
 router.get('/check-setup', onlineStoreController.checkOnlineStoreSetup);
 
+// Preview routes (protected - for store owners to preview their store)
+// These mirror the public store routes exactly but are protected and can show unpublished stores
+
+// Get store preview overview (returns collections in response)
+router.get('/preview', onlineStoreController.getStorePreview);
+
+// Get all products for preview (ALL products with filters)
+// Filters: collection_id, search, category, store_id
+router.get('/preview/products', onlineStoreController.getPreviewProducts);
+
+// Get product by ID for preview
+router.get('/preview/products/:product_id', onlineStoreController.getPreviewProduct);
+
+// Get all services for preview (ALL services with filters)
+// Filters: collection_id, search
+router.get('/preview/services', onlineStoreController.getPreviewServices);
+
+// Get service by ID for preview
+router.get('/preview/services/:service_id', onlineStoreController.getPreviewService);
+
 // Create/initialize online store
 router.post('/setup', onlineStoreController.setupOnlineStore);
 
@@ -163,6 +183,10 @@ router.post('/:id/products/:product_id/publish', onlineStoreController.publishOn
 // Remove/Delete product from online store (free users only)
 // Query param: ?unpublish_only=true (optional - if true, only unpublishes, doesn't delete product)
 router.delete('/:id/products/:product_id', onlineStoreController.removeOnlineStoreProduct);
+
+// Get all products uploaded to online store (not in collections)
+// This shows products that can be added to collections
+router.get('/:id/products', onlineStoreController.getOnlineStoreProducts);
 
 module.exports = router;
 

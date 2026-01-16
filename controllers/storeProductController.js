@@ -57,10 +57,36 @@ async function getAvailableProducts(req, res) {
       where.category = category;
     }
 
+    if (store_id) {
+      where.store_id = store_id;
+    }
+
+    // Get all product IDs that are already in collections for this online store
+    const productsInCollections = await models.StoreCollectionProduct.findAll({
+      attributes: ['product_id'],
+      include: [
+        {
+          model: models.StoreCollection,
+          where: { online_store_id: online_store_id },
+          attributes: []
+        }
+      ],
+      raw: true
+    });
+
+    const productIdsInCollections = productsInCollections.map(p => p.product_id).filter(Boolean);
+
+    // Exclude products that are already in collections
+    if (productIdsInCollections.length > 0) {
+      where.id = {
+        [Sequelize.Op.notIn]: productIdsInCollections
+      };
+    }
+
     // Get products with pagination using findAndCountAll
     const { count, rows } = await models.Product.findAndCountAll({
       where,
-      attributes: ['id', 'name', 'sku', 'price', 'image_url', 'category'],
+      attributes: ['id', 'name', 'sku', 'price', 'image_url', 'category', 'stock', 'description'],
       order: [['created_at', 'DESC']],
       limit: limitNum,
       offset: offset

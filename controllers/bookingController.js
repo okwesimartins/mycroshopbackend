@@ -225,11 +225,11 @@ async function createBooking(req, res) {
     }
 
     // Get tenant info if not already fetched above
-    const tenantId = req.user?.tenantId;
-    const { getTenantById } = require('../config/tenant');
     let tenant = null;
     let isFreePlan = false;
-    if (!tenant) {
+    const tenantId = req.user?.tenantId;
+    if (tenantId && !tenant) {
+      const { getTenantById } = require('../config/tenant');
       try {
         tenant = await getTenantById(tenantId);
         isFreePlan = tenant && tenant.subscription_plan === 'free';
@@ -273,6 +273,22 @@ async function createBooking(req, res) {
         }
       ]
     });
+
+    // Send booking confirmation email
+    if (customer_email && tenant) {
+      try {
+        const { sendBookingConfirmationEmail } = require('../services/emailService');
+        await sendBookingConfirmationEmail({
+          tenant,
+          booking: completeBooking,
+          customerEmail: customer_email,
+          customerName: customer_name || customer?.name || 'Customer'
+        });
+      } catch (emailError) {
+        console.error('Error sending booking confirmation email:', emailError);
+        // Don't fail the booking creation if email fails
+      }
+    }
 
     res.status(201).json({
       success: true,

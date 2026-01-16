@@ -845,19 +845,56 @@ async function publishOnlineStore(req, res) {
 
 /**
  * Get public store preview by username
+ * Public route - no authentication required
+ * Requires tenant_id as query parameter OR will try to look it up from username
  */
 async function getPublicStorePreview(req, res) {
   try {
     const { username } = req.params;
+    let { tenant_id } = req.query;
 
-    if (!req.db) {
-      return res.status(500).json({
+    const { getTenantConnection } = require('../config/database');
+    const { getTenantById } = require('../config/tenant');
+    const initModels = require('../models');
+
+    // If tenant_id not provided, try to look it up from username in shared database
+    if (!tenant_id) {
+      try {
+        const { getSharedFreeDatabase } = require('../config/database');
+        const sharedDb = await getSharedFreeDatabase();
+        const sharedModels = initModels(sharedDb);
+        
+        const onlineStoreInShared = await sharedModels.OnlineStore.findOne({
+          where: { username: username.toLowerCase() },
+          attributes: ['tenant_id']
+        });
+
+        if (onlineStoreInShared && onlineStoreInShared.tenant_id) {
+          tenant_id = onlineStoreInShared.tenant_id;
+        }
+      } catch (lookupError) {
+        console.warn('Could not look up tenant_id from username:', lookupError.message);
+      }
+    }
+
+    if (!tenant_id) {
+      return res.status(400).json({
         success: false,
-        message: 'Database connection not available'
+        message: 'tenant_id is required. Please provide it as a query parameter: ?tenant_id=123'
       });
     }
 
-    const models = initModels(req.db);
+    // Get tenant database connection
+    const tenant = await getTenantById(tenant_id);
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Store not found'
+      });
+    }
+
+    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const models = initModels(sequelize);
 
     const onlineStore = await models.OnlineStore.findOne({
       where: { username: username.toLowerCase(), is_published: true },
@@ -877,15 +914,27 @@ async function getPublicStorePreview(req, res) {
                 }
               ],
               order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
+            },
+            {
+              model: models.StoreCollectionService,
+              include: [
+                {
+                  model: models.StoreService,
+                  where: { is_active: true },
+                  required: false
+                }
+              ],
+              order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
             }
           ],
           order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
         },
         {
-          model: models.StoreService,
-          through: { attributes: ['is_visible'] },
-          where: { is_active: true },
-          required: false
+          model: models.OnlineStoreLocation,
+          include: [{ 
+            model: models.Store, 
+            attributes: ['id', 'name', 'address', 'city', 'state', 'country'] 
+          }]
         }
       ]
     });
@@ -897,16 +946,54 @@ async function getPublicStorePreview(req, res) {
       });
     }
 
-    const normalizedStore = normalizeOnlineStoreData(req, onlineStore);
+    // Normalize store data (similar to publicStoreController)
+    const storeData = onlineStore.toJSON();
+    
+    // Normalize URLs
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    }
+
+    if (storeData.profile_logo_url) storeData.profile_logo_url = getFullUrl(storeData.profile_logo_url);
+    if (storeData.banner_image_url) storeData.banner_image_url = getFullUrl(storeData.banner_image_url);
+    if (storeData.background_image_url) storeData.background_image_url = getFullUrl(storeData.background_image_url);
+
+    // Normalize product/service images within collections
+    if (storeData.StoreCollections) {
+      storeData.StoreCollections.forEach(collection => {
+        if (collection.StoreCollectionProducts) {
+          collection.StoreCollectionProducts.forEach(cp => {
+            if (cp.Product && cp.Product.image_url) {
+              cp.Product.image_url = getFullUrl(cp.Product.image_url);
+            }
+          });
+        }
+        if (collection.StoreCollectionServices) {
+          collection.StoreCollectionServices.forEach(cs => {
+            if (cs.StoreService && cs.StoreService.service_image_url) {
+              cs.StoreService.service_image_url = getFullUrl(cs.StoreService.service_image_url);
+            }
+          });
+        }
+      });
+    }
+
     res.json({
       success: true,
-      data: { onlineStore: normalizedStore }
+      data: { onlineStore: storeData }
     });
   } catch (error) {
     console.error('Error getting public store preview:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get store preview'
+      message: 'Failed to get store preview',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }
@@ -2700,6 +2787,932 @@ async function publishOnlineStoreProduct(req, res) {
   }
 }
 
+/**
+ * Get all products uploaded to online store (not in collections)
+ * GET /api/v1/stores/online/:id/products
+ * Returns products that are NOT in any collection
+ */
+async function getOnlineStoreProducts(req, res) {
+  try {
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const { id: online_store_id } = req.params;
+    const { search, category, store_id, page = 1, limit = 20 } = req.query;
+
+    // Parse pagination parameters
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    // Verify online store belongs to current tenant
+    const onlineStore = await findTenantOnlineStoreById(req, models, online_store_id);
+    if (!onlineStore) {
+      return res.status(403).json({
+        success: false,
+        message: 'Online store not found or access denied'
+      });
+    }
+
+    // Get tenant to check subscription plan
+    const tenantId = req.user?.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    let tenant = null;
+    let isFreePlan = false;
+    try {
+      tenant = await getTenantById(tenantId);
+      isFreePlan = tenant && tenant.subscription_plan === 'free';
+    } catch (error) {
+      console.warn('Could not fetch tenant:', error);
+    }
+
+    const { Sequelize } = require('sequelize');
+
+    // Build where clause
+    const where = {
+      is_active: true
+    };
+
+    if (search) {
+      where[Sequelize.Op.or] = [
+        { name: { [Sequelize.Op.like]: `%${search}%` } },
+        { sku: { [Sequelize.Op.like]: `%${search}%` } }
+      ];
+    }
+
+    if (category) {
+      where.category = category;
+    }
+
+    // For enterprise users, filter by store_id if provided
+    if (!isFreePlan && store_id) {
+      where.store_id = store_id;
+    }
+
+    // Get all product IDs that are already in collections for this online store
+    const productsInCollections = await models.StoreCollectionProduct.findAll({
+      attributes: ['product_id'],
+      include: [
+        {
+          model: models.StoreCollection,
+          where: { online_store_id: online_store_id },
+          attributes: []
+        }
+      ],
+      raw: true
+    });
+
+    const productIdsInCollections = productsInCollections.map(p => p.product_id).filter(Boolean);
+
+    // Exclude products that are already in collections
+    if (productIdsInCollections.length > 0) {
+      where.id = {
+        [Sequelize.Op.notIn]: productIdsInCollections
+      };
+    }
+
+    // Get products with pagination
+    const { count, rows } = await models.Product.findAndCountAll({
+      where,
+      attributes: ['id', 'name', 'sku', 'price', 'image_url', 'category', 'stock', 'description', 'created_at'],
+      order: [['created_at', 'DESC']],
+      limit: limitNum,
+      offset: offset
+    });
+
+    // Helper function to get full URL
+    const getFullUrl = (relativePath) => {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    };
+
+    // Convert image_url to full URL for each product
+    const products = rows.map(product => {
+      const productData = product.toJSON();
+      if (productData.image_url) {
+        productData.image_url = getFullUrl(productData.image_url);
+      }
+      return productData;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        products,
+        total: count,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total_pages: Math.ceil(count / limitNum),
+          total_items: count
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error getting online store products:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get online store products',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Get authenticated user's online store preview
+ * Protected route - requires authentication
+ * Returns comprehensive store overview (same as public but for authenticated owners)
+ * Can preview even if store is not published
+ * GET /api/v1/online-stores/preview?preview_limit=5
+ */
+async function getStorePreview(req, res) {
+  try {
+    const { preview_limit = 5 } = req.query;
+
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const { Sequelize, Op } = require('sequelize');
+
+    // Parse preview limit (max 20 items per section)
+    const previewLimit = Math.min(parseInt(preview_limit) || 5, 20);
+
+    // Get user's online store (can be unpublished for preview)
+    const onlineStore = await models.OnlineStore.findOne({
+      where: {
+        // For free users, filter by tenant_id; for enterprise, no filter needed (separate DB)
+        ...(req.user.tenantId && req.tenant?.subscription_plan === 'free' 
+          ? { tenant_id: req.user.tenantId } 
+          : {})
+      },
+      include: [
+        {
+          model: models.OnlineStoreLocation,
+          include: [{ 
+            model: models.Store, 
+            attributes: ['id', 'name', 'address', 'city', 'state', 'country'] 
+          }]
+        }
+      ],
+      order: [['created_at', 'DESC']] // Get most recent store
+    });
+
+    if (!onlineStore) {
+      return res.status(404).json({
+        success: false,
+        message: 'Online store not found. Please set up your online store first.'
+      });
+    }
+
+    // Helper to normalize URLs
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    }
+
+    const storeData = onlineStore.toJSON();
+    
+    // Normalize store image URLs
+    if (storeData.profile_logo_url) storeData.profile_logo_url = getFullUrl(storeData.profile_logo_url);
+    if (storeData.banner_image_url) storeData.banner_image_url = getFullUrl(storeData.banner_image_url);
+    if (storeData.background_image_url) storeData.background_image_url = getFullUrl(storeData.background_image_url);
+
+    // Check if products and services exist to determine toggle visibility
+    // Can preview even if not published
+    const hasProducts = await models.StoreProduct.count({
+      where: {
+        online_store_id: onlineStore.id
+      },
+      include: [{
+        model: models.Product,
+        where: { is_active: true },
+        required: true
+      }]
+    }) > 0;
+
+    const hasServices = await models.StoreService.count({
+      where: { is_active: true }
+    }) > 0;
+
+    // Get product collections (preview - limited items per collection)
+    // Can preview even if not visible
+    const productCollections = await models.StoreCollection.findAll({
+      where: {
+        online_store_id: onlineStore.id,
+        collection_type: 'product'
+      },
+      include: [
+        {
+          model: models.StoreCollectionProduct,
+          include: [
+            {
+              model: models.Product,
+              where: { is_active: true },
+              required: false,
+              attributes: ['id', 'name', 'sku', 'price', 'image_url', 'category']
+            }
+          ],
+          limit: previewLimit,
+          order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
+        }
+      ],
+      order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']],
+      limit: 10
+    });
+
+    // Get service collections (preview - limited items per collection)
+    // Can preview even if not visible
+    const serviceCollections = await models.StoreCollection.findAll({
+      where: {
+        online_store_id: onlineStore.id,
+        collection_type: 'service'
+      },
+      include: [
+        {
+          model: models.StoreCollectionService,
+          include: [
+            {
+              model: models.StoreService,
+              where: { is_active: true },
+              required: false,
+              attributes: ['id', 'service_title', 'description', 'price', 'service_image_url', 'duration_minutes']
+            }
+          ],
+          limit: previewLimit,
+          order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
+        }
+      ],
+      order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']],
+      limit: 10
+    });
+
+    // Get products NOT in any collection (preview)
+    // Can preview even if not published
+    const productsNotInCollections = await models.StoreProduct.findAll({
+      where: {
+        online_store_id: onlineStore.id,
+        '$Product.StoreCollectionProducts.id$': { [Op.eq]: null }
+      },
+      include: [
+        {
+          model: models.Product,
+          where: { is_active: true },
+          required: true,
+          include: [{
+            model: models.StoreCollectionProduct,
+            required: false,
+            attributes: []
+          }]
+        }
+      ],
+      limit: previewLimit,
+      order: [['created_at', 'DESC']],
+      subQuery: false,
+      group: ['StoreProduct.id']
+    });
+
+    // Get services NOT in any collection (preview)
+    const servicesNotInCollections = await models.StoreService.findAll({
+      where: {
+        is_active: true,
+        '$OnlineStoreServices.online_store_id$': onlineStore.id,
+        '$StoreCollectionServices.id$': { [Op.eq]: null }
+      },
+      include: [
+        {
+          model: models.OnlineStoreService,
+          where: { 
+            online_store_id: onlineStore.id,
+            is_visible: true
+          },
+          required: true,
+          attributes: []
+        },
+        {
+          model: models.StoreCollectionService,
+          required: false,
+          attributes: []
+        }
+      ],
+      limit: previewLimit,
+      order: [['created_at', 'DESC']],
+      subQuery: false,
+      group: ['StoreService.id']
+    });
+
+    // Get total counts for pagination info
+    // Can preview even if not visible
+    const totalProductCollections = await models.StoreCollection.count({
+      where: {
+        online_store_id: onlineStore.id,
+        collection_type: 'product'
+      }
+    });
+
+    const totalServiceCollections = await models.StoreCollection.count({
+      where: {
+        online_store_id: onlineStore.id,
+        collection_type: 'service'
+      }
+    });
+
+    // Count products not in collections using a subquery approach
+    // Can preview even if not published
+    const [productsNotInCollectionsCountResult] = await req.db.query(`
+      SELECT COUNT(DISTINCT sp.id) as count
+      FROM store_products sp
+      INNER JOIN products p ON sp.product_id = p.id
+      LEFT JOIN store_collection_products scp ON p.id = scp.product_id
+      WHERE sp.online_store_id = :onlineStoreId
+        AND p.is_active = 1
+        AND scp.id IS NULL
+    `, {
+      replacements: { onlineStoreId: onlineStore.id },
+      type: Sequelize.QueryTypes.SELECT
+    });
+    const totalProductsNotInCollections = productsNotInCollectionsCountResult?.count || 0;
+
+    // Count services not in collections (linked to this online store)
+    const [servicesNotInCollectionsCountResult] = await req.db.query(`
+      SELECT COUNT(DISTINCT ss.id) as count
+      FROM store_services ss
+      INNER JOIN online_store_services oss ON ss.id = oss.service_id
+      LEFT JOIN store_collection_services scs ON ss.id = scs.service_id
+      WHERE ss.is_active = 1
+        AND oss.online_store_id = :onlineStoreId
+        AND oss.is_visible = 1
+        AND scs.id IS NULL
+    `, {
+      replacements: { onlineStoreId: onlineStore.id },
+      type: Sequelize.QueryTypes.SELECT
+    });
+    const totalServicesNotInCollections = servicesNotInCollectionsCountResult?.count || 0;
+
+    // Normalize collection data
+    const normalizeCollection = (collection) => {
+      const collectionData = collection.toJSON();
+      if (collectionData.StoreCollectionProducts) {
+        collectionData.StoreCollectionProducts = collectionData.StoreCollectionProducts.map(cp => {
+          const productData = cp.Product ? cp.Product.toJSON() : null;
+          if (productData && productData.image_url) {
+            productData.image_url = getFullUrl(productData.image_url);
+          }
+          return {
+            ...cp.toJSON(),
+            Product: productData
+          };
+        });
+      }
+      if (collectionData.StoreCollectionServices) {
+        collectionData.StoreCollectionServices = collectionData.StoreCollectionServices.map(cs => {
+          const serviceData = cs.StoreService ? cs.StoreService.toJSON() : null;
+          if (serviceData && serviceData.service_image_url) {
+            serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
+          }
+          return {
+            ...cs.toJSON(),
+            StoreService: serviceData
+          };
+        });
+      }
+      return collectionData;
+    };
+
+    // Normalize products
+    const normalizedProducts = productsNotInCollections.map(sp => {
+      const productData = sp.Product.toJSON();
+      if (productData.image_url) {
+        productData.image_url = getFullUrl(productData.image_url);
+      }
+      return productData;
+    });
+
+    // Normalize services
+    const normalizedServices = servicesNotInCollections.map(service => {
+      const serviceData = service.toJSON();
+      if (serviceData.service_image_url) {
+        serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
+      }
+      return serviceData;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        store: {
+          id: storeData.id,
+          username: storeData.username,
+          store_name: storeData.store_name,
+          store_description: storeData.store_description,
+          profile_logo_url: storeData.profile_logo_url,
+          banner_image_url: storeData.banner_image_url,
+          background_image_url: storeData.background_image_url,
+          background_color: storeData.background_color,
+          button_style: storeData.button_style,
+          button_color: storeData.button_color,
+          button_font_color: storeData.button_font_color,
+          social_links: storeData.social_links,
+          is_location_based: storeData.is_location_based,
+          show_location: storeData.show_location,
+          allow_delivery_datetime: storeData.allow_delivery_datetime,
+          is_published: storeData.is_published, // Include published status for preview
+          OnlineStoreLocations: storeData.OnlineStoreLocations
+        },
+        toggles: {
+          show_products: hasProducts,
+          show_services: hasServices
+        },
+        product_collections: {
+          items: productCollections.map(normalizeCollection),
+          total: totalProductCollections,
+          preview_limit: previewLimit,
+          has_more: totalProductCollections > productCollections.length
+        },
+        service_collections: {
+          items: serviceCollections.map(normalizeCollection),
+          total: totalServiceCollections,
+          preview_limit: previewLimit,
+          has_more: totalServiceCollections > serviceCollections.length
+        },
+        products_not_in_collections: {
+          items: normalizedProducts,
+          total: parseInt(totalProductsNotInCollections) || 0,
+          preview_limit: previewLimit,
+          has_more: (parseInt(totalProductsNotInCollections) || 0) > normalizedProducts.length
+        },
+        services_not_in_collections: {
+          items: normalizedServices,
+          total: parseInt(totalServicesNotInCollections) || 0,
+          preview_limit: previewLimit,
+          has_more: (parseInt(totalServicesNotInCollections) || 0) > normalizedServices.length
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error getting store preview:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get store preview',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
+/**
+ * Preview Controller Functions
+ * These mirror the public store routes but are protected and can show unpublished stores
+ * For authenticated store owners to preview their store
+ */
+
+/**
+ * Get all services for preview (ALL services with filters)
+ * GET /api/v1/online-stores/preview/services?collection_id=123&search=keyword
+ * Filters:
+ *   - collection_id: Filter services by collection
+ *   - search: Search by service name or description
+ */
+async function getPreviewServices(req, res) {
+  try {
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const { search, page = 1, limit = 20 } = req.query;
+
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    // Get user's online store
+    const onlineStore = await models.OnlineStore.findOne({
+      where: {
+        ...(req.user.tenantId && req.tenant?.subscription_plan === 'free' 
+          ? { tenant_id: req.user.tenantId } 
+          : {})
+      },
+      order: [['created_at', 'DESC']]
+    });
+
+    if (!onlineStore) {
+      return res.status(404).json({
+        success: false,
+        message: 'Online store not found. Please set up your online store first.'
+      });
+    }
+
+    const { Op } = require('sequelize');
+    const { collection_id } = req.query;
+
+    const where = {
+      is_active: true
+    };
+
+    if (search) {
+      where[Op.or] = [
+        { service_title: { [Op.like]: `%${search}%` } },
+        { description: { [Op.like]: `%${search}%` } }
+      ];
+    }
+
+    // Build include clause - services linked to this online store
+    const includeClause = [{
+      model: models.OnlineStoreService,
+      where: { 
+        online_store_id: onlineStore.id,
+        is_visible: true
+      },
+      required: true,
+      attributes: []
+    }];
+
+    // If collection_id is provided, filter services in that collection
+    if (collection_id) {
+      includeClause.push({
+        model: models.StoreCollectionService,
+        where: { collection_id },
+        required: true,
+        attributes: []
+      });
+    }
+
+    // Get ALL services for this online store (with optional collection filter)
+    // Can preview even if not visible
+    const { count, rows } = await models.StoreService.findAndCountAll({
+      where,
+      include: includeClause,
+      order: [['created_at', 'DESC']],
+      limit: limitNum,
+      offset: offset,
+      distinct: true
+    });
+
+    // Normalize image URLs
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    }
+
+    const services = rows.map(service => {
+      const serviceData = service.toJSON();
+      if (serviceData.service_image_url) {
+        serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
+      }
+      return serviceData;
+    });
+
+    res.json({
+      success: true,
+      data: { 
+        services,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total_pages: Math.ceil(count / limitNum),
+          total_items: count
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error getting preview services:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get services',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
+/**
+ * Get service by ID for preview
+ * GET /api/v1/online-stores/preview/services/:service_id
+ */
+async function getPreviewService(req, res) {
+  try {
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const { service_id } = req.params;
+
+    // Get user's online store
+    const onlineStore = await models.OnlineStore.findOne({
+      where: {
+        ...(req.user.tenantId && req.tenant?.subscription_plan === 'free' 
+          ? { tenant_id: req.user.tenantId } 
+          : {})
+      },
+      order: [['created_at', 'DESC']]
+    });
+
+    if (!onlineStore) {
+      return res.status(404).json({
+        success: false,
+        message: 'Online store not found. Please set up your online store first.'
+      });
+    }
+
+    // Get service (linked to this online store)
+    const service = await models.StoreService.findOne({
+      where: {
+        id: service_id,
+        is_active: true
+      },
+      include: [{
+        model: models.OnlineStoreService,
+        where: { 
+          online_store_id: onlineStore.id
+        },
+        required: true
+      }]
+    });
+
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found'
+      });
+    }
+
+    // Normalize image URLs
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    }
+
+    const serviceData = service.toJSON();
+    if (serviceData.service_image_url) {
+      serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
+    }
+
+    res.json({
+      success: true,
+      data: { service: serviceData }
+    });
+  } catch (error) {
+    console.error('Error getting preview service:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get service',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
+/**
+ * Get all products for preview (products not in collections)
+ * GET /api/v1/online-stores/preview/products
+ */
+async function getPreviewProducts(req, res) {
+  try {
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const { search, category, store_id, page = 1, limit = 20 } = req.query;
+
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
+
+    // Get user's online store
+    const onlineStore = await models.OnlineStore.findOne({
+      where: {
+        ...(req.user.tenantId && req.tenant?.subscription_plan === 'free' 
+          ? { tenant_id: req.user.tenantId } 
+          : {})
+      },
+      order: [['created_at', 'DESC']]
+    });
+
+    if (!onlineStore) {
+      return res.status(404).json({
+        success: false,
+        message: 'Online store not found. Please set up your online store first.'
+      });
+    }
+
+    const { Op } = require('sequelize');
+
+    // Build product where clause
+    const productWhere = { is_active: true };
+    if (search) {
+      productWhere[Op.or] = [
+        { name: { [Op.like]: `%${search}%` } },
+        { sku: { [Op.like]: `%${search}%` } }
+      ];
+    }
+    if (category) {
+      productWhere.category = category;
+    }
+
+    // For enterprise users, filter by physical store if store_id is provided
+    if (req.tenant?.subscription_plan !== 'free' && store_id) {
+      productWhere.store_id = store_id;
+    }
+
+    // Build StoreProduct where clause
+    const storeProductWhere = {
+      online_store_id: onlineStore.id
+    };
+
+    // If collection_id is provided, filter products in that collection
+    if (collection_id) {
+      storeProductWhere['$Product.StoreCollectionProducts.collection_id$'] = collection_id;
+    }
+
+    // Get ALL products for this online store (with optional collection filter)
+    // Can preview even if not published
+    const { count, rows } = await models.StoreProduct.findAndCountAll({
+      where: storeProductWhere,
+      include: [
+        {
+          model: models.Product,
+          where: productWhere,
+          required: true,
+          include: [{
+            model: models.StoreCollectionProduct,
+            required: collection_id ? true : false, // Required only if filtering by collection
+            attributes: ['id', 'collection_id'],
+            ...(collection_id ? { where: { collection_id } } : {})
+          }]
+        }
+      ],
+      limit: limitNum,
+      offset: offset,
+      order: [['created_at', 'DESC']],
+      subQuery: false,
+      group: ['StoreProduct.id'],
+      distinct: true
+    });
+
+    // Normalize image URLs
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    }
+
+    const products = rows.map(sp => {
+      const productData = sp.Product.toJSON();
+      if (productData.image_url) {
+        productData.image_url = getFullUrl(productData.image_url);
+      }
+      return productData;
+    });
+
+    res.json({
+      success: true,
+      data: { 
+        products,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total_pages: Math.ceil(count.length / limitNum),
+          total_items: count.length
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error getting preview products:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get products',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
+/**
+ * Get product by ID for preview
+ * GET /api/v1/online-stores/preview/products/:product_id
+ */
+async function getPreviewProduct(req, res) {
+  try {
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const { product_id } = req.params;
+
+    // Get user's online store
+    const onlineStore = await models.OnlineStore.findOne({
+      where: {
+        ...(req.user.tenantId && req.tenant?.subscription_plan === 'free' 
+          ? { tenant_id: req.user.tenantId } 
+          : {})
+      },
+      order: [['created_at', 'DESC']]
+    });
+
+    if (!onlineStore) {
+      return res.status(404).json({
+        success: false,
+        message: 'Online store not found. Please set up your online store first.'
+      });
+    }
+
+    // Get product (can preview even if not published)
+    const product = await models.Product.findOne({
+      where: {
+        id: product_id,
+        is_active: true
+      },
+      include: [{
+        model: models.StoreProduct,
+        where: {
+          online_store_id: onlineStore.id
+        },
+        required: true
+      }]
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Normalize image URLs
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    }
+
+    const productData = product.toJSON();
+    if (productData.image_url) {
+      productData.image_url = getFullUrl(productData.image_url);
+    }
+
+    res.json({
+      success: true,
+      data: { product: productData }
+    });
+  } catch (error) {
+    console.error('Error getting preview product:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get product',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
 module.exports = {
   checkOnlineStoreSetup,
   setupOnlineStore,
@@ -2710,9 +3723,15 @@ module.exports = {
   uploadStoreImage,
   publishOnlineStore,
   getPublicStorePreview,
+  getStorePreview,
+  getPreviewProducts,
+  getPreviewProduct,
+  getPreviewServices,
+  getPreviewService,
   createOnlineStoreProduct,
   updateOnlineStoreProduct,
   removeOnlineStoreProduct,
-  publishOnlineStoreProduct
+  publishOnlineStoreProduct,
+  getOnlineStoreProducts
 };
 
