@@ -3272,7 +3272,7 @@ async function getStorePreview(req, res) {
     console.error('Error getting store preview:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get store preview',
+      message: error.message,
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
