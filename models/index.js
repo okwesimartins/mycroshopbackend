@@ -1712,6 +1712,21 @@ function initializeModels(sequelize) {
     updatedAt: false
   });
 
+  // Define OnlineStoreOrder associations
+  // OnlineStoreOrder ↔ OnlineStore
+  OnlineStoreOrder.belongsTo(OnlineStore, { foreignKey: 'online_store_id', onDelete: 'CASCADE' });
+  OnlineStore.hasMany(OnlineStoreOrder, { foreignKey: 'online_store_id', onDelete: 'CASCADE' });
+
+  // OnlineStoreOrder ↔ Store (optional - for enterprise users with physical stores)
+  OnlineStoreOrder.belongsTo(Store, { foreignKey: 'store_id', onDelete: 'SET NULL' });
+
+  // OnlineStoreOrder ↔ OnlineStoreOrderItem
+  OnlineStoreOrder.hasMany(OnlineStoreOrderItem, { foreignKey: 'order_id', onDelete: 'CASCADE' });
+  OnlineStoreOrderItem.belongsTo(OnlineStoreOrder, { foreignKey: 'order_id', onDelete: 'CASCADE' });
+
+  // OnlineStoreOrderItem ↔ Product (optional)
+  OnlineStoreOrderItem.belongsTo(Product, { foreignKey: 'product_id', onDelete: 'SET NULL' });
+
   // Define store associations (online stores are linked to physical stores via OnlineStoreLocation)
   // OnlineStore ↔ OnlineStoreLocation (one online store can have many physical locations)
   OnlineStore.hasMany(OnlineStoreLocation, { foreignKey: 'online_store_id', onDelete: 'CASCADE' });
