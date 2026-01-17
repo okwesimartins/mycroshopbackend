@@ -3916,26 +3916,78 @@ async function getPreviewService(req, res) {
       });
     }
 
-    // Get service (linked to this online store)
-    const service = await models.StoreService.findOne({
-      where: {
-        id: service_id,
-        is_active: true
-      },
-      include: [{
-        model: models.OnlineStoreService,
-        where: { 
-          online_store_id: onlineStore.id
-        },
-        required: true
-      }]
-    });
+    // Determine if this is a free user (for raw SQL queries)
+    const isFreePlan = req.tenant?.subscription_plan === 'free' || !!req.user?.tenantId;
+    const { Sequelize } = require('sequelize');
 
-    if (!service) {
-      return res.status(404).json({
-        success: false,
-        message: 'Service not found'
+    // Get service (linked to this online store)
+    // For free users: use raw SQL to ensure tenant_id is checked
+    let service;
+    
+    if (isFreePlan) {
+      // Free users: use raw SQL
+      const [serviceRows] = await req.db.query(`
+        SELECT ss.id, ss.tenant_id, ss.service_title, ss.description, ss.price, ss.service_image_url, 
+               ss.duration_minutes, ss.is_active, ss.created_at, ss.updated_at
+        FROM store_services ss
+        INNER JOIN online_store_services oss ON ss.id = oss.service_id
+        WHERE ss.id = :serviceId
+          AND ss.is_active = 1
+          AND oss.online_store_id = :onlineStoreId
+          AND ss.tenant_id = :tenantId
+          AND oss.is_visible = 1
+      `, {
+        replacements: { 
+          serviceId: service_id,
+          onlineStoreId: onlineStore.id,
+          tenantId: req.user.tenantId
+        },
+        type: Sequelize.QueryTypes.SELECT
       });
+
+      if (serviceRows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Service not found'
+        });
+      }
+
+      const row = serviceRows[0];
+      service = {
+        id: row.id,
+        tenant_id: row.tenant_id,
+        service_title: row.service_title,
+        description: row.description,
+        price: row.price,
+        service_image_url: row.service_image_url,
+        duration_minutes: row.duration_minutes,
+        is_active: row.is_active,
+        created_at: row.created_at,
+        updated_at: row.updated_at
+      };
+      service.toJSON = () => service;
+    } else {
+      // Enterprise users: use Sequelize
+      service = await models.StoreService.findOne({
+        where: {
+          id: service_id,
+          is_active: true
+        },
+        include: [{
+          model: models.OnlineStoreService,
+          where: { 
+            online_store_id: onlineStore.id
+          },
+          required: true
+        }]
+      });
+
+      if (!service) {
+        return res.status(404).json({
+          success: false,
+          message: 'Service not found'
+        });
+      }
     }
 
     // Normalize image URLs
@@ -3949,8 +4001,11 @@ async function getPreviewService(req, res) {
       return `${protocol}://${host}${relativePath}`;
     }
 
-    const serviceData = service.toJSON();
-    if (serviceData.service_image_url) {
+    // Handle both Sequelize instances and plain objects
+    const serviceData = service && typeof service.toJSON === 'function' 
+      ? service.toJSON() 
+      : service;
+    if (serviceData && serviceData.service_image_url) {
       serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
     }
 
@@ -4262,26 +4317,95 @@ async function getPreviewProduct(req, res) {
       });
     }
 
-    // Get product (can preview even if not published)
-    const product = await models.Product.findOne({
-      where: {
-        id: product_id,
-        is_active: true
-      },
-      include: [{
-        model: models.StoreProduct,
-        where: {
-          online_store_id: onlineStore.id
-        },
-        required: true
-      }]
-    });
+    // Determine if this is a free user (for raw SQL queries)
+    const isFreePlan = req.tenant?.subscription_plan === 'free' || !!req.user?.tenantId;
+    const { Sequelize } = require('sequelize');
 
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
+    // Get product (can preview even if not published)
+    // For free users: use raw SQL to avoid online_store_id issues
+    let product;
+    
+    if (isFreePlan) {
+      // Free users: use raw SQL
+      const [productRows] = await req.db.query(`
+        SELECT p.id, p.tenant_id, p.name, p.description, p.sku, p.barcode, p.price, p.stock, 
+               p.low_stock_threshold, p.category, p.image_url, p.expiry_date, p.is_active, 
+               p.created_at, p.updated_at,
+               sp.id as 'StoreProduct.id', sp.tenant_id as 'StoreProduct.tenant_id', 
+               sp.product_id as 'StoreProduct.product_id', sp.is_published as 'StoreProduct.is_published',
+               sp.featured as 'StoreProduct.featured', sp.sort_order as 'StoreProduct.sort_order',
+               sp.created_at as 'StoreProduct.created_at', sp.updated_at as 'StoreProduct.updated_at'
+        FROM products p
+        INNER JOIN store_products sp ON p.id = sp.product_id
+        WHERE p.id = :productId
+          AND p.is_active = 1
+          AND sp.tenant_id = :tenantId
+      `, {
+        replacements: { 
+          productId: product_id,
+          tenantId: req.user.tenantId
+        },
+        type: Sequelize.QueryTypes.SELECT
       });
+
+      if (productRows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found'
+        });
+      }
+
+      const row = productRows[0];
+      product = {
+        id: row.id,
+        tenant_id: row.tenant_id,
+        name: row.name,
+        description: row.description,
+        sku: row.sku,
+        barcode: row.barcode,
+        price: row.price,
+        stock: row.stock,
+        low_stock_threshold: row.low_stock_threshold,
+        category: row.category,
+        image_url: row.image_url,
+        expiry_date: row.expiry_date,
+        is_active: row.is_active,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        StoreProducts: [{
+          id: row['StoreProduct.id'],
+          tenant_id: row['StoreProduct.tenant_id'],
+          product_id: row['StoreProduct.product_id'],
+          is_published: row['StoreProduct.is_published'],
+          featured: row['StoreProduct.featured'],
+          sort_order: row['StoreProduct.sort_order'],
+          created_at: row['StoreProduct.created_at'],
+          updated_at: row['StoreProduct.updated_at']
+        }]
+      };
+      product.toJSON = () => product;
+    } else {
+      // Enterprise users: use Sequelize
+      product = await models.Product.findOne({
+        where: {
+          id: product_id,
+          is_active: true
+        },
+        include: [{
+          model: models.StoreProduct,
+          where: {
+            online_store_id: onlineStore.id
+          },
+          required: true
+        }]
+      });
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found'
+        });
+      }
     }
 
     // Normalize image URLs
@@ -4295,8 +4419,11 @@ async function getPreviewProduct(req, res) {
       return `${protocol}://${host}${relativePath}`;
     }
 
-    const productData = product.toJSON();
-    if (productData.image_url) {
+    // Handle both Sequelize instances and plain objects
+    const productData = product && typeof product.toJSON === 'function' 
+      ? product.toJSON() 
+      : product;
+    if (productData && productData.image_url) {
       productData.image_url = getFullUrl(productData.image_url);
     }
 
