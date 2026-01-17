@@ -3011,6 +3011,24 @@ async function getStorePreview(req, res) {
 
     const storeData = onlineStore.toJSON();
     
+    // Parse social_links if it's a string (JSON stored as string in database)
+    if (storeData.social_links) {
+      if (typeof storeData.social_links === 'string') {
+        try {
+          storeData.social_links = JSON.parse(storeData.social_links);
+        } catch (e) {
+          console.error('[getStorePreview] Error parsing social_links:', e);
+          storeData.social_links = [];
+        }
+      }
+      // Ensure it's an array
+      if (!Array.isArray(storeData.social_links)) {
+        storeData.social_links = [];
+      }
+    } else {
+      storeData.social_links = [];
+    }
+    
     // Normalize store image URLs
     if (storeData.profile_logo_url) storeData.profile_logo_url = getFullUrl(storeData.profile_logo_url);
     if (storeData.banner_image_url) storeData.banner_image_url = getFullUrl(storeData.banner_image_url);
