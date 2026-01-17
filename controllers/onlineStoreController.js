@@ -2999,10 +2999,15 @@ async function getStorePreview(req, res) {
 
     // Check if products and services exist to determine toggle visibility
     // Can preview even if not published
+    // For free users: filter by tenant_id (store_products doesn't have online_store_id)
+    // For enterprise users: filter by online_store_id if column exists, otherwise by tenant_id
+    const isFreePlan = req.tenant?.subscription_plan === 'free';
+    const productWhere = isFreePlan 
+      ? { tenant_id: req.user.tenantId }
+      : { online_store_id: onlineStore.id };
+    
     const hasProducts = await models.StoreProduct.count({
-      where: {
-        online_store_id: onlineStore.id
-      },
+      where: productWhere,
       include: [{
         model: models.Product,
         where: { is_active: true },
@@ -3068,11 +3073,20 @@ async function getStorePreview(req, res) {
 
     // Get products NOT in any collection (preview)
     // Can preview even if not published
+    // For free users: filter by tenant_id (store_products doesn't have online_store_id)
+    // For enterprise users: filter by online_store_id if column exists, otherwise by tenant_id
+    const productsNotInCollectionsWhere = isFreePlan
+      ? {
+          tenant_id: req.user.tenantId,
+          '$Product.StoreCollectionProducts.id$': { [Op.eq]: null }
+        }
+      : {
+          online_store_id: onlineStore.id,
+          '$Product.StoreCollectionProducts.id$': { [Op.eq]: null }
+        };
+    
     const productsNotInCollections = await models.StoreProduct.findAll({
-      where: {
-        online_store_id: onlineStore.id,
-        '$Product.StoreCollectionProducts.id$': { [Op.eq]: null }
-      },
+      where: productsNotInCollectionsWhere,
       include: [
         {
           model: models.Product,
@@ -3138,18 +3152,27 @@ async function getStorePreview(req, res) {
 
     // Count products not in collections using a subquery approach
     // Can preview even if not published
+    // For free users: filter by tenant_id (store_products doesn't have online_store_id)
+    // For enterprise users: filter by online_store_id if column exists, otherwise by tenant_id
     let totalProductsNotInCollections = 0;
     try {
+      const whereClause = isFreePlan
+        ? `sp.tenant_id = :tenantId`
+        : `sp.online_store_id = :onlineStoreId`;
+      const replacements = isFreePlan
+        ? { tenantId: req.user.tenantId }
+        : { onlineStoreId: onlineStore.id };
+      
       const productsNotInCollectionsCountResult = await req.db.query(`
         SELECT COUNT(DISTINCT sp.id) as count
         FROM store_products sp
         INNER JOIN products p ON sp.product_id = p.id
         LEFT JOIN store_collection_products scp ON p.id = scp.product_id
-        WHERE sp.online_store_id = :onlineStoreId
+        WHERE ${whereClause}
           AND p.is_active = 1
           AND scp.id IS NULL
       `, {
-        replacements: { onlineStoreId: onlineStore.id },
+        replacements: replacements,
         type: Sequelize.QueryTypes.SELECT
       });
       // Query returns array of results, get first element's count
@@ -3158,10 +3181,12 @@ async function getStorePreview(req, res) {
       console.error('Error counting products not in collections:', queryError);
       // Fallback: use Sequelize count
       try {
+        const fallbackWhere = isFreePlan
+          ? { tenant_id: req.user.tenantId }
+          : { online_store_id: onlineStore.id };
+        
         totalProductsNotInCollections = await models.StoreProduct.count({
-          where: {
-            online_store_id: onlineStore.id
-          },
+          where: fallbackWhere,
           include: [{
             model: models.Product,
             where: { is_active: true },
