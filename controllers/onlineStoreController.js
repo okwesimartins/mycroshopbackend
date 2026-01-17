@@ -3006,14 +3006,35 @@ async function getStorePreview(req, res) {
       ? { tenant_id: req.user.tenantId }
       : { online_store_id: onlineStore.id };
     
-    const hasProducts = await models.StoreProduct.count({
-      where: productWhere,
-      include: [{
-        model: models.Product,
-        where: { is_active: true },
-        required: true
-      }]
-    }) > 0;
+    // Only select columns that exist in the database (exclude seo_title, seo_description, seo_keywords for free users)
+    const storeProductAttributes = isFreePlan
+      ? ['id', 'tenant_id', 'product_id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at']
+      : ['id', 'tenant_id', 'product_id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at', 'seo_title', 'seo_description', 'seo_keywords'];
+    
+    // For free users, use raw query to avoid model field issues
+    let hasProducts = false;
+    if (isFreePlan) {
+      const [result] = await req.db.query(`
+        SELECT COUNT(*) as count
+        FROM store_products sp
+        INNER JOIN products p ON sp.product_id = p.id
+        WHERE sp.tenant_id = :tenantId
+          AND p.is_active = 1
+      `, {
+        replacements: { tenantId: req.user.tenantId },
+        type: Sequelize.QueryTypes.SELECT
+      });
+      hasProducts = (parseInt(result?.count || 0) > 0);
+    } else {
+      hasProducts = await models.StoreProduct.count({
+        where: productWhere,
+        include: [{
+          model: models.Product,
+          where: { is_active: true },
+          required: true
+        }]
+      }) > 0;
+    }
 
     const hasServices = await models.StoreService.count({
       where: { is_active: true }
@@ -3087,6 +3108,7 @@ async function getStorePreview(req, res) {
     
     const productsNotInCollections = await models.StoreProduct.findAll({
       where: productsNotInCollectionsWhere,
+      attributes: storeProductAttributes, // Only select columns that exist in the database
       include: [
         {
           model: models.Product,
@@ -3187,6 +3209,7 @@ async function getStorePreview(req, res) {
         
         totalProductsNotInCollections = await models.StoreProduct.count({
           where: fallbackWhere,
+          attributes: storeProductAttributes, // Only select columns that exist in the database
           include: [{
             model: models.Product,
             where: { is_active: true },
