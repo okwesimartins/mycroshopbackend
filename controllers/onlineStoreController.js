@@ -3926,7 +3926,7 @@ async function getPreviewService(req, res) {
     
     if (isFreePlan) {
       // Free users: use raw SQL
-      const [serviceRows] = await req.db.query(`
+      const serviceRows = await req.db.query(`
         SELECT ss.id, ss.tenant_id, ss.service_title, ss.description, ss.price, ss.service_image_url, 
                ss.duration_minutes, ss.is_active, ss.created_at, ss.updated_at
         FROM store_services ss
@@ -3936,6 +3936,7 @@ async function getPreviewService(req, res) {
           AND oss.online_store_id = :onlineStoreId
           AND ss.tenant_id = :tenantId
           AND oss.is_visible = 1
+        LIMIT 1
       `, {
         replacements: { 
           serviceId: service_id,
@@ -3945,7 +3946,7 @@ async function getPreviewService(req, res) {
         type: Sequelize.QueryTypes.SELECT
       });
 
-      if (serviceRows.length === 0) {
+      if (!serviceRows || serviceRows.length === 0 || !serviceRows[0]) {
         return res.status(404).json({
           success: false,
           message: 'Service not found'
@@ -3953,6 +3954,13 @@ async function getPreviewService(req, res) {
       }
 
       const row = serviceRows[0];
+      if (!row || !row.id) {
+        return res.status(404).json({
+          success: false,
+          message: 'Service not found'
+        });
+      }
+
       service = {
         id: row.id,
         tenant_id: row.tenant_id,
@@ -4327,7 +4335,7 @@ async function getPreviewProduct(req, res) {
     
     if (isFreePlan) {
       // Free users: use raw SQL
-      const [productRows] = await req.db.query(`
+      const productRows = await req.db.query(`
         SELECT p.id, p.tenant_id, p.name, p.description, p.sku, p.barcode, p.price, p.stock, 
                p.low_stock_threshold, p.category, p.image_url, p.expiry_date, p.is_active, 
                p.created_at, p.updated_at,
@@ -4340,6 +4348,7 @@ async function getPreviewProduct(req, res) {
         WHERE p.id = :productId
           AND p.is_active = 1
           AND sp.tenant_id = :tenantId
+        LIMIT 1
       `, {
         replacements: { 
           productId: product_id,
@@ -4348,7 +4357,7 @@ async function getPreviewProduct(req, res) {
         type: Sequelize.QueryTypes.SELECT
       });
 
-      if (productRows.length === 0) {
+      if (!productRows || productRows.length === 0 || !productRows[0]) {
         return res.status(404).json({
           success: false,
           message: 'Product not found'
@@ -4356,6 +4365,13 @@ async function getPreviewProduct(req, res) {
       }
 
       const row = productRows[0];
+      if (!row || !row.id) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found'
+        });
+      }
+
       product = {
         id: row.id,
         tenant_id: row.tenant_id,
