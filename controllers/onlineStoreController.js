@@ -3214,27 +3214,42 @@ async function getStorePreview(req, res) {
       totalProductsNotInCollections = parseInt(productsNotInCollectionsCountResult?.[0]?.count || 0);
     } catch (queryError) {
       console.error('Error counting products not in collections:', queryError);
-      // Fallback: use Sequelize count
+      // Fallback: use raw query for free users, Sequelize for enterprise
       try {
-        const fallbackWhere = isFreePlan
-          ? { tenant_id: req.user.tenantId }
-          : { online_store_id: onlineStore.id };
-        
-        totalProductsNotInCollections = await models.StoreProduct.count({
-          where: fallbackWhere,
-          attributes: storeProductAttributes, // Only select columns that exist in the database
-          include: [{
-            model: models.Product,
-            where: { is_active: true },
-            required: true,
+        if (isFreePlan) {
+          // Use raw query for free users to avoid model field issues (online_store_id doesn't exist)
+          const [fallbackResult] = await req.db.query(`
+            SELECT COUNT(DISTINCT sp.id) as count
+            FROM store_products sp
+            INNER JOIN products p ON sp.product_id = p.id
+            LEFT JOIN store_collection_products scp ON p.id = scp.product_id
+            WHERE sp.tenant_id = :tenantId
+              AND p.is_active = 1
+              AND scp.id IS NULL
+          `, {
+            replacements: { tenantId: req.user.tenantId },
+            type: Sequelize.QueryTypes.SELECT
+          });
+          totalProductsNotInCollections = parseInt(fallbackResult?.count || 0);
+        } else {
+          // Enterprise users can use Sequelize
+          totalProductsNotInCollections = await models.StoreProduct.count({
+            where: { online_store_id: onlineStore.id },
+            attributes: storeProductAttributes, // Only select columns that exist in the database
             include: [{
-              model: models.StoreCollectionProduct,
-              required: false,
-              attributes: []
-            }]
-          }],
-          having: Sequelize.literal('COUNT(StoreCollectionProducts.id) = 0')
-        });
+              model: models.Product,
+              where: { is_active: true },
+              required: true,
+              attributes: productAttributes, // Only select columns that exist in the database
+              include: [{
+                model: models.StoreCollectionProduct,
+                required: false,
+                attributes: []
+              }]
+            }],
+            having: Sequelize.literal('COUNT(StoreCollectionProducts.id) = 0')
+          });
+        }
       } catch (fallbackError) {
         console.error('Fallback count also failed:', fallbackError);
         totalProductsNotInCollections = 0;
