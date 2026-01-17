@@ -171,6 +171,7 @@ async function createPublicOrder(req, res) {
         whereClause.tenant_id = orderTenantId;
       }
 
+      // For free users: don't include Store (they don't have physical stores)
       const existingOrder = await models.OnlineStoreOrder.findOne({
         where: whereClause,
         include: [
@@ -178,11 +179,12 @@ async function createPublicOrder(req, res) {
             model: models.OnlineStore,
             attributes: ['id', 'username', 'store_name']
           },
-          {
+          // Only include Store for enterprise users (free users don't have physical stores)
+          ...(isFreePlan ? [] : [{
             model: models.Store,
             attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
             required: false
-          },
+          }]),
           {
             model: models.OnlineStoreOrderItem
           }
@@ -221,9 +223,13 @@ async function createPublicOrder(req, res) {
         });
       }
 
-      // If store_id provided, verify it's linked to online store
-      let finalStoreId = store_id;
-      if (store_id) {
+      // Handle store_id - free users don't have physical stores
+      // For free users: store_id should always be null
+      // For enterprise users: verify store is linked to online store
+      let finalStoreId = null;
+      
+      if (!isFreePlan && store_id) {
+        // Enterprise users: verify store is linked to online store
         const storeLink = await models.OnlineStoreLocation.findOne({
           where: { online_store_id, store_id }
         });
@@ -235,8 +241,8 @@ async function createPublicOrder(req, res) {
           });
         }
         finalStoreId = store_id;
-      } else {
-        // Get default store for online store
+      } else if (!isFreePlan && !store_id) {
+        // Enterprise users: get default store for online store if no store_id provided
         const defaultStore = await models.OnlineStoreLocation.findOne({
           where: { online_store_id, is_default: true }
         });
@@ -244,6 +250,7 @@ async function createPublicOrder(req, res) {
           finalStoreId = defaultStore.store_id;
         }
       }
+      // For free users: finalStoreId remains null (they don't have physical stores)
 
       // Calculate totals
       let subtotal = 0;
@@ -261,11 +268,17 @@ async function createPublicOrder(req, res) {
         }
 
         // Verify product exists and is active
+        // For free users: exclude store_id and other enterprise-only columns
+        const productAttributes = isFreePlan 
+          ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
+          : undefined; // Enterprise users: select all columns
+        
         const product = await models.Product.findOne({
           where: {
             id: product_id,
             is_active: true
-          }
+          },
+          ...(productAttributes ? { attributes: productAttributes } : {})
         });
 
         if (!product) {
@@ -276,13 +289,25 @@ async function createPublicOrder(req, res) {
           });
         }
 
-        // Check stock if store_id is provided
-        if (finalStoreId) {
+        // Check stock
+        // For free users: check stock directly from products table
+        // For enterprise users: check stock from product_stores table if store_id is provided
+        if (isFreePlan) {
+          // Free users: stock is on the products table directly
+          if (product.stock !== null && product.stock < quantity) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${quantity}`
+            });
+          }
+        } else if (finalStoreId) {
+          // Enterprise users: check stock from product_stores table
           const productStore = await models.ProductStore.findOne({
             where: { product_id, store_id: finalStoreId }
           });
 
-          if (productStore && productStore.stock < quantity) {
+          if (productStore && productStore.stock !== null && productStore.stock < quantity) {
             await transaction.rollback();
             return res.status(400).json({
               success: false,
@@ -377,14 +402,27 @@ async function createPublicOrder(req, res) {
         }, { transaction });
       }
 
-      // Update stock if store_id is provided
-      if (finalStoreId) {
+      // Update stock
+      // For free users: update stock on products table directly
+      // For enterprise users: update stock on product_stores table if store_id is provided
+      if (isFreePlan) {
+        // Free users: update stock on products table
+        for (const item of items) {
+          const product = await models.Product.findByPk(item.product_id, { transaction });
+          if (product && product.stock !== null) {
+            await product.update({
+              stock: product.stock - item.quantity
+            }, { transaction });
+          }
+        }
+      } else if (finalStoreId) {
+        // Enterprise users: update stock on product_stores table
         for (const item of items) {
           const productStore = await models.ProductStore.findOne({
             where: { product_id: item.product_id, store_id: finalStoreId }
-          });
+          }, { transaction });
 
-          if (productStore) {
+          if (productStore && productStore.stock !== null) {
             await productStore.update({
               stock: productStore.stock - item.quantity
             }, { transaction });
@@ -395,17 +433,19 @@ async function createPublicOrder(req, res) {
       await transaction.commit();
 
       // Fetch complete order
+      // For free users: don't include Store (they don't have physical stores)
       const completeOrder = await models.OnlineStoreOrder.findByPk(order.id, {
         include: [
           {
             model: models.OnlineStore,
             attributes: ['id', 'username', 'store_name']
           },
-          {
+          // Only include Store for enterprise users (free users don't have physical stores)
+          ...(isFreePlan ? [] : [{
             model: models.Store,
             attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
             required: false
-          },
+          }]),
           {
             model: models.OnlineStoreOrderItem
           }
@@ -764,4 +804,5 @@ module.exports = {
   initializePublicPayment,
   getPublicOrderByNumber
 };
+
 
