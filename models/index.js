@@ -8,7 +8,7 @@ function initializeModels(sequelize) {
       throw new Error('Sequelize instance is required');
     }
 
-    const { DataTypes } = require('sequelize');
+  const { DataTypes } = require('sequelize');
 
     console.log('Starting model initialization...');
     console.log('Sequelize instance type:', typeof sequelize);
@@ -53,7 +53,7 @@ function initializeModels(sequelize) {
       }
     }
 
-    // Store Model (must be defined before Product)
+  // Store Model (must be defined before Product)
     console.log('Defining Store model...');
     
     // Define Store model - Sequelize will handle removal of existing model if needed
@@ -61,62 +61,62 @@ function initializeModels(sequelize) {
     let Store;
     try {
       Store = sequelize.define('Store', {
-        id: {
-          type: DataTypes.INTEGER,
-          primaryKey: true,
-          autoIncrement: true
-        },
-        tenant_id: {
-          type: DataTypes.INTEGER,
-          allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
-          comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
-        },
-        name: {
-          type: DataTypes.STRING(255),
-          allowNull: false
-        },
-        store_type: {
-          type: DataTypes.ENUM('retail_store', 'warehouse', 'popup_store', 'online_only'),
-          allowNull: false
-        },
-        address: {
-          type: DataTypes.TEXT,
-          allowNull: true
-        },
-        city: {
-          type: DataTypes.STRING(100),
-          allowNull: true
-        },
-        state: {
-          type: DataTypes.STRING(100),
-          allowNull: true
-        },
-        country: {
-          type: DataTypes.STRING(100),
-          defaultValue: 'Nigeria'
-        },
-        phone: {
-          type: DataTypes.STRING(50),
-          allowNull: true
-        },
-        email: {
-          type: DataTypes.STRING(255),
-          allowNull: true
-        },
-        description: {
-          type: DataTypes.TEXT,
-          allowNull: true
-        },
-        is_active: {
-          type: DataTypes.BOOLEAN,
-          defaultValue: true
-        }
-      }, {
-        tableName: 'stores',
-        timestamps: true,
-        createdAt: 'created_at',
-        updatedAt: 'updated_at'
-      });
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
+      comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+    },
+    name: {
+      type: DataTypes.STRING(255),
+      allowNull: false
+    },
+    store_type: {
+      type: DataTypes.ENUM('retail_store', 'warehouse', 'popup_store', 'online_only'),
+      allowNull: false
+    },
+    address: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    city: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    state: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    country: {
+      type: DataTypes.STRING(100),
+      defaultValue: 'Nigeria'
+    },
+    phone: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
+    email: {
+      type: DataTypes.STRING(255),
+      allowNull: true
+    },
+    description: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true
+    }
+  }, {
+    tableName: 'stores',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  });
       console.log('Store model defined:', !!Store);
     } catch (storeError) {
       console.error('Error defining Store model:', storeError.message);
@@ -194,9 +194,9 @@ function initializeModels(sequelize) {
       }
     }
 
-    // Product Model (store-specific)
+  // Product Model (store-specific)
     console.log('Defining Product model...');
-    const Product = sequelize.define('Product', {
+  const Product = sequelize.define('Product', {
     id: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -494,112 +494,112 @@ function initializeModels(sequelize) {
     updatedAt: 'updated_at'
   });
 
-    // Invoice Model (store-specific with tax breakdown)
+  // Invoice Model (store-specific with tax breakdown)
     console.log('Defining Invoice model...');
-    const Invoice = sequelize.define('Invoice', {
-      id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true
-      },
-      tenant_id: {
-        type: DataTypes.INTEGER,
-        allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
-        comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
-      },
-      invoice_number: {
-        type: DataTypes.STRING(50),
-        unique: true,
-        allowNull: false
-      },
-      store_id: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        references: {
-          model: 'stores',
-          key: 'id'
-        }
-      },
-      customer_id: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        references: {
-          model: 'customers',
-          key: 'id'
-        }
-      },
-      issue_date: {
-        type: DataTypes.DATEONLY,
-        allowNull: false
-      },
-      due_date: {
-        type: DataTypes.DATEONLY,
-        allowNull: true
-      },
-      subtotal: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: false,
-        defaultValue: 0.00
-      },
-      tax_amount: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00
-      },
-      vat_amount: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00
-      },
-      development_levy_amount: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00
-      },
-      other_tax_amount: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00
-      },
-      tax_breakdown: {
-        type: DataTypes.JSON,
-        allowNull: true
-      },
-      discount_amount: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00
-      },
-      total: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: false,
-        defaultValue: 0.00
-      },
-      tax_calculation_method: {
-        type: DataTypes.ENUM('automatic', 'manual'),
-        defaultValue: 'automatic'
-      },
-      tax_rate: {
-        type: DataTypes.DECIMAL(5, 2),
-        defaultValue: 0.00
-      },
-      status: {
-        type: DataTypes.ENUM('draft', 'sent', 'paid', 'overdue', 'cancelled'),
-        defaultValue: 'draft'
-      },
-      payment_method: {
-        type: DataTypes.STRING(50),
-        allowNull: true
-      },
-      payment_date: {
-        type: DataTypes.DATEONLY,
-        allowNull: true
-      },
-      notes: {
-        type: DataTypes.TEXT,
-        allowNull: true
+  const Invoice = sequelize.define('Invoice', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
+      comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+    },
+    invoice_number: {
+      type: DataTypes.STRING(50),
+      unique: true,
+      allowNull: false
+    },
+    store_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'stores',
+        key: 'id'
       }
-    }, {
-      tableName: 'invoices',
-      timestamps: true,
-      createdAt: 'created_at',
-      updatedAt: 'updated_at'
-    });
+    },
+    customer_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'customers',
+        key: 'id'
+      }
+    },
+    issue_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: false
+    },
+    due_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true
+    },
+    subtotal: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00
+    },
+    tax_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.00
+    },
+    vat_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.00
+    },
+    development_levy_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.00
+    },
+    other_tax_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.00
+    },
+    tax_breakdown: {
+      type: DataTypes.JSON,
+      allowNull: true
+    },
+    discount_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.00
+    },
+    total: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00
+    },
+    tax_calculation_method: {
+      type: DataTypes.ENUM('automatic', 'manual'),
+      defaultValue: 'automatic'
+    },
+    tax_rate: {
+      type: DataTypes.DECIMAL(5, 2),
+      defaultValue: 0.00
+    },
+    status: {
+      type: DataTypes.ENUM('draft', 'sent', 'paid', 'overdue', 'cancelled'),
+      defaultValue: 'draft'
+    },
+    payment_method: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
+    payment_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    }
+  }, {
+    tableName: 'invoices',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  });
     console.log('Invoice model defined:', !!Invoice);
 
   // Invoice Item Model (with price adjustments and bundling)
@@ -1159,64 +1159,64 @@ function initializeModels(sequelize) {
     timestamps: true,
     createdAt: 'created_at',
     updatedAt: 'updated_at'
-    });
+  });
 
     // Define associations (all associations must be inside try block)
     console.log('Defining model associations...');
     
-    // Store associations
-    Store.hasMany(Product, { foreignKey: 'store_id' });
-    Product.belongsTo(Store, { foreignKey: 'store_id' });
+  // Store associations
+  Store.hasMany(Product, { foreignKey: 'store_id' });
+  Product.belongsTo(Store, { foreignKey: 'store_id' });
 
-    Store.belongsToMany(Product, { through: ProductStore, foreignKey: 'store_id', otherKey: 'product_id' });
-    Product.belongsToMany(Store, { through: ProductStore, foreignKey: 'product_id', otherKey: 'store_id' });
+  Store.belongsToMany(Product, { through: ProductStore, foreignKey: 'store_id', otherKey: 'product_id' });
+  Product.belongsToMany(Store, { through: ProductStore, foreignKey: 'product_id', otherKey: 'store_id' });
 
-    Store.hasMany(Invoice, { foreignKey: 'store_id' });
-    Invoice.belongsTo(Store, { foreignKey: 'store_id' });
+  Store.hasMany(Invoice, { foreignKey: 'store_id' });
+  Invoice.belongsTo(Store, { foreignKey: 'store_id' });
 
-    Store.hasMany(StoreService, { foreignKey: 'store_id', onDelete: 'CASCADE' });
-    StoreService.belongsTo(Store, { foreignKey: 'store_id' });
+  Store.hasMany(StoreService, { foreignKey: 'store_id', onDelete: 'CASCADE' });
+  StoreService.belongsTo(Store, { foreignKey: 'store_id' });
 
-    Store.hasMany(Booking, { foreignKey: 'store_id' });
-    Booking.belongsTo(Store, { foreignKey: 'store_id' });
+  Store.hasMany(Booking, { foreignKey: 'store_id' });
+  Booking.belongsTo(Store, { foreignKey: 'store_id' });
 
-    Store.hasMany(BookingAvailability, { foreignKey: 'store_id', onDelete: 'CASCADE' });
-    BookingAvailability.belongsTo(Store, { foreignKey: 'store_id' });
+  Store.hasMany(BookingAvailability, { foreignKey: 'store_id', onDelete: 'CASCADE' });
+  BookingAvailability.belongsTo(Store, { foreignKey: 'store_id' });
 
-    // Customer associations
-    Customer.hasMany(Invoice, { foreignKey: 'customer_id' });
-    Invoice.belongsTo(Customer, { foreignKey: 'customer_id' });
+  // Customer associations
+  Customer.hasMany(Invoice, { foreignKey: 'customer_id' });
+  Invoice.belongsTo(Customer, { foreignKey: 'customer_id' });
 
-    Customer.hasMany(Booking, { foreignKey: 'customer_id' });
-    Booking.belongsTo(Customer, { foreignKey: 'customer_id' });
+  Customer.hasMany(Booking, { foreignKey: 'customer_id' });
+  Booking.belongsTo(Customer, { foreignKey: 'customer_id' });
 
-    Customer.hasMany(CustomerInteraction, { foreignKey: 'customer_id', onDelete: 'CASCADE' });
-    CustomerInteraction.belongsTo(Customer, { foreignKey: 'customer_id' });
+  Customer.hasMany(CustomerInteraction, { foreignKey: 'customer_id', onDelete: 'CASCADE' });
+  CustomerInteraction.belongsTo(Customer, { foreignKey: 'customer_id' });
 
-    // Invoice associations
-    Invoice.hasMany(InvoiceItem, { foreignKey: 'invoice_id', onDelete: 'CASCADE' });
-    InvoiceItem.belongsTo(Invoice, { foreignKey: 'invoice_id' });
+  // Invoice associations
+  Invoice.hasMany(InvoiceItem, { foreignKey: 'invoice_id', onDelete: 'CASCADE' });
+  InvoiceItem.belongsTo(Invoice, { foreignKey: 'invoice_id' });
 
-    Product.hasMany(InvoiceItem, { foreignKey: 'product_id' });
-    InvoiceItem.belongsTo(Product, { foreignKey: 'product_id' });
+  Product.hasMany(InvoiceItem, { foreignKey: 'product_id' });
+  InvoiceItem.belongsTo(Product, { foreignKey: 'product_id' });
 
-    // Booking associations
-    StoreService.hasMany(Booking, { foreignKey: 'service_id' });
-    Booking.belongsTo(StoreService, { foreignKey: 'service_id' });
+  // Booking associations
+  StoreService.hasMany(Booking, { foreignKey: 'service_id' });
+  Booking.belongsTo(StoreService, { foreignKey: 'service_id' });
 
-    StoreService.hasMany(BookingAvailability, { foreignKey: 'service_id', onDelete: 'CASCADE' });
-    BookingAvailability.belongsTo(StoreService, { foreignKey: 'service_id' });
+  StoreService.hasMany(BookingAvailability, { foreignKey: 'service_id', onDelete: 'CASCADE' });
+  BookingAvailability.belongsTo(StoreService, { foreignKey: 'service_id' });
   
-    // Product associations
+  // Product associations
     // One product can be published to multiple stores, so it's hasMany, not hasOne
     Product.hasMany(StoreProduct, { foreignKey: 'product_id', onDelete: 'CASCADE' });
-    StoreProduct.belongsTo(Product, { foreignKey: 'product_id' });
+  StoreProduct.belongsTo(Product, { foreignKey: 'product_id' });
 
-    // Product Variation associations
-    Product.hasMany(ProductVariation, { foreignKey: 'product_id', onDelete: 'CASCADE' });
-    ProductVariation.belongsTo(Product, { foreignKey: 'product_id' });
-    ProductVariation.hasMany(ProductVariationOption, { foreignKey: 'variation_id', onDelete: 'CASCADE' });
-    ProductVariationOption.belongsTo(ProductVariation, { foreignKey: 'variation_id' });
+  // Product Variation associations
+  Product.hasMany(ProductVariation, { foreignKey: 'product_id', onDelete: 'CASCADE' });
+  ProductVariation.belongsTo(Product, { foreignKey: 'product_id' });
+  ProductVariation.hasMany(ProductVariationOption, { foreignKey: 'variation_id', onDelete: 'CASCADE' });
+  ProductVariationOption.belongsTo(ProductVariation, { foreignKey: 'variation_id' });
  
   // Online Store Model (aggregates physical stores)
   const OnlineStore = sequelize.define('OnlineStore', {
@@ -1576,6 +1576,11 @@ function initializeModels(sequelize) {
       type: DataTypes.STRING(50),
       unique: true,
       allowNull: false
+    },
+    idempotency_key: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      comment: 'Unique key to prevent duplicate orders from the same request'
     },
     customer_name: {
       type: DataTypes.STRING(255),
@@ -2979,16 +2984,16 @@ function initializeModels(sequelize) {
       type: DataTypes.DATE,
       allowNull: true
     }
-    }, {
-      tableName: 'payment_transactions',
-      timestamps: true,
-      createdAt: 'created_at',
-      updatedAt: 'updated_at'
-    });
+  }, {
+    tableName: 'payment_transactions',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  });
 
     // Payment associations (these are the last associations after PaymentTransaction model)
-    PaymentTransaction.belongsTo(OnlineStoreOrder, { foreignKey: 'order_id' });
-    PaymentTransaction.belongsTo(Invoice, { foreignKey: 'invoice_id' });
+  PaymentTransaction.belongsTo(OnlineStoreOrder, { foreignKey: 'order_id' });
+  PaymentTransaction.belongsTo(Invoice, { foreignKey: 'invoice_id' });
 
     // Verify Invoice model is defined before returning
     console.log('Checking Invoice model before return...');
@@ -3005,52 +3010,52 @@ function initializeModels(sequelize) {
 
     console.log('Creating models object...');
     const models = {
-      Store,
-      Product,
-      ProductStore,
-      ProductVariation,
-      ProductVariationOption,
-      Customer,
-      Invoice,
-      InvoiceItem,
+    Store,
+    Product,
+    ProductStore,
+    ProductVariation,
+    ProductVariationOption,
+    Customer,
+    Invoice,
+    InvoiceItem,
       Receipt,
-      StoreService,
-      Booking,
-      BookingAvailability,
-      StoreProduct,
-      CustomerInteraction,
-      AIAgentConfig,
-      OnlineStore,
-      OnlineStoreLocation,
-      OnlineStoreService,
-      StoreCollection,
-      StoreCollectionProduct,
-      StoreCollectionService,
-      OnlineStoreOrder,
-      OnlineStoreOrderItem,
-      Staff,
-      Role,
-      Permission,
-      RolePermission,
-      Supplier,
-      PurchaseOrder,
-      PurchaseOrderItem,
-      POSTransaction,
-      POSTransactionItem,
-      ProductBundle,
-      ProductBundleItem,
-      Menu,
-      MenuItem,
-      MenuItemModifier,
-      StockMovement,
-      LoyaltyProgram,
-      CustomerLoyaltyPoints,
-      LoyaltyPointTransaction,
-      StaffAttendance,
-      StaffShift,
-      PaymentGateway,
-      PaymentTransaction
-    };
+    StoreService,
+    Booking,
+    BookingAvailability,
+    StoreProduct,
+    CustomerInteraction,
+    AIAgentConfig,
+    OnlineStore,
+    OnlineStoreLocation,
+    OnlineStoreService,
+    StoreCollection,
+    StoreCollectionProduct,
+    StoreCollectionService,
+    OnlineStoreOrder,
+    OnlineStoreOrderItem,
+    Staff,
+    Role,
+    Permission,
+    RolePermission,
+    Supplier,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    POSTransaction,
+    POSTransactionItem,
+    ProductBundle,
+    ProductBundleItem,
+    Menu,
+    MenuItem,
+    MenuItemModifier,
+    StockMovement,
+    LoyaltyProgram,
+    CustomerLoyaltyPoints,
+    LoyaltyPointTransaction,
+    StaffAttendance,
+    StaffShift,
+    PaymentGateway,
+    PaymentTransaction
+  };
 
   // Final verification
   if (!models.Invoice) {

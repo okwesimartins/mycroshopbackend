@@ -111,6 +111,7 @@ async function createPublicOrder(req, res) {
       tenant_id, // Required - to identify which tenant database
       online_store_id,
       store_id, // Physical store to fulfill order (optional)
+      idempotency_key, // Optional - Unique key to prevent duplicate orders
       customer_name,
       customer_email,
       customer_phone,
@@ -153,6 +154,53 @@ async function createPublicOrder(req, res) {
 
     const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
+
+    // Get tenant_id for order queries (for free users)
+    const isFreePlan = tenant.subscription_plan === 'free';
+    const orderTenantId = isFreePlan ? tenant_id : null;
+
+    // Check for duplicate order using idempotency key
+    if (idempotency_key) {
+      const whereClause = {
+        idempotency_key: idempotency_key,
+        online_store_id: online_store_id
+      };
+      
+      // For free users, also filter by tenant_id
+      if (isFreePlan && orderTenantId) {
+        whereClause.tenant_id = orderTenantId;
+      }
+
+      const existingOrder = await models.OnlineStoreOrder.findOne({
+        where: whereClause,
+        include: [
+          {
+            model: models.OnlineStore,
+            attributes: ['id', 'username', 'store_name']
+          },
+          {
+            model: models.Store,
+            attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
+            required: false
+          },
+          {
+            model: models.OnlineStoreOrderItem
+          }
+        ]
+      });
+
+      if (existingOrder) {
+        // Return existing order - this is a duplicate request
+        return res.status(200).json({
+          success: true,
+          message: 'Order already exists (duplicate request detected)',
+          data: {
+            order: existingOrder,
+            is_duplicate: true
+          }
+        });
+      }
+    }
 
     const transaction = await sequelize.transaction();
 
@@ -259,16 +307,47 @@ async function createPublicOrder(req, res) {
       const taxAmount = subtotal * (tax_rate / 100);
       const total = subtotal + taxAmount + shipping_amount - discount_amount;
 
-      // Get tenant_id for order creation (for free users)
-      const isFreePlan = tenant.subscription_plan === 'free';
-      const orderTenantId = isFreePlan ? tenant_id : null;
+      // Generate order number (ensure uniqueness)
+      let orderNumber = generateOrderNumber();
+      let orderNumberExists = true;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      // Ensure order number is unique (handle rare collisions)
+      while (orderNumberExists && attempts < maxAttempts) {
+        const whereClause = { order_number: orderNumber };
+        if (isFreePlan && orderTenantId) {
+          whereClause.tenant_id = orderTenantId;
+        }
+
+        const existingOrderNumber = await models.OnlineStoreOrder.findOne({
+          where: whereClause,
+          attributes: ['id']
+        });
+
+        if (!existingOrderNumber) {
+          orderNumberExists = false;
+        } else {
+          orderNumber = generateOrderNumber();
+          attempts++;
+        }
+      }
+
+      if (orderNumberExists) {
+        await transaction.rollback();
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to generate unique order number. Please try again.'
+        });
+      }
 
       // Create order
       const order = await models.OnlineStoreOrder.create({
         tenant_id: orderTenantId,
         online_store_id,
         store_id: finalStoreId,
-        order_number: generateOrderNumber(),
+        order_number: orderNumber,
+        idempotency_key: idempotency_key || null, // Store idempotency key to prevent duplicates
         customer_name,
         customer_email: customer_email || null,
         customer_phone: customer_phone || null,
@@ -345,10 +424,66 @@ async function createPublicOrder(req, res) {
       });
     } catch (error) {
       await transaction.rollback();
+      
+      // Handle duplicate idempotency key error
+      if (error.name === 'SequelizeUniqueConstraintError' && error.errors) {
+        const uniqueError = error.errors.find(e => e.path === 'idempotency_key' || e.path?.includes('idempotency'));
+        if (uniqueError && idempotency_key) {
+          // Duplicate idempotency key - fetch and return existing order
+          const whereClause = {
+            idempotency_key: idempotency_key,
+            online_store_id: online_store_id
+          };
+          
+          if (isFreePlan && orderTenantId) {
+            whereClause.tenant_id = orderTenantId;
+          }
+
+          const existingOrder = await models.OnlineStoreOrder.findOne({
+            where: whereClause,
+            include: [
+              {
+                model: models.OnlineStore,
+                attributes: ['id', 'username', 'store_name']
+              },
+              {
+                model: models.Store,
+                attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
+                required: false
+              },
+              {
+                model: models.OnlineStoreOrderItem
+              }
+            ]
+          });
+
+          if (existingOrder) {
+            return res.status(200).json({
+              success: true,
+              message: 'Order already exists (duplicate request detected)',
+              data: {
+                order: existingOrder,
+                is_duplicate: true
+              }
+            });
+          }
+        }
+      }
+      
       throw error;
     }
   } catch (error) {
     console.error('Error creating public order:', error);
+    
+    // Handle Sequelize unique constraint errors
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({
+        success: false,
+        message: 'Duplicate order detected. If you used an idempotency_key, the order may already exist.',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Failed to create order',

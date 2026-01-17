@@ -801,6 +801,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       online_store_id INT NOT NULL,
       store_id INT,
       order_number VARCHAR(50) NOT NULL,
+      idempotency_key VARCHAR(255) NULL,
       customer_name VARCHAR(255) NOT NULL,
       customer_email VARCHAR(255),
       customer_phone VARCHAR(50),
@@ -825,12 +826,57 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       FOREIGN KEY (online_store_id) REFERENCES online_stores(id) ON DELETE CASCADE,
       FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE SET NULL,
       ${isSharedDb ? 'UNIQUE KEY unique_tenant_order_number (tenant_id, order_number),' : 'UNIQUE KEY unique_order_number (order_number),'}
+      ${isSharedDb ? 'UNIQUE KEY unique_tenant_idempotency (tenant_id, idempotency_key),' : 'UNIQUE KEY unique_idempotency (idempotency_key),'}
       INDEX idx_order_number (order_number),
+      INDEX idx_idempotency_key (idempotency_key),
       INDEX idx_status (status),
       INDEX idx_payment_status (payment_status),
       INDEX idx_online_store_id (online_store_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  // Migration: Add idempotency_key column if it doesn't exist
+  try {
+    const [idempotencyKeyColumn] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'online_store_orders' 
+        AND COLUMN_NAME = 'idempotency_key'
+    `);
+    
+    if (!idempotencyKeyColumn || idempotencyKeyColumn.length === 0) {
+      console.log('Adding idempotency_key column to online_store_orders table...');
+      await connection.query(`
+        ALTER TABLE online_store_orders 
+        ADD COLUMN idempotency_key VARCHAR(255) NULL AFTER order_number
+      `);
+      
+      // Add unique index for idempotency_key
+      if (isSharedDb) {
+        await connection.query(`
+          ALTER TABLE online_store_orders 
+          ADD UNIQUE KEY unique_tenant_idempotency (tenant_id, idempotency_key)
+        `);
+      } else {
+        await connection.query(`
+          ALTER TABLE online_store_orders 
+          ADD UNIQUE KEY unique_idempotency (idempotency_key)
+        `);
+      }
+      
+      // Add index for faster lookups
+      await connection.query(`
+        ALTER TABLE online_store_orders 
+        ADD INDEX idx_idempotency_key (idempotency_key)
+      `);
+      
+      console.log('✅ idempotency_key column added to online_store_orders table');
+    }
+  } catch (alterError) {
+    console.warn('Could not check/add idempotency_key column:', alterError.message);
+    // Continue - column might already exist or index might already exist
+  }
 
   // Online Store Order Items table
   const orderItemTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
