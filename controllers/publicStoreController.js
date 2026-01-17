@@ -1385,7 +1385,7 @@ async function getPublicProducts(req, res) {
     console.error('Error getting public products:', error);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Failed to get products',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -1418,13 +1418,21 @@ async function getPublicProduct(req, res) {
 
     const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
+    const { Sequelize } = require('sequelize');
+
+    // Determine if this is a free user
+    // CRITICAL: Free users don't have store_id in products table
+    // Also, they don't have cost, batch_number, unit_of_measure columns
+    const subscriptionPlan = tenant.subscription_plan || 'free';
+    const isFreePlan = subscriptionPlan !== 'enterprise';
 
     // Find online store
     const onlineStore = await models.OnlineStore.findOne({
       where: { 
         username: username.toLowerCase(), 
         is_published: true 
-      }
+      },
+      attributes: ['id']
     });
 
     if (!onlineStore) {
@@ -1434,19 +1442,212 @@ async function getPublicProduct(req, res) {
       });
     }
 
-    // Get product
-    const product = await models.Product.findOne({
-      where: {
-        id: product_id,
-        is_active: true
+    // Helper to normalize URLs
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
       }
-    });
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    }
 
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
+    let product;
+
+    if (isFreePlan) {
+      // Free users: use raw SQL to avoid store_id and other enterprise-only columns
+      const productRows = await sequelize.query(`
+        SELECT p.id, p.tenant_id, p.name, p.description, p.sku, p.barcode, p.price, p.stock, 
+               p.low_stock_threshold, p.category, p.image_url, p.expiry_date, p.is_active, 
+               p.created_at, p.updated_at
+        FROM products p
+        INNER JOIN store_products sp ON p.id = sp.product_id
+        WHERE p.id = :productId
+          AND p.is_active = 1
+          AND sp.tenant_id = :tenantId
+          AND sp.is_published = 1
+        LIMIT 1
+      `, {
+        replacements: { 
+          productId: product_id,
+          tenantId: tenant_id
+        },
+        type: Sequelize.QueryTypes.SELECT
       });
+
+      if (!productRows || productRows.length === 0 || !productRows[0] || !productRows[0].id) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found'
+        });
+      }
+
+      const row = productRows[0];
+
+      // Get product variations with options
+      // For free users: product_variation_options table doesn't have barcode column
+      const variationWhereClause = isFreePlan 
+        ? 'WHERE pv.product_id = :productId AND pv.tenant_id = :tenantId'
+        : 'WHERE pv.product_id = :productId';
+      
+      const variations = await sequelize.query(`
+        SELECT pv.id, pv.variation_name, pv.variation_type, pv.is_required, pv.sort_order,
+               pvo.id as 'option_id', pvo.option_value, pvo.option_display_name, 
+               pvo.price_adjustment, pvo.stock, pvo.sku, pvo.image_url, 
+               pvo.is_default, pvo.is_available, pvo.sort_order as 'option_sort_order',
+               pvo.created_at as 'option_created_at'
+        FROM product_variations pv
+        LEFT JOIN product_variation_options pvo ON pv.id = pvo.variation_id
+          ${isFreePlan ? 'AND pvo.tenant_id = :tenantId' : ''}
+        ${variationWhereClause}
+        ORDER BY pv.sort_order ASC, pvo.sort_order ASC
+      `, {
+        replacements: { 
+          productId: product_id,
+          ...(isFreePlan ? { tenantId: tenant_id } : {})
+        },
+        type: Sequelize.QueryTypes.SELECT
+      });
+
+      // Group variations and their options
+      const variationsMap = {};
+      variations.forEach(v => {
+        if (!variationsMap[v.id]) {
+          variationsMap[v.id] = {
+            id: v.id,
+            variation_name: v.variation_name,
+            variation_type: v.variation_type,
+            is_required: v.is_required,
+            sort_order: v.sort_order,
+            options: []
+          };
+        }
+        if (v.option_id) {
+          // For free users: barcode column doesn't exist in product_variation_options table
+          const optionData = {
+            id: v.option_id,
+            option_value: v.option_value,
+            option_display_name: v.option_display_name,
+            price_adjustment: v.price_adjustment,
+            stock: v.stock,
+            sku: v.sku,
+            image_url: v.image_url ? getFullUrl(v.image_url) : null,
+            is_default: v.is_default,
+            is_available: v.is_available,
+            sort_order: v.option_sort_order,
+            created_at: v.option_created_at
+          };
+          // Only include barcode for enterprise users (free users don't have this column)
+          if (!isFreePlan && v.barcode !== undefined) {
+            optionData.barcode = v.barcode;
+          }
+          variationsMap[v.id].options.push(optionData);
+        }
+      });
+
+      product = {
+        id: row.id,
+        tenant_id: row.tenant_id,
+        name: row.name,
+        description: row.description,
+        sku: row.sku,
+        barcode: row.barcode,
+        price: row.price,
+        stock: row.stock,
+        low_stock_threshold: row.low_stock_threshold,
+        category: row.category,
+        image_url: row.image_url ? getFullUrl(row.image_url) : null,
+        expiry_date: row.expiry_date,
+        is_active: row.is_active,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        variations: Object.values(variationsMap)
+      };
+    } else {
+      // Enterprise users: use Sequelize
+      product = await models.Product.findOne({
+        where: {
+          id: product_id,
+          is_active: true
+        },
+        include: [
+          {
+            model: models.StoreProduct,
+            where: {
+              online_store_id: onlineStore.id,
+              is_published: true
+            },
+            required: true,
+            attributes: [] // Don't include StoreProduct data in response
+          },
+          {
+            model: models.ProductVariation,
+            include: [{
+              model: models.ProductVariationOption,
+              order: [['sort_order', 'ASC']]
+            }],
+            order: [['sort_order', 'ASC']],
+            required: false
+          }
+        ]
+      });
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found'
+        });
+      }
+
+      // Normalize product data and variations
+      const productData = product.toJSON();
+      
+      // Normalize product image URL
+      if (productData.image_url) {
+        productData.image_url = getFullUrl(productData.image_url);
+      }
+
+      // Normalize variation option image URLs
+      if (productData.ProductVariations) {
+        productData.variations = productData.ProductVariations.map(variation => {
+          const variationData = {
+            id: variation.id,
+            variation_name: variation.variation_name,
+            variation_type: variation.variation_type,
+            is_required: variation.is_required,
+            sort_order: variation.sort_order,
+            options: (variation.ProductVariationOptions || []).map(option => {
+              const optionData = {
+                id: option.id,
+                option_value: option.option_value,
+                option_display_name: option.option_display_name,
+                price_adjustment: option.price_adjustment,
+                stock: option.stock,
+                sku: option.sku,
+                image_url: option.image_url ? getFullUrl(option.image_url) : null,
+                is_default: option.is_default,
+                is_available: option.is_available,
+                sort_order: option.sort_order,
+                created_at: option.created_at
+              };
+              
+              // Include barcode for enterprise users if it exists
+              if (option.barcode !== undefined) {
+                optionData.barcode = option.barcode;
+              }
+              
+              return optionData;
+            })
+          };
+          return variationData;
+        });
+        
+        // Remove ProductVariations from response (we've converted it to variations)
+        delete productData.ProductVariations;
+      }
+
+      product = productData;
     }
 
     res.json({
@@ -1457,7 +1658,8 @@ async function getPublicProduct(req, res) {
     console.error('Error getting public product:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Failed to get product',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }
