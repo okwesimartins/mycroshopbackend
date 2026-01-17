@@ -2952,11 +2952,26 @@ async function getStorePreview(req, res) {
     // Parse preview limit (max 20 items per section)
     const previewLimit = Math.min(parseInt(preview_limit) || 5, 20);
 
+    // CRITICAL: Determine if this is a free plan user
+    // Free users: always have tenant_id, use shared database, store_products table doesn't have online_store_id
+    // Enterprise users: separate database, store_products table may have online_store_id
+    // If req.tenant is not set but tenantId exists, assume free user (defensive check)
+    const isFreePlan = req.tenant?.subscription_plan === 'free' || (req.user?.tenantId && (!req.tenant || req.tenant.subscription_plan !== 'enterprise'));
+    
+    // Log for debugging
+    console.log('[getStorePreview] Plan detection:', {
+      isFreePlan,
+      hasTenantId: !!req.user?.tenantId,
+      hasTenant: !!req.tenant,
+      subscriptionPlan: req.tenant?.subscription_plan,
+      tenantId: req.user?.tenantId
+    });
+
     // Get user's online store (can be unpublished for preview)
     const onlineStore = await models.OnlineStore.findOne({
       where: {
         // For free users, filter by tenant_id; for enterprise, no filter needed (separate DB)
-        ...(req.user.tenantId && req.tenant?.subscription_plan === 'free' 
+        ...(isFreePlan && req.user.tenantId
           ? { tenant_id: req.user.tenantId } 
           : {})
       },
@@ -2999,13 +3014,9 @@ async function getStorePreview(req, res) {
 
     // Check if products and services exist to determine toggle visibility
     // Can preview even if not published
-    // For free users: filter by tenant_id (store_products doesn't have online_store_id)
-    // For enterprise users: filter by online_store_id if column exists, otherwise by tenant_id
-    const isFreePlan = req.tenant?.subscription_plan === 'free';
-    const productWhere = isFreePlan 
-      ? { tenant_id: req.user.tenantId }
-      : { online_store_id: onlineStore.id };
-    
+    // CRITICAL: For free users, store_products table does NOT have online_store_id column
+    // We MUST use raw SQL for ALL StoreProduct queries for free users
+    // isFreePlan is already determined above with defensive checks
     // Only select columns that exist in the database (exclude seo_title, seo_description, seo_keywords for free users)
     const storeProductAttributes = isFreePlan
       ? ['id', 'tenant_id', 'product_id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at']
@@ -3020,35 +3031,51 @@ async function getStorePreview(req, res) {
       ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
       : ['id', 'tenant_id', 'store_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at'];
     
-    // For free users, use raw query to avoid model field issues
+    // CRITICAL: For free users, ALWAYS use raw SQL - NEVER use Sequelize StoreProduct queries
+    // Sequelize will try to use online_store_id from the model definition even if we specify tenant_id
+    // SAFETY: If tenantId exists, assume free user to avoid online_store_id errors
+    const safeIsFreePlan = isFreePlan || !!req.user?.tenantId;
+    
     let hasProducts = false;
-    if (isFreePlan) {
-      const [result] = await req.db.query(`
-        SELECT COUNT(*) as count
-        FROM store_products sp
-        INNER JOIN products p ON sp.product_id = p.id
-        WHERE sp.tenant_id = :tenantId
-          AND p.is_active = 1
-      `, {
-        replacements: { tenantId: req.user.tenantId },
-        type: Sequelize.QueryTypes.SELECT
-      });
-      hasProducts = (parseInt(result?.count || 0) > 0);
+    if (safeIsFreePlan) {
+      // Free users: MUST use raw SQL - store_products table doesn't have online_store_id
+      try {
+        if (!req.user?.tenantId) {
+          console.warn('[getStorePreview] Warning: isFreePlan is true but tenantId is missing');
+          hasProducts = false;
+        } else {
+          const [result] = await req.db.query(`
+            SELECT COUNT(*) as count
+            FROM store_products sp
+            INNER JOIN products p ON sp.product_id = p.id
+            WHERE sp.tenant_id = :tenantId
+              AND p.is_active = 1
+          `, {
+            replacements: { tenantId: req.user.tenantId },
+            type: Sequelize.QueryTypes.SELECT
+          });
+          hasProducts = (parseInt(result?.count || 0) > 0);
+        }
+      } catch (error) {
+        console.error('Error checking products for free user:', error);
+        hasProducts = false;
+      }
     } else {
+      // Enterprise users: can use Sequelize with online_store_id
       hasProducts = await models.StoreProduct.count({
-        where: productWhere,
+        where: { online_store_id: onlineStore.id },
         include: [{
           model: models.Product,
           where: { is_active: true },
           required: true,
-          attributes: productAttributes // Only select columns that exist in the database
+          attributes: productAttributes
         }]
       }) > 0;
     }
 
     // Check if services exist - for free users, filter by tenant_id and online_store_id via join
     let hasServices = false;
-    if (isFreePlan) {
+    if (safeIsFreePlan) {
       const [servicesResult] = await req.db.query(`
         SELECT COUNT(*) as count
         FROM store_services ss
@@ -3095,7 +3122,7 @@ async function getStorePreview(req, res) {
               model: models.Product,
               where: { is_active: true },
               required: false,
-              attributes: isFreePlan 
+              attributes: safeIsFreePlan 
                 ? ['id', 'name', 'sku', 'price', 'image_url', 'category']
                 : ['id', 'name', 'sku', 'price', 'image_url', 'category', 'store_id']
             }
@@ -3139,7 +3166,7 @@ async function getStorePreview(req, res) {
     // For free users: MUST use raw SQL (store_products doesn't have online_store_id, Sequelize will fail)
     // For enterprise users: can use Sequelize with online_store_id
     let productsNotInCollections = [];
-    if (isFreePlan) {
+    if (safeIsFreePlan) {
       // Free users: use raw SQL to avoid online_store_id issues
       const productsResult = await req.db.query(`
         SELECT DISTINCT sp.id, sp.tenant_id, sp.product_id, sp.is_published, sp.featured, sp.sort_order, sp.created_at, sp.updated_at,
@@ -3227,7 +3254,7 @@ async function getStorePreview(req, res) {
     // For free users: filter by tenant_id in online_store_services
     // For enterprise users: filter by online_store_id
     let servicesNotInCollections = [];
-    if (isFreePlan) {
+    if (safeIsFreePlan) {
       // Free users: use raw SQL to ensure we filter correctly
       const servicesResult = await req.db.query(`
         SELECT DISTINCT ss.id, ss.tenant_id, ss.service_title, ss.description, ss.price, ss.service_image_url, 
@@ -3317,10 +3344,10 @@ async function getStorePreview(req, res) {
     // For enterprise users: filter by online_store_id if column exists, otherwise by tenant_id
     let totalProductsNotInCollections = 0;
     try {
-      const whereClause = isFreePlan
+      const whereClause = safeIsFreePlan
         ? `sp.tenant_id = :tenantId`
         : `sp.online_store_id = :onlineStoreId`;
-      const replacements = isFreePlan
+      const replacements = safeIsFreePlan
         ? { tenantId: req.user.tenantId }
         : { onlineStoreId: onlineStore.id };
       
@@ -3342,7 +3369,7 @@ async function getStorePreview(req, res) {
       console.error('Error counting products not in collections:', queryError);
       // Fallback: use raw query for free users, Sequelize for enterprise
       try {
-        if (isFreePlan) {
+        if (safeIsFreePlan) {
           // Use raw query for free users to avoid model field issues (online_store_id doesn't exist)
           const [fallbackResult] = await req.db.query(`
             SELECT COUNT(DISTINCT sp.id) as count
