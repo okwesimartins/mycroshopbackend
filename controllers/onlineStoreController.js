@@ -3011,6 +3011,11 @@ async function getStorePreview(req, res) {
       ? ['id', 'tenant_id', 'product_id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at']
       : ['id', 'tenant_id', 'product_id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at', 'seo_title', 'seo_description', 'seo_keywords'];
     
+    // Define Product attributes - exclude store_id for free users (products table doesn't have store_id, uses product_stores junction table)
+    const productAttributes = isFreePlan
+      ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at']
+      : ['id', 'tenant_id', 'store_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at'];
+    
     // For free users, use raw query to avoid model field issues
     let hasProducts = false;
     if (isFreePlan) {
@@ -3031,7 +3036,8 @@ async function getStorePreview(req, res) {
         include: [{
           model: models.Product,
           where: { is_active: true },
-          required: true
+          required: true,
+          attributes: productAttributes // Only select columns that exist in the database
         }]
       }) > 0;
     }
@@ -3114,6 +3120,7 @@ async function getStorePreview(req, res) {
           model: models.Product,
           where: { is_active: true },
           required: true,
+          attributes: productAttributes, // Only select columns that exist in the database
           include: [{
             model: models.StoreCollectionProduct,
             required: false,
