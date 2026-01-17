@@ -911,17 +911,17 @@ async function getPublicStorePreview(req, res) {
                   model: models.Product,
                   where: { is_active: true },
                   required: false
-                }
-              ],
-              order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
-            },
+            }
+          ],
+          order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
+        },
             {
               model: models.StoreCollectionService,
               include: [
-                {
-                  model: models.StoreService,
-                  where: { is_active: true },
-                  required: false
+        {
+          model: models.StoreService,
+          where: { is_active: true },
+          required: false
                 }
               ],
               order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
@@ -3138,35 +3138,97 @@ async function getStorePreview(req, res) {
 
     // Count products not in collections using a subquery approach
     // Can preview even if not published
-    const [productsNotInCollectionsCountResult] = await req.db.query(`
-      SELECT COUNT(DISTINCT sp.id) as count
-      FROM store_products sp
-      INNER JOIN products p ON sp.product_id = p.id
-      LEFT JOIN store_collection_products scp ON p.id = scp.product_id
-      WHERE sp.online_store_id = :onlineStoreId
-        AND p.is_active = 1
-        AND scp.id IS NULL
-    `, {
-      replacements: { onlineStoreId: onlineStore.id },
-      type: Sequelize.QueryTypes.SELECT
-    });
-    const totalProductsNotInCollections = productsNotInCollectionsCountResult?.count || 0;
+    let totalProductsNotInCollections = 0;
+    try {
+      const productsNotInCollectionsCountResult = await req.db.query(`
+        SELECT COUNT(DISTINCT sp.id) as count
+        FROM store_products sp
+        INNER JOIN products p ON sp.product_id = p.id
+        LEFT JOIN store_collection_products scp ON p.id = scp.product_id
+        WHERE sp.online_store_id = :onlineStoreId
+          AND p.is_active = 1
+          AND scp.id IS NULL
+      `, {
+        replacements: { onlineStoreId: onlineStore.id },
+        type: Sequelize.QueryTypes.SELECT
+      });
+      // Query returns array of results, get first element's count
+      totalProductsNotInCollections = parseInt(productsNotInCollectionsCountResult?.[0]?.count || 0);
+    } catch (queryError) {
+      console.error('Error counting products not in collections:', queryError);
+      // Fallback: use Sequelize count
+      try {
+        totalProductsNotInCollections = await models.StoreProduct.count({
+          where: {
+            online_store_id: onlineStore.id
+          },
+          include: [{
+            model: models.Product,
+            where: { is_active: true },
+            required: true,
+            include: [{
+              model: models.StoreCollectionProduct,
+              required: false,
+              attributes: []
+            }]
+          }],
+          having: Sequelize.literal('COUNT(StoreCollectionProducts.id) = 0')
+        });
+      } catch (fallbackError) {
+        console.error('Fallback count also failed:', fallbackError);
+        totalProductsNotInCollections = 0;
+      }
+    }
 
     // Count services not in collections (linked to this online store)
-    const [servicesNotInCollectionsCountResult] = await req.db.query(`
-      SELECT COUNT(DISTINCT ss.id) as count
-      FROM store_services ss
-      INNER JOIN online_store_services oss ON ss.id = oss.service_id
-      LEFT JOIN store_collection_services scs ON ss.id = scs.service_id
-      WHERE ss.is_active = 1
-        AND oss.online_store_id = :onlineStoreId
-        AND oss.is_visible = 1
-        AND scs.id IS NULL
-    `, {
-      replacements: { onlineStoreId: onlineStore.id },
-      type: Sequelize.QueryTypes.SELECT
-    });
-    const totalServicesNotInCollections = servicesNotInCollectionsCountResult?.count || 0;
+    let totalServicesNotInCollections = 0;
+    try {
+      const servicesNotInCollectionsCountResult = await req.db.query(`
+        SELECT COUNT(DISTINCT ss.id) as count
+        FROM store_services ss
+        INNER JOIN online_store_services oss ON ss.id = oss.service_id
+        LEFT JOIN store_collection_services scs ON ss.id = scs.service_id
+        WHERE ss.is_active = 1
+          AND oss.online_store_id = :onlineStoreId
+          AND oss.is_visible = 1
+          AND scs.id IS NULL
+      `, {
+        replacements: { onlineStoreId: onlineStore.id },
+        type: Sequelize.QueryTypes.SELECT
+      });
+      // Query returns array of results, get first element's count
+      totalServicesNotInCollections = parseInt(servicesNotInCollectionsCountResult?.[0]?.count || 0);
+    } catch (queryError) {
+      console.error('Error counting services not in collections:', queryError);
+      // Fallback: use Sequelize count
+      try {
+        totalServicesNotInCollections = await models.StoreService.count({
+          where: {
+            is_active: true
+          },
+          include: [
+            {
+              model: models.OnlineStoreService,
+              where: { 
+                online_store_id: onlineStore.id,
+                is_visible: true
+              },
+              required: true,
+              attributes: []
+            },
+            {
+              model: models.StoreCollectionService,
+              required: false,
+              attributes: []
+            }
+          ],
+          having: Sequelize.literal('COUNT(StoreCollectionServices.id) = 0')
+        });
+      } catch (fallbackError) {
+        console.error('Fallback count also failed:', fallbackError);
+        totalServicesNotInCollections = 0;
+      }
+    }
 
     // Normalize collection data
     const normalizeCollection = (collection) => {
@@ -3270,10 +3332,20 @@ async function getStorePreview(req, res) {
     });
   } catch (error) {
     console.error('Error getting store preview:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: error.message,
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Failed to get store preview',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      ...(process.env.NODE_ENV === 'development' && { 
+        stack: error.stack,
+        details: {
+          hasDb: !!req.db,
+          hasModels: !!req.db?.models,
+          hasUser: !!req.user,
+          tenantId: req.user?.tenantId
+        }
+      })
     });
   }
 }
