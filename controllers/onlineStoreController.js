@@ -3046,9 +3046,39 @@ async function getStorePreview(req, res) {
       }) > 0;
     }
 
-    const hasServices = await models.StoreService.count({
-      where: { is_active: true }
-    }) > 0;
+    // Check if services exist - for free users, filter by tenant_id and online_store_id via join
+    let hasServices = false;
+    if (isFreePlan) {
+      const [servicesResult] = await req.db.query(`
+        SELECT COUNT(*) as count
+        FROM store_services ss
+        INNER JOIN online_store_services oss ON ss.id = oss.service_id
+        WHERE ss.is_active = 1
+          AND oss.online_store_id = :onlineStoreId
+          AND oss.is_visible = 1
+          AND ss.tenant_id = :tenantId
+      `, {
+        replacements: { onlineStoreId: onlineStore.id, tenantId: req.user.tenantId },
+        type: Sequelize.QueryTypes.SELECT
+      });
+      hasServices = (parseInt(servicesResult?.count || 0) > 0);
+    } else {
+      hasServices = await models.StoreService.count({
+        where: {
+          is_active: true,
+          '$OnlineStoreServices.online_store_id$': onlineStore.id
+        },
+        include: [{
+          model: models.OnlineStoreService,
+          where: {
+            online_store_id: onlineStore.id,
+            is_visible: true
+          },
+          required: true,
+          attributes: []
+        }]
+      }) > 0;
+    }
 
     // Get product collections (preview - limited items per collection)
     // Can preview even if not visible
@@ -3106,68 +3136,164 @@ async function getStorePreview(req, res) {
 
     // Get products NOT in any collection (preview)
     // Can preview even if not published
-    // For free users: filter by tenant_id (store_products doesn't have online_store_id)
-    // For enterprise users: filter by online_store_id if column exists, otherwise by tenant_id
-    const productsNotInCollectionsWhere = isFreePlan
-      ? {
-          tenant_id: req.user.tenantId,
-          '$Product.StoreCollectionProducts.id$': { [Op.eq]: null }
-        }
-      : {
+    // For free users: MUST use raw SQL (store_products doesn't have online_store_id, Sequelize will fail)
+    // For enterprise users: can use Sequelize with online_store_id
+    let productsNotInCollections = [];
+    if (isFreePlan) {
+      // Free users: use raw SQL to avoid online_store_id issues
+      const productsResult = await req.db.query(`
+        SELECT DISTINCT sp.id, sp.tenant_id, sp.product_id, sp.is_published, sp.featured, sp.sort_order, sp.created_at, sp.updated_at,
+               p.id as 'Product.id', p.tenant_id as 'Product.tenant_id', p.name as 'Product.name', 
+               p.description as 'Product.description', p.sku as 'Product.sku', p.barcode as 'Product.barcode',
+               p.price as 'Product.price', p.stock as 'Product.stock', p.low_stock_threshold as 'Product.low_stock_threshold',
+               p.category as 'Product.category', p.image_url as 'Product.image_url', p.expiry_date as 'Product.expiry_date',
+               p.is_active as 'Product.is_active', p.created_at as 'Product.created_at', p.updated_at as 'Product.updated_at'
+        FROM store_products sp
+        INNER JOIN products p ON sp.product_id = p.id
+        LEFT JOIN store_collection_products scp ON p.id = scp.product_id
+        WHERE sp.tenant_id = :tenantId
+          AND p.is_active = 1
+          AND scp.id IS NULL
+        ORDER BY sp.created_at DESC
+        LIMIT :limit
+      `, {
+        replacements: { tenantId: req.user.tenantId, limit: previewLimit },
+        type: Sequelize.QueryTypes.SELECT
+      });
+      
+      // Transform raw results to match Sequelize format
+      productsNotInCollections = productsResult.map(row => {
+        const sp = {
+          id: row.id,
+          tenant_id: row.tenant_id,
+          product_id: row.product_id,
+          is_published: row.is_published,
+          featured: row.featured,
+          sort_order: row.sort_order,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          Product: {
+            id: row['Product.id'],
+            tenant_id: row['Product.tenant_id'],
+            name: row['Product.name'],
+            description: row['Product.description'],
+            sku: row['Product.sku'],
+            barcode: row['Product.barcode'],
+            price: row['Product.price'],
+            stock: row['Product.stock'],
+            low_stock_threshold: row['Product.low_stock_threshold'],
+            category: row['Product.category'],
+            image_url: row['Product.image_url'],
+            expiry_date: row['Product.expiry_date'],
+            is_active: row['Product.is_active'],
+            created_at: row['Product.created_at'],
+            updated_at: row['Product.updated_at']
+          }
+        };
+        // Add toJSON method for compatibility
+        sp.toJSON = () => sp;
+        sp.Product.toJSON = () => sp.Product;
+        return sp;
+      });
+    } else {
+      // Enterprise users: can use Sequelize
+      productsNotInCollections = await models.StoreProduct.findAll({
+        where: {
           online_store_id: onlineStore.id,
           '$Product.StoreCollectionProducts.id$': { [Op.eq]: null }
-        };
-    
-    const productsNotInCollections = await models.StoreProduct.findAll({
-      where: productsNotInCollectionsWhere,
-      attributes: storeProductAttributes, // Only select columns that exist in the database
-      include: [
-        {
-          model: models.Product,
-          where: { is_active: true },
-          required: true,
-          attributes: productAttributes, // Only select columns that exist in the database
-          include: [{
-            model: models.StoreCollectionProduct,
-            required: false,
-            attributes: []
-          }]
-        }
-      ],
-      limit: previewLimit,
-      order: [['created_at', 'DESC']],
-      subQuery: false,
-      group: ['StoreProduct.id']
-    });
+        },
+        attributes: storeProductAttributes,
+        include: [
+          {
+            model: models.Product,
+            where: { is_active: true },
+            required: true,
+            attributes: productAttributes,
+            include: [{
+              model: models.StoreCollectionProduct,
+              required: false,
+              attributes: []
+            }]
+          }
+        ],
+        limit: previewLimit,
+        order: [['created_at', 'DESC']],
+        subQuery: false,
+        group: ['StoreProduct.id']
+      });
+    }
 
     // Get services NOT in any collection (preview)
-    const servicesNotInCollections = await models.StoreService.findAll({
-      where: {
-        is_active: true,
-        '$OnlineStoreServices.online_store_id$': onlineStore.id,
-        '$StoreCollectionServices.id$': { [Op.eq]: null }
-      },
-      include: [
-        {
-          model: models.OnlineStoreService,
-          where: { 
-            online_store_id: onlineStore.id,
-            is_visible: true
-          },
-          required: true,
-          attributes: []
+    // For free users: filter by tenant_id in online_store_services
+    // For enterprise users: filter by online_store_id
+    let servicesNotInCollections = [];
+    if (isFreePlan) {
+      // Free users: use raw SQL to ensure we filter correctly
+      const servicesResult = await req.db.query(`
+        SELECT DISTINCT ss.id, ss.tenant_id, ss.service_title, ss.description, ss.price, ss.service_image_url, 
+               ss.duration_minutes, ss.is_active, ss.created_at, ss.updated_at
+        FROM store_services ss
+        INNER JOIN online_store_services oss ON ss.id = oss.service_id
+        LEFT JOIN store_collection_services scs ON ss.id = scs.service_id
+        WHERE ss.is_active = 1
+          AND oss.online_store_id = :onlineStoreId
+          AND oss.is_visible = 1
+          AND ss.tenant_id = :tenantId
+          AND scs.id IS NULL
+        ORDER BY ss.created_at DESC
+        LIMIT :limit
+      `, {
+        replacements: { onlineStoreId: onlineStore.id, tenantId: req.user.tenantId, limit: previewLimit },
+        type: Sequelize.QueryTypes.SELECT
+      });
+      
+      // Transform raw results to match Sequelize format
+      servicesNotInCollections = servicesResult.map(row => {
+        const service = {
+          id: row.id,
+          tenant_id: row.tenant_id,
+          service_title: row.service_title,
+          description: row.description,
+          price: row.price,
+          service_image_url: row.service_image_url,
+          duration_minutes: row.duration_minutes,
+          is_active: row.is_active,
+          created_at: row.created_at,
+          updated_at: row.updated_at
+        };
+        service.toJSON = () => service;
+        return service;
+      });
+    } else {
+      // Enterprise users: can use Sequelize
+      servicesNotInCollections = await models.StoreService.findAll({
+        where: {
+          is_active: true,
+          '$OnlineStoreServices.online_store_id$': onlineStore.id,
+          '$StoreCollectionServices.id$': { [Op.eq]: null }
         },
-        {
-          model: models.StoreCollectionService,
-          required: false,
-          attributes: []
-        }
-      ],
-      limit: previewLimit,
-      order: [['created_at', 'DESC']],
-      subQuery: false,
-      group: ['StoreService.id']
-    });
+        include: [
+          {
+            model: models.OnlineStoreService,
+            where: { 
+              online_store_id: onlineStore.id,
+              is_visible: true
+            },
+            required: true,
+            attributes: []
+          },
+          {
+            model: models.StoreCollectionService,
+            required: false,
+            attributes: []
+          }
+        ],
+        limit: previewLimit,
+        order: [['created_at', 'DESC']],
+        subQuery: false,
+        group: ['StoreService.id']
+      });
+    }
 
     // Get total counts for pagination info
     // Can preview even if not visible
@@ -3336,9 +3462,10 @@ async function getStorePreview(req, res) {
       return collectionData;
     };
 
-    // Normalize products
+    // Normalize products (handle both Sequelize and raw SQL results)
     const normalizedProducts = productsNotInCollections.map(sp => {
-      const productData = sp.Product.toJSON();
+      // Handle both Sequelize instances and raw SQL results
+      const productData = sp.Product ? (typeof sp.Product.toJSON === 'function' ? sp.Product.toJSON() : sp.Product) : sp;
       if (productData.image_url) {
         productData.image_url = getFullUrl(productData.image_url);
       }
