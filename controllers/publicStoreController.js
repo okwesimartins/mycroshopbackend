@@ -339,7 +339,7 @@ async function getPublicStore(req, res) {
       // Free users: use raw SQL
       const serviceRows = await sequelize.query(`
         SELECT DISTINCT ss.id, ss.tenant_id, ss.service_title, ss.description, ss.price, ss.service_image_url, 
-               ss.duration_minutes, ss.is_active, ss.created_at, ss.updated_at
+               ss.duration_minutes, ss.location_type, ss.availability, ss.is_active, ss.created_at, ss.updated_at
         FROM store_services ss
         INNER JOIN online_store_services oss ON ss.id = oss.service_id
         LEFT JOIN store_collection_services scs ON ss.id = scs.service_id
@@ -361,6 +361,21 @@ async function getPublicStore(req, res) {
       
       // Transform raw results to match Sequelize format
       servicesNotInCollections = serviceRows.map(row => {
+        // Parse availability from JSON string to object
+        let availability = {};
+        if (row.availability) {
+          if (typeof row.availability === 'string') {
+            try {
+              availability = JSON.parse(row.availability);
+            } catch (e) {
+              console.error('Error parsing service availability:', e);
+              availability = {}; // Default to empty object if parsing fails
+            }
+          } else {
+            availability = row.availability;
+          }
+        }
+        
         const service = {
           id: row.id,
           tenant_id: row.tenant_id,
@@ -369,6 +384,8 @@ async function getPublicStore(req, res) {
           price: row.price,
           service_image_url: row.service_image_url,
           duration_minutes: row.duration_minutes,
+          location_type: row.location_type,
+          availability: availability,
           is_active: row.is_active,
           created_at: row.created_at,
           updated_at: row.updated_at
@@ -567,6 +584,20 @@ async function getPublicStore(req, res) {
                 : csData.StoreService)
             : null;
           
+          // Parse availability from JSON string to object
+          if (serviceData && serviceData.availability) {
+            if (typeof serviceData.availability === 'string') {
+              try {
+                serviceData.availability = JSON.parse(serviceData.availability);
+              } catch (e) {
+                console.error('Error parsing service availability:', e);
+                serviceData.availability = {}; // Default to empty object if parsing fails
+              }
+            }
+          } else if (serviceData) {
+            serviceData.availability = {}; // Default to empty object if not set
+          }
+          
           if (serviceData && serviceData.service_image_url) {
             serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
           }
@@ -595,6 +626,21 @@ async function getPublicStore(req, res) {
       const serviceData = service && typeof service.toJSON === 'function' 
         ? service.toJSON() 
         : service;
+      
+      // Parse availability from JSON string to object
+      if (serviceData && serviceData.availability) {
+        if (typeof serviceData.availability === 'string') {
+          try {
+            serviceData.availability = JSON.parse(serviceData.availability);
+          } catch (e) {
+            console.error('Error parsing service availability:', e);
+            serviceData.availability = {}; // Default to empty object if parsing fails
+          }
+        }
+      } else if (serviceData) {
+        serviceData.availability = {}; // Default to empty object if not set
+      }
+      
       if (serviceData && serviceData.service_image_url) {
         serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
       }
@@ -994,9 +1040,26 @@ async function getPublicServices(req, res) {
 
     const services = rows.map(service => {
       const serviceData = service.toJSON();
+      
+      // Parse availability from JSON string to object
+      if (serviceData.availability) {
+        if (typeof serviceData.availability === 'string') {
+          try {
+            serviceData.availability = JSON.parse(serviceData.availability);
+          } catch (e) {
+            console.error('Error parsing service availability:', e);
+            serviceData.availability = {}; // Default to empty object if parsing fails
+          }
+        }
+      } else {
+        serviceData.availability = {}; // Default to empty object if not set
+      }
+      
+      // Normalize service image URL
       if (serviceData.service_image_url) {
         serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
       }
+      
       return serviceData;
     });
 
@@ -1070,19 +1133,61 @@ async function getPublicService(req, res) {
       where: {
         id: service_id,
         is_active: true
-      }
+      },
+      include: [{
+        model: models.OnlineStoreService,
+        where: {
+          online_store_id: onlineStore.id,
+          is_visible: true
+        },
+        required: true,
+        attributes: [] // Don't include OnlineStoreService data in response
+      }]
     });
 
     if (!service) {
       return res.status(404).json({
         success: false,
-        message: 'Service not found'
+        message: 'Service not found or not available in this store'
       });
+    }
+
+    // Helper to normalize URLs
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    }
+
+    // Normalize service data
+    const serviceData = service.toJSON();
+    
+    // Parse availability from JSON string to object
+    if (serviceData.availability) {
+      if (typeof serviceData.availability === 'string') {
+        try {
+          serviceData.availability = JSON.parse(serviceData.availability);
+        } catch (e) {
+          console.error('Error parsing service availability:', e);
+          serviceData.availability = {}; // Default to empty object if parsing fails
+        }
+      }
+    } else {
+      serviceData.availability = {}; // Default to empty object if not set
+    }
+
+    // Normalize service image URL
+    if (serviceData.service_image_url) {
+      serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
     }
 
     res.json({
       success: true,
-      data: { service }
+      data: { service: serviceData }
     });
   } catch (error) {
     console.error('Error getting public service:', error);
