@@ -3011,9 +3011,13 @@ async function getStorePreview(req, res) {
       ? ['id', 'tenant_id', 'product_id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at']
       : ['id', 'tenant_id', 'product_id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at', 'seo_title', 'seo_description', 'seo_keywords'];
     
-    // Define Product attributes - exclude store_id for free users (products table doesn't have store_id, uses product_stores junction table)
+    // Define Product attributes - only include columns that exist in the database
+    // For free users: products table has: id, tenant_id, name, description, sku, barcode, price, cost_price, stock, low_stock_threshold, category, image_url, expiry_date, is_active, created_at, updated_at
+    // Note: The model defines 'cost' but database has 'cost_price' - no field mapping exists, so we can't use 'cost'
+    // Note: batch_number, unit_of_measure, store_id don't exist in the products table for free users
+    // For free users, only include columns that actually exist in the database
     const productAttributes = isFreePlan
-      ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at']
+      ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
       : ['id', 'tenant_id', 'store_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at'];
     
     // For free users, use raw query to avoid model field issues
@@ -3061,7 +3065,9 @@ async function getStorePreview(req, res) {
               model: models.Product,
               where: { is_active: true },
               required: false,
-              attributes: ['id', 'name', 'sku', 'price', 'image_url', 'category']
+              attributes: isFreePlan 
+                ? ['id', 'name', 'sku', 'price', 'image_url', 'category']
+                : ['id', 'name', 'sku', 'price', 'image_url', 'category', 'store_id']
             }
           ],
           limit: previewLimit,
