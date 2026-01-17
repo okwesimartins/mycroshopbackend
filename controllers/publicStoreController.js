@@ -1457,7 +1457,7 @@ async function getPublicProduct(req, res) {
     console.error('Error getting public product:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get product'
+      message: error.message
     });
   }
 }
