@@ -1134,7 +1134,9 @@ async function getPublicProducts(req, res) {
     const { Sequelize, Op } = require('sequelize');
 
     // Determine if this is a free user
-    const isFreePlan = tenant.subscription_plan === 'free';
+    // CRITICAL: Free users don't have online_store_id in store_products table
+    // Also, they don't have seo_title, seo_description, seo_keywords columns
+    const isFreePlan = tenant.subscription_plan === 'free' || !tenant.subscription_plan;
 
     // Find online store
     const onlineStore = await models.OnlineStore.findOne({
@@ -1166,8 +1168,11 @@ async function getPublicProducts(req, res) {
     let products = [];
     let totalCount = 0;
 
+    // CRITICAL: For free users, ALWAYS use raw SQL to avoid:
+    // 1. online_store_id column (doesn't exist in store_products for free users)
+    // 2. seo_title, seo_description, seo_keywords columns (don't exist for free users)
     if (isFreePlan) {
-      // Free users: use raw SQL to avoid online_store_id issues
+      // Free users: use raw SQL to avoid online_store_id and SEO column issues
       // Build WHERE conditions
       let whereConditions = [
         'sp.tenant_id = :tenantId',
@@ -1300,8 +1305,13 @@ async function getPublicProducts(req, res) {
       }
 
       // Get ALL products for this online store (with optional collection filter)
+      // Explicitly specify attributes to avoid selecting columns that don't exist
+      // StoreProduct attributes: only include columns that exist for both free and enterprise
+      const storeProductAttributes = ['id', 'tenant_id', 'product_id', 'online_store_id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at'];
+      
       const { count, rows } = await models.StoreProduct.findAndCountAll({
         where: storeProductWhere,
+        attributes: storeProductAttributes, // Explicitly set attributes to avoid SEO columns
         include: [
           {
             model: models.Product,
