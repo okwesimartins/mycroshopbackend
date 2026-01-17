@@ -2953,16 +2953,20 @@ async function getStorePreview(req, res) {
     const previewLimit = Math.min(parseInt(preview_limit) || 5, 20);
 
     // CRITICAL: Determine if this is a free plan user
-    // Free users: always have tenant_id, use shared database, store_products table doesn't have online_store_id
-    // Enterprise users: separate database, store_products table may have online_store_id
-    // If req.tenant is not set but tenantId exists, assume free user (defensive check)
+    // Free users: ALWAYS have tenantId, use shared database, store_products/store_services tables DON'T have online_store_id
+    // Enterprise users: separate database, may have online_store_id in store_products/store_services
+    // SAFETY: If tenantId exists, we MUST treat as free user to avoid online_store_id errors
     const isFreePlan = req.tenant?.subscription_plan === 'free' || (req.user?.tenantId && (!req.tenant || req.tenant.subscription_plan !== 'enterprise'));
+    
+    // ABSOLUTE SAFETY: If tenantId exists, force free user mode (defensive programming)
+    // This prevents ANY Sequelize StoreProduct/StoreService queries from using online_store_id
+    const forceFreeUser = !!req.user?.tenantId;
     
     // Log for debugging
     console.log('[getStorePreview] Plan detection:', {
       isFreePlan,
+      forceFreeUser,
       hasTenantId: !!req.user?.tenantId,
-      hasTenant: !!req.tenant,
       subscriptionPlan: req.tenant?.subscription_plan,
       tenantId: req.user?.tenantId
     });
@@ -3033,15 +3037,22 @@ async function getStorePreview(req, res) {
     
     // CRITICAL: For free users, ALWAYS use raw SQL - NEVER use Sequelize StoreProduct queries
     // Sequelize will try to use online_store_id from the model definition even if we specify tenant_id
-    // SAFETY: If tenantId exists, assume free user to avoid online_store_id errors
-    const safeIsFreePlan = isFreePlan || !!req.user?.tenantId;
+    // ABSOLUTE SAFETY: If tenantId exists, ALWAYS use raw SQL (store_products doesn't have online_store_id for free users)
+    const useRawSQL = forceFreeUser || isFreePlan;
+    
+    console.log('[getStorePreview] useRawSQL decision:', {
+      useRawSQL,
+      forceFreeUser,
+      isFreePlan,
+      tenantId: req.user?.tenantId
+    });
     
     let hasProducts = false;
-    if (safeIsFreePlan) {
+    if (useRawSQL) {
       // Free users: MUST use raw SQL - store_products table doesn't have online_store_id
       try {
         if (!req.user?.tenantId) {
-          console.warn('[getStorePreview] Warning: isFreePlan is true but tenantId is missing');
+          console.warn('[getStorePreview] Warning: useRawSQL is true but tenantId is missing');
           hasProducts = false;
         } else {
           const [result] = await req.db.query(`
@@ -3057,25 +3068,48 @@ async function getStorePreview(req, res) {
           hasProducts = (parseInt(result?.count || 0) > 0);
         }
       } catch (error) {
-        console.error('Error checking products for free user:', error);
+        console.error('[getStorePreview] Error checking products for free user:', error);
         hasProducts = false;
       }
     } else {
       // Enterprise users: can use Sequelize with online_store_id
-      hasProducts = await models.StoreProduct.count({
-        where: { online_store_id: onlineStore.id },
-        include: [{
-          model: models.Product,
-          where: { is_active: true },
-          required: true,
-          attributes: productAttributes
-        }]
-      }) > 0;
+      // BUT: Double-check we're not accidentally calling this for free users
+      if (req.user?.tenantId) {
+        console.error('[getStorePreview] ERROR: useRawSQL is false but tenantId exists! This should not happen for free users.');
+        // Fallback to raw SQL to prevent error
+        try {
+          const [result] = await req.db.query(`
+            SELECT COUNT(*) as count
+            FROM store_products sp
+            INNER JOIN products p ON sp.product_id = p.id
+            WHERE sp.tenant_id = :tenantId
+              AND p.is_active = 1
+          `, {
+            replacements: { tenantId: req.user.tenantId },
+            type: Sequelize.QueryTypes.SELECT
+          });
+          hasProducts = (parseInt(result?.count || 0) > 0);
+        } catch (error) {
+          console.error('[getStorePreview] Error in fallback raw SQL:', error);
+          hasProducts = false;
+        }
+      } else {
+        hasProducts = await models.StoreProduct.count({
+          where: { online_store_id: onlineStore.id },
+          include: [{
+            model: models.Product,
+            where: { is_active: true },
+            required: true,
+            attributes: productAttributes
+          }]
+        }) > 0;
+      }
     }
 
     // Check if services exist - for free users, filter by tenant_id and online_store_id via join
+    // Note: store_services table doesn't have online_store_id, but online_store_services does
     let hasServices = false;
-    if (safeIsFreePlan) {
+    if (useRawSQL) {
       const [servicesResult] = await req.db.query(`
         SELECT COUNT(*) as count
         FROM store_services ss
@@ -3122,7 +3156,7 @@ async function getStorePreview(req, res) {
               model: models.Product,
               where: { is_active: true },
               required: false,
-              attributes: safeIsFreePlan 
+              attributes: useRawSQL 
                 ? ['id', 'name', 'sku', 'price', 'image_url', 'category']
                 : ['id', 'name', 'sku', 'price', 'image_url', 'category', 'store_id']
             }
@@ -3166,7 +3200,7 @@ async function getStorePreview(req, res) {
     // For free users: MUST use raw SQL (store_products doesn't have online_store_id, Sequelize will fail)
     // For enterprise users: can use Sequelize with online_store_id
     let productsNotInCollections = [];
-    if (safeIsFreePlan) {
+    if (useRawSQL) {
       // Free users: use raw SQL to avoid online_store_id issues
       const productsResult = await req.db.query(`
         SELECT DISTINCT sp.id, sp.tenant_id, sp.product_id, sp.is_published, sp.featured, sp.sort_order, sp.created_at, sp.updated_at,
@@ -3251,10 +3285,10 @@ async function getStorePreview(req, res) {
     }
 
     // Get services NOT in any collection (preview)
-    // For free users: filter by tenant_id in online_store_services
+    // For free users: filter by tenant_id in online_store_services (store_services doesn't have online_store_id)
     // For enterprise users: filter by online_store_id
     let servicesNotInCollections = [];
-    if (safeIsFreePlan) {
+    if (useRawSQL) {
       // Free users: use raw SQL to ensure we filter correctly
       const servicesResult = await req.db.query(`
         SELECT DISTINCT ss.id, ss.tenant_id, ss.service_title, ss.description, ss.price, ss.service_image_url, 
@@ -3344,10 +3378,10 @@ async function getStorePreview(req, res) {
     // For enterprise users: filter by online_store_id if column exists, otherwise by tenant_id
     let totalProductsNotInCollections = 0;
     try {
-      const whereClause = safeIsFreePlan
+      const whereClause = useRawSQL
         ? `sp.tenant_id = :tenantId`
         : `sp.online_store_id = :onlineStoreId`;
-      const replacements = safeIsFreePlan
+      const replacements = useRawSQL
         ? { tenantId: req.user.tenantId }
         : { onlineStoreId: onlineStore.id };
       
@@ -3369,7 +3403,7 @@ async function getStorePreview(req, res) {
       console.error('Error counting products not in collections:', queryError);
       // Fallback: use raw query for free users, Sequelize for enterprise
       try {
-        if (safeIsFreePlan) {
+        if (useRawSQL) {
           // Use raw query for free users to avoid model field issues (online_store_id doesn't exist)
           const [fallbackResult] = await req.db.query(`
             SELECT COUNT(DISTINCT sp.id) as count
