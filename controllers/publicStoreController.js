@@ -234,7 +234,7 @@ async function getPublicStore(req, res) {
               model: models.StoreService,
               where: { is_active: true },
               required: false,
-              attributes: ['id', 'name', 'description', 'price', 'service_image_url', 'duration']
+              attributes: ['id', 'service_title', 'description', 'price', 'service_image_url', 'duration_minutes']
             }
           ],
           limit: previewLimit, // Limit services per collection
