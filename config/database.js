@@ -893,14 +893,74 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       quantity DECIMAL(10, 2) NOT NULL,
       unit_price DECIMAL(10, 2) NOT NULL,
       total DECIMAL(10, 2) NOT NULL,
+      variation_id INT NULL,
+      variation_option_id INT NULL,
+      variation_name VARCHAR(100) NULL,
+      variation_option_value VARCHAR(255) NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       ${orderItemTenantIndex}
       FOREIGN KEY (order_id) REFERENCES online_store_orders(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
+      FOREIGN KEY (variation_id) REFERENCES product_variations(id) ON DELETE SET NULL,
+      FOREIGN KEY (variation_option_id) REFERENCES product_variation_options(id) ON DELETE SET NULL,
       INDEX idx_order_id (order_id),
-      INDEX idx_product_id (product_id)
+      INDEX idx_product_id (product_id),
+      INDEX idx_variation_id (variation_id),
+      INDEX idx_variation_option_id (variation_option_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  
+  // Migration: Add variation columns if they don't exist
+  try {
+    const [variationColumns] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'online_store_order_items' 
+        AND COLUMN_NAME IN ('variation_id', 'variation_option_id', 'variation_name', 'variation_option_value')
+    `);
+    
+    const existingColumns = variationColumns.map(col => col.COLUMN_NAME);
+    
+    if (!existingColumns.includes('variation_id')) {
+      await connection.query(`
+        ALTER TABLE online_store_order_items 
+        ADD COLUMN variation_id INT NULL AFTER total,
+        ADD FOREIGN KEY (variation_id) REFERENCES product_variations(id) ON DELETE SET NULL,
+        ADD INDEX idx_variation_id (variation_id)
+      `);
+    }
+    
+    if (!existingColumns.includes('variation_option_id')) {
+      await connection.query(`
+        ALTER TABLE online_store_order_items 
+        ADD COLUMN variation_option_id INT NULL AFTER variation_id,
+        ADD FOREIGN KEY (variation_option_id) REFERENCES product_variation_options(id) ON DELETE SET NULL,
+        ADD INDEX idx_variation_option_id (variation_option_id)
+      `);
+    }
+    
+    if (!existingColumns.includes('variation_name')) {
+      await connection.query(`
+        ALTER TABLE online_store_order_items 
+        ADD COLUMN variation_name VARCHAR(100) NULL AFTER variation_option_id
+      `);
+    }
+    
+    if (!existingColumns.includes('variation_option_value')) {
+      await connection.query(`
+        ALTER TABLE online_store_order_items 
+        ADD COLUMN variation_option_value VARCHAR(255) NULL AFTER variation_name
+      `);
+    }
+    
+    if (variationColumns.length < 4) {
+      console.log('✅ Variation columns added to online_store_order_items table');
+    }
+  } catch (alterError) {
+    console.warn('Could not check/add variation columns to online_store_order_items:', alterError.message);
+    // Continue - columns might already exist or foreign keys might fail if tables don't exist yet
+  }
 
   // Staff table
   const staffTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';

@@ -1704,6 +1704,32 @@ function initializeModels(sequelize) {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
       defaultValue: 0.00
+    },
+    variation_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'product_variations',
+        key: 'id'
+      }
+    },
+    variation_option_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'product_variation_options',
+        key: 'id'
+      }
+    },
+    variation_name: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      comment: 'Name of the variation (e.g., "Color", "Size")'
+    },
+    variation_option_value: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      comment: 'Value of the selected variation option (e.g., "Red", "Large")'
     }
   }, {
     tableName: 'online_store_order_items',

@@ -168,12 +168,14 @@ async function addPaymentGateway(req, res) {
             testMode: test_mode
           });
 
-          // Save subaccount code to online store
+          // Save subaccount code and ID to online store
           await onlineStore.update({
-            paystack_subaccount_code: subaccountDetails.subaccount_code
+            paystack_subaccount_code: subaccountDetails.subaccount_code,
+            paystack_subaccount_id: subaccountDetails.subaccount_id || null
           });
 
           console.log(`✅ Paystack subaccount created and linked to online store ${onlineStore.id}`);
+          console.log(`   Subaccount ID: ${subaccountDetails.subaccount_id || 'N/A'}`);
           console.log(`   Subaccount Code: ${subaccountDetails.subaccount_code}`);
           console.log(`   Account Name: ${subaccountDetails.account_name}`);
         } else {

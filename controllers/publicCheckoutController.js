@@ -257,7 +257,13 @@ async function createPublicOrder(req, res) {
       const orderItems = [];
 
       for (const item of items) {
-        const { product_id, quantity, unit_price } = item;
+        const { 
+          product_id, 
+          quantity, 
+          unit_price,
+          variation_id,        // Optional - variation ID (e.g., Color variation)
+          variation_option_id  // Optional - specific option ID (e.g., Red option)
+        } = item;
 
         if (!product_id || !quantity || !unit_price) {
           await transaction.rollback();
@@ -289,10 +295,110 @@ async function createPublicOrder(req, res) {
           });
         }
 
-        // Check stock
-        // For free users: check stock directly from products table
-        // For enterprise users: check stock from product_stores table if store_id is provided
-        if (isFreePlan) {
+        // Verify and get variation option if provided
+        let variationOption = null;
+        let variationName = null;
+        let variationOptionValue = null;
+        
+        if (variation_option_id || variation_id) {
+          // If variation_option_id is provided, verify it exists and belongs to the product
+          if (variation_option_id) {
+            // For free users, we need to verify via the variation's product_id and tenant_id
+            const { Sequelize } = require('sequelize');
+            const variationOptionQuery = isFreePlan && orderTenantId
+              ? `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name, 
+                        pv.variation_name, pv.product_id
+                 FROM product_variation_options pvo
+                 INNER JOIN product_variations pv ON pvo.variation_id = pv.id
+                 WHERE pvo.id = :optionId AND pv.product_id = :productId AND pvo.tenant_id = :tenantId`
+              : `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name, 
+                        pv.variation_name, pv.product_id
+                 FROM product_variation_options pvo
+                 INNER JOIN product_variations pv ON pvo.variation_id = pv.id
+                 WHERE pvo.id = :optionId AND pv.product_id = :productId`;
+            
+            const variationOptionRows = await req.db.query(variationOptionQuery, {
+              replacements: { 
+                optionId: variation_option_id,
+                productId: product_id,
+                ...(isFreePlan && orderTenantId ? { tenantId: orderTenantId } : {})
+              },
+              type: Sequelize.QueryTypes.SELECT,
+              transaction
+            });
+
+            if (!variationOptionRows || variationOptionRows.length === 0) {
+              await transaction.rollback();
+              return res.status(400).json({
+                success: false,
+                message: `Invalid variation option for product ${product.name}`
+              });
+            }
+
+            const variationOptionRow = variationOptionRows[0];
+            variationOption = {
+              id: variationOptionRow.id,
+              variation_id: variationOptionRow.variation_id,
+              option_value: variationOptionRow.option_value,
+              option_display_name: variationOptionRow.option_display_name
+            };
+            variationName = variationOptionRow.variation_name;
+            variationOptionValue = variationOptionRow.option_display_name || variationOptionRow.option_value;
+            variation_id = variationOptionRow.variation_id; // Update variation_id from option
+          } else if (variation_id) {
+            // Only variation_id provided - verify it belongs to the product
+            const { Sequelize } = require('sequelize');
+            const variationQuery = isFreePlan && orderTenantId
+              ? `SELECT id, variation_name, product_id 
+                 FROM product_variations 
+                 WHERE id = :variationId AND product_id = :productId AND tenant_id = :tenantId`
+              : `SELECT id, variation_name, product_id 
+                 FROM product_variations 
+                 WHERE id = :variationId AND product_id = :productId`;
+            
+            const variationRows = await req.db.query(variationQuery, {
+              replacements: { 
+                variationId: variation_id,
+                productId: product_id,
+                ...(isFreePlan && orderTenantId ? { tenantId: orderTenantId } : {})
+              },
+              type: Sequelize.QueryTypes.SELECT,
+              transaction
+            });
+
+            if (!variationRows || variationRows.length === 0) {
+              await transaction.rollback();
+              return res.status(400).json({
+                success: false,
+                message: `Invalid variation for product ${product.name}`
+              });
+            }
+
+            variationName = variationRows[0].variation_name;
+          }
+        }
+
+        // Check stock - for variations, check stock on the variation option
+        // For free users: check stock directly from products table or variation options
+        // For enterprise users: check stock from product_stores table if store_id is provided, or variation options
+        if (variationOption) {
+          // Check stock on variation option
+          const { Sequelize } = require('sequelize');
+          const stockQuery = `SELECT stock FROM product_variation_options WHERE id = :optionId`;
+          const stockRows = await req.db.query(stockQuery, {
+            replacements: { optionId: variation_option_id },
+            type: Sequelize.QueryTypes.SELECT,
+            transaction
+          });
+
+          if (stockRows && stockRows.length > 0 && stockRows[0].stock !== null && stockRows[0].stock < quantity) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Insufficient stock for ${product.name} - ${variationOptionValue}. Available: ${stockRows[0].stock}, Requested: ${quantity}`
+            });
+          }
+        } else if (isFreePlan) {
           // Free users: stock is on the products table directly
           if (product.stock !== null && product.stock < quantity) {
             await transaction.rollback();
@@ -325,12 +431,21 @@ async function createPublicOrder(req, res) {
           product_sku: product.sku || null,
           quantity,
           unit_price,
-          total: itemTotal
+          total: itemTotal,
+          variation_id: variation_id || null,
+          variation_option_id: variation_option_id || null,
+          variation_name: variationName || null,
+          variation_option_value: variationOptionValue || null
         });
       }
 
-      const taxAmount = subtotal * (tax_rate / 100);
-      const total = subtotal + taxAmount + shipping_amount - discount_amount;
+      // Handle optional tax_rate, shipping_amount, discount_amount (default to 0 if not provided)
+      const finalTaxRate = tax_rate !== undefined && tax_rate !== null ? parseFloat(tax_rate) : 0;
+      const finalShippingAmount = shipping_amount !== undefined && shipping_amount !== null ? parseFloat(shipping_amount) : 0;
+      const finalDiscountAmount = discount_amount !== undefined && discount_amount !== null ? parseFloat(discount_amount) : 0;
+      
+      const taxAmount = subtotal * (finalTaxRate / 100);
+      const total = subtotal + taxAmount + finalShippingAmount - finalDiscountAmount;
 
       // Generate order number (ensure uniqueness)
       let orderNumber = generateOrderNumber();
@@ -384,8 +499,8 @@ async function createPublicOrder(req, res) {
         delivery_time: delivery_time || null,
         subtotal,
         tax_amount: taxAmount,
-        shipping_amount,
-        discount_amount,
+        shipping_amount: finalShippingAmount,
+        discount_amount: finalDiscountAmount,
         total,
         status: 'pending',
         payment_status: 'pending',
@@ -403,28 +518,41 @@ async function createPublicOrder(req, res) {
       }
 
       // Update stock
-      // For free users: update stock on products table directly
-      // For enterprise users: update stock on product_stores table if store_id is provided
-      if (isFreePlan) {
-        // Free users: update stock on products table
-        for (const item of items) {
-          const product = await models.Product.findByPk(item.product_id, { transaction });
+      // For variations: update stock on variation options
+      // For free users: update stock on products table directly (if no variation)
+      // For enterprise users: update stock on product_stores table if store_id is provided (if no variation)
+      
+      for (const item of items) {
+        const { product_id, quantity, variation_option_id } = item;
+        
+        if (variation_option_id) {
+          // Update stock on variation option
+          await req.db.query(
+            `UPDATE product_variation_options 
+             SET stock = stock - :quantity 
+             WHERE id = :optionId AND stock IS NOT NULL`,
+            {
+              replacements: { optionId: variation_option_id, quantity },
+              transaction
+            }
+          );
+        } else if (isFreePlan) {
+          // Free users: update stock on products table directly
+          const product = await models.Product.findByPk(product_id, { transaction });
           if (product && product.stock !== null) {
             await product.update({
-              stock: product.stock - item.quantity
+              stock: product.stock - quantity
             }, { transaction });
           }
-        }
-      } else if (finalStoreId) {
-        // Enterprise users: update stock on product_stores table
-        for (const item of items) {
+        } else if (finalStoreId) {
+          // Enterprise users: update stock on product_stores table
           const productStore = await models.ProductStore.findOne({
-            where: { product_id: item.product_id, store_id: finalStoreId }
+            where: { product_id, store_id: finalStoreId }
           }, { transaction });
 
           if (productStore && productStore.stock !== null) {
             await productStore.update({
-              stock: productStore.stock - item.quantity
+              stock: productStore.stock - quantity
             }, { transaction });
           }
         }
@@ -804,5 +932,4 @@ module.exports = {
   initializePublicPayment,
   getPublicOrderByNumber
 };
-
 
