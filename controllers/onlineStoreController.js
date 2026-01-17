@@ -3494,28 +3494,47 @@ async function getStorePreview(req, res) {
     }
 
     // Normalize collection data
+    // Handles both Sequelize instances (with .toJSON()) and plain objects (from raw SQL)
     const normalizeCollection = (collection) => {
-      const collectionData = collection.toJSON();
+      // Handle both Sequelize instances and plain objects
+      const collectionData = collection && typeof collection.toJSON === 'function' 
+        ? collection.toJSON() 
+        : collection;
+      
       if (collectionData.StoreCollectionProducts) {
         collectionData.StoreCollectionProducts = collectionData.StoreCollectionProducts.map(cp => {
-          const productData = cp.Product ? cp.Product.toJSON() : null;
+          // Handle both Sequelize instances and plain objects
+          const cpData = cp && typeof cp.toJSON === 'function' ? cp.toJSON() : cp;
+          const productData = cpData.Product 
+            ? (cpData.Product && typeof cpData.Product.toJSON === 'function' 
+                ? cpData.Product.toJSON() 
+                : cpData.Product)
+            : null;
+          
           if (productData && productData.image_url) {
             productData.image_url = getFullUrl(productData.image_url);
           }
           return {
-            ...cp.toJSON(),
+            ...cpData,
             Product: productData
           };
         });
       }
       if (collectionData.StoreCollectionServices) {
         collectionData.StoreCollectionServices = collectionData.StoreCollectionServices.map(cs => {
-          const serviceData = cs.StoreService ? cs.StoreService.toJSON() : null;
+          // Handle both Sequelize instances and plain objects
+          const csData = cs && typeof cs.toJSON === 'function' ? cs.toJSON() : cs;
+          const serviceData = csData.StoreService 
+            ? (csData.StoreService && typeof csData.StoreService.toJSON === 'function' 
+                ? csData.StoreService.toJSON() 
+                : csData.StoreService)
+            : null;
+          
           if (serviceData && serviceData.service_image_url) {
             serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
           }
           return {
-            ...cs.toJSON(),
+            ...csData,
             StoreService: serviceData
           };
         });
@@ -3534,9 +3553,12 @@ async function getStorePreview(req, res) {
     });
 
     // Normalize services
+    // Handle both Sequelize instances and plain objects (from raw SQL)
     const normalizedServices = servicesNotInCollections.map(service => {
-      const serviceData = service.toJSON();
-      if (serviceData.service_image_url) {
+      const serviceData = service && typeof service.toJSON === 'function' 
+        ? service.toJSON() 
+        : service;
+      if (serviceData && serviceData.service_image_url) {
         serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
       }
       return serviceData;
