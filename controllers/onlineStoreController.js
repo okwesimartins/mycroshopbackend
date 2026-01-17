@@ -3677,7 +3677,7 @@ async function getPreviewServices(req, res) {
     }
 
     const models = initModels(req.db);
-    const { search, page = 1, limit = 20 } = req.query;
+    const { search, collection_id, page = 1, limit = 20 } = req.query;
 
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 20;
@@ -3701,50 +3701,140 @@ async function getPreviewServices(req, res) {
     }
 
     const { Op } = require('sequelize');
-    const { collection_id } = req.query;
-
-    const where = {
-      is_active: true
-    };
-
-    if (search) {
-      where[Op.or] = [
-        { service_title: { [Op.like]: `%${search}%` } },
-        { description: { [Op.like]: `%${search}%` } }
-      ];
-    }
-
-    // Build include clause - services linked to this online store
-    const includeClause = [{
-      model: models.OnlineStoreService,
-      where: { 
-        online_store_id: onlineStore.id,
-        is_visible: true
-      },
-      required: true,
-      attributes: []
-    }];
-
-    // If collection_id is provided, filter services in that collection
-    if (collection_id) {
-      includeClause.push({
-        model: models.StoreCollectionService,
-        where: { collection_id },
-        required: true,
-        attributes: []
-      });
-    }
+    const { Sequelize } = require('sequelize');
+    
+    // Determine if this is a free user (for raw SQL queries)
+    const isFreePlan = req.tenant?.subscription_plan === 'free' || !!req.user?.tenantId;
 
     // Get ALL services for this online store (with optional collection filter)
     // Can preview even if not visible
-    const { count, rows } = await models.StoreService.findAndCountAll({
-      where,
-      include: includeClause,
-      order: [['created_at', 'DESC']],
-      limit: limitNum,
-      offset: offset,
-      distinct: true
-    });
+    // For free users: use raw SQL to avoid online_store_id issues
+    let count, rows;
+    
+    if (isFreePlan) {
+      // Free users: use raw SQL
+      let query = `
+        SELECT DISTINCT ss.id, ss.tenant_id, ss.service_title, ss.description, ss.price, ss.service_image_url, 
+               ss.duration_minutes, ss.is_active, ss.created_at, ss.updated_at
+        FROM store_services ss
+        INNER JOIN online_store_services oss ON ss.id = oss.service_id
+      `;
+      
+      const replacements = { 
+        onlineStoreId: onlineStore.id,
+        tenantId: req.user.tenantId
+      };
+      
+      // Add collection filter if provided
+      if (collection_id) {
+        query += ` INNER JOIN store_collection_services scs ON ss.id = scs.service_id AND scs.collection_id = :collectionId`;
+        replacements.collectionId = collection_id;
+      }
+      
+      query += ` WHERE ss.is_active = 1 AND oss.online_store_id = :onlineStoreId AND ss.tenant_id = :tenantId AND oss.is_visible = 1`;
+      
+      // Add search filter
+      if (search) {
+        query += ` AND (ss.service_title LIKE :search OR ss.description LIKE :search)`;
+        replacements.search = `%${search}%`;
+      }
+      
+      query += ` ORDER BY ss.created_at DESC LIMIT :limit OFFSET :offset`;
+      replacements.limit = limitNum;
+      replacements.offset = offset;
+      
+      // Get count
+      let countQuery = `
+        SELECT COUNT(DISTINCT ss.id) as count
+        FROM store_services ss
+        INNER JOIN online_store_services oss ON ss.id = oss.service_id
+      `;
+      
+      if (collection_id) {
+        countQuery += ` INNER JOIN store_collection_services scs ON ss.id = scs.service_id AND scs.collection_id = :collectionId`;
+      }
+      
+      countQuery += ` WHERE ss.is_active = 1 AND oss.online_store_id = :onlineStoreId AND ss.tenant_id = :tenantId AND oss.is_visible = 1`;
+      
+      if (search) {
+        countQuery += ` AND (ss.service_title LIKE :search OR ss.description LIKE :search)`;
+      }
+      
+      const [countResult] = await req.db.query(countQuery, {
+        replacements,
+        type: Sequelize.QueryTypes.SELECT
+      });
+      
+      const serviceRows = await req.db.query(query, {
+        replacements,
+        type: Sequelize.QueryTypes.SELECT
+      });
+      
+      // Transform raw results to match Sequelize format
+      rows = serviceRows.map(row => {
+        const service = {
+          id: row.id,
+          tenant_id: row.tenant_id,
+          service_title: row.service_title,
+          description: row.description,
+          price: row.price,
+          service_image_url: row.service_image_url,
+          duration_minutes: row.duration_minutes,
+          is_active: row.is_active,
+          created_at: row.created_at,
+          updated_at: row.updated_at
+        };
+        service.toJSON = () => service;
+        return service;
+      });
+      
+      count = parseInt(countResult?.count || 0);
+    } else {
+      // Enterprise users: use Sequelize
+      const where = {
+        is_active: true
+      };
+
+      if (search) {
+        where[Op.or] = [
+          { service_title: { [Op.like]: `%${search}%` } },
+          { description: { [Op.like]: `%${search}%` } }
+        ];
+      }
+
+      // Build include clause - services linked to this online store
+      const includeClause = [{
+        model: models.OnlineStoreService,
+        where: { 
+          online_store_id: onlineStore.id,
+          is_visible: true
+        },
+        required: true,
+        attributes: []
+      }];
+
+      // If collection_id is provided, filter services in that collection
+      if (collection_id) {
+        includeClause.push({
+          model: models.StoreCollectionService,
+          where: { collection_id },
+          required: true,
+          attributes: []
+        });
+      }
+
+      const result = await models.StoreService.findAndCountAll({
+        where,
+        include: includeClause,
+        order: [['created_at', 'DESC']],
+        limit: limitNum,
+        offset: offset,
+        distinct: true
+      });
+      
+      count = result.count;
+      rows = result.rows;
+    }
 
     // Normalize image URLs
     function getFullUrl(relativePath) {
@@ -3757,13 +3847,19 @@ async function getPreviewServices(req, res) {
       return `${protocol}://${host}${relativePath}`;
     }
 
+    // Normalize services - handle both Sequelize instances and plain objects
     const services = rows.map(service => {
-      const serviceData = service.toJSON();
-      if (serviceData.service_image_url) {
+      const serviceData = service && typeof service.toJSON === 'function' 
+        ? service.toJSON() 
+        : service;
+      if (serviceData && serviceData.service_image_url) {
         serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
       }
       return serviceData;
     });
+
+    // Calculate total count
+    const totalCount = typeof count === 'number' ? count : (Array.isArray(count) ? count.length : 0);
 
     res.json({
       success: true,
@@ -3772,8 +3868,8 @@ async function getPreviewServices(req, res) {
         pagination: {
           page: pageNum,
           limit: limitNum,
-          total_pages: Math.ceil(count / limitNum),
-          total_items: count
+          total_pages: Math.ceil(totalCount / limitNum),
+          total_items: totalCount
         }
       }
     });
@@ -3886,7 +3982,7 @@ async function getPreviewProducts(req, res) {
     }
 
     const models = initModels(req.db);
-    const { search, category, store_id, page = 1, limit = 20 } = req.query;
+    const { search, category, collection_id, page = 1, limit = 20 } = req.query;
 
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 20;
@@ -3910,6 +4006,10 @@ async function getPreviewProducts(req, res) {
     }
 
     const { Op } = require('sequelize');
+    const { Sequelize } = require('sequelize');
+    
+    // Determine if this is a free user (for raw SQL queries)
+    const isFreePlan = req.tenant?.subscription_plan === 'free' || !!req.user?.tenantId;
 
     // Build product where clause
     const productWhere = { is_active: true };
@@ -3923,45 +4023,164 @@ async function getPreviewProducts(req, res) {
       productWhere.category = category;
     }
 
-    // For enterprise users, filter by physical store if store_id is provided
-    if (req.tenant?.subscription_plan !== 'free' && store_id) {
-      productWhere.store_id = store_id;
-    }
+    // Note: Removed store_id filter - enterprise users can only have one online store
+    // Products are already linked to the online store via StoreProduct
 
     // Build StoreProduct where clause
-    const storeProductWhere = {
-      online_store_id: onlineStore.id
-    };
+    // For free users: use tenant_id (store_products doesn't have online_store_id)
+    // For enterprise users: use online_store_id
+    const storeProductWhere = isFreePlan
+      ? { tenant_id: req.user.tenantId }
+      : { online_store_id: onlineStore.id };
 
     // If collection_id is provided, filter products in that collection
-    if (collection_id) {
-      storeProductWhere['$Product.StoreCollectionProducts.collection_id$'] = collection_id;
-    }
+    // This will be handled in the query below
 
     // Get ALL products for this online store (with optional collection filter)
     // Can preview even if not published
-    const { count, rows } = await models.StoreProduct.findAndCountAll({
-      where: storeProductWhere,
-      include: [
+    // For free users: use raw SQL to avoid online_store_id issues
+    let count, rows;
+    
+    if (isFreePlan) {
+      // Free users: use raw SQL
+      let query = `
+        SELECT DISTINCT sp.id, sp.tenant_id, sp.product_id, sp.is_published, sp.featured, sp.sort_order, sp.created_at, sp.updated_at,
+               p.id as 'Product.id', p.tenant_id as 'Product.tenant_id', p.name as 'Product.name', 
+               p.description as 'Product.description', p.sku as 'Product.sku', p.barcode as 'Product.barcode',
+               p.price as 'Product.price', p.stock as 'Product.stock', p.low_stock_threshold as 'Product.low_stock_threshold',
+               p.category as 'Product.category', p.image_url as 'Product.image_url', p.expiry_date as 'Product.expiry_date',
+               p.is_active as 'Product.is_active', p.created_at as 'Product.created_at', p.updated_at as 'Product.updated_at'
+        FROM store_products sp
+        INNER JOIN products p ON sp.product_id = p.id
+      `;
+      
+      const replacements = { tenantId: req.user.tenantId };
+      
+      // Add collection filter if provided
+      if (collection_id) {
+        query += ` INNER JOIN store_collection_products scp ON p.id = scp.product_id AND scp.collection_id = :collectionId`;
+        replacements.collectionId = collection_id;
+      }
+      
+      query += ` WHERE sp.tenant_id = :tenantId AND p.is_active = 1`;
+      
+      // Add search filter
+      if (search) {
+        query += ` AND (p.name LIKE :search OR p.sku LIKE :search)`;
+        replacements.search = `%${search}%`;
+      }
+      
+      // Add category filter
+      if (category) {
+        query += ` AND p.category = :category`;
+        replacements.category = category;
+      }
+      
+      query += ` ORDER BY sp.created_at DESC LIMIT :limit OFFSET :offset`;
+      replacements.limit = limitNum;
+      replacements.offset = offset;
+      
+      // Get count
+      let countQuery = `
+        SELECT COUNT(DISTINCT sp.id) as count
+        FROM store_products sp
+        INNER JOIN products p ON sp.product_id = p.id
+      `;
+      
+      if (collection_id) {
+        countQuery += ` INNER JOIN store_collection_products scp ON p.id = scp.product_id AND scp.collection_id = :collectionId`;
+      }
+      
+      countQuery += ` WHERE sp.tenant_id = :tenantId AND p.is_active = 1`;
+      
+      if (search) {
+        countQuery += ` AND (p.name LIKE :search OR p.sku LIKE :search)`;
+      }
+      
+      if (category) {
+        countQuery += ` AND p.category = :category`;
+      }
+      
+      const [countResult] = await req.db.query(countQuery, {
+        replacements,
+        type: Sequelize.QueryTypes.SELECT
+      });
+      
+      const productRows = await req.db.query(query, {
+        replacements,
+        type: Sequelize.QueryTypes.SELECT
+      });
+      
+      // Transform raw results to match Sequelize format
+      rows = productRows.map(row => {
+        const sp = {
+          id: row.id,
+          tenant_id: row.tenant_id,
+          product_id: row.product_id,
+          is_published: row.is_published,
+          featured: row.featured,
+          sort_order: row.sort_order,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          Product: {
+            id: row['Product.id'],
+            tenant_id: row['Product.tenant_id'],
+            name: row['Product.name'],
+            description: row['Product.description'],
+            sku: row['Product.sku'],
+            barcode: row['Product.barcode'],
+            price: row['Product.price'],
+            stock: row['Product.stock'],
+            low_stock_threshold: row['Product.low_stock_threshold'],
+            category: row['Product.category'],
+            image_url: row['Product.image_url'],
+            expiry_date: row['Product.expiry_date'],
+            is_active: row['Product.is_active'],
+            created_at: row['Product.created_at'],
+            updated_at: row['Product.updated_at']
+          }
+        };
+        sp.toJSON = () => sp;
+        sp.Product.toJSON = () => sp.Product;
+        return sp;
+      });
+      
+      count = [{ count: parseInt(countResult?.count || 0) }];
+    } else {
+      // Enterprise users: use Sequelize
+      const includeClause = [
         {
           model: models.Product,
           where: productWhere,
           required: true,
-          include: [{
-            model: models.StoreCollectionProduct,
-            required: collection_id ? true : false, // Required only if filtering by collection
-            attributes: ['id', 'collection_id'],
-            ...(collection_id ? { where: { collection_id } } : {})
-          }]
+          include: []
         }
-      ],
-      limit: limitNum,
-      offset: offset,
-      order: [['created_at', 'DESC']],
-      subQuery: false,
-      group: ['StoreProduct.id'],
-      distinct: true
-    });
+      ];
+      
+      // Add collection filter if provided
+      if (collection_id) {
+        includeClause[0].include.push({
+          model: models.StoreCollectionProduct,
+          where: { collection_id },
+          required: true,
+          attributes: ['id', 'collection_id']
+        });
+      }
+      
+      const result = await models.StoreProduct.findAndCountAll({
+        where: storeProductWhere,
+        include: includeClause,
+        limit: limitNum,
+        offset: offset,
+        order: [['created_at', 'DESC']],
+        subQuery: false,
+        group: ['StoreProduct.id'],
+        distinct: true
+      });
+      
+      count = result.count;
+      rows = result.rows;
+    }
 
     // Normalize image URLs
     function getFullUrl(relativePath) {
@@ -3974,13 +4193,19 @@ async function getPreviewProducts(req, res) {
       return `${protocol}://${host}${relativePath}`;
     }
 
+    // Normalize products - handle both Sequelize instances and plain objects
     const products = rows.map(sp => {
-      const productData = sp.Product.toJSON();
-      if (productData.image_url) {
+      const productData = sp.Product && typeof sp.Product.toJSON === 'function' 
+        ? sp.Product.toJSON() 
+        : (sp.Product || sp);
+      if (productData && productData.image_url) {
         productData.image_url = getFullUrl(productData.image_url);
       }
       return productData;
     });
+
+    // Calculate total count
+    const totalCount = Array.isArray(count) ? count[0]?.count || count.length : count;
 
     res.json({
       success: true,
@@ -3989,8 +4214,8 @@ async function getPreviewProducts(req, res) {
         pagination: {
           page: pageNum,
           limit: limitNum,
-          total_pages: Math.ceil(count.length / limitNum),
-          total_items: count.length
+          total_pages: Math.ceil(totalCount / limitNum),
+          total_items: totalCount
         }
       }
     });
