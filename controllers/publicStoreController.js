@@ -1131,6 +1131,10 @@ async function getPublicProducts(req, res) {
 
     const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
+    const { Sequelize, Op } = require('sequelize');
+
+    // Determine if this is a free user
+    const isFreePlan = tenant.subscription_plan === 'free';
 
     // Find online store
     const onlineStore = await models.OnlineStore.findOne({
@@ -1148,61 +1152,7 @@ async function getPublicProducts(req, res) {
       });
     }
 
-    const { Op } = require('sequelize');
-
-    // Build product where clause
-    const productWhere = { is_active: true };
-    if (search) {
-      productWhere[Op.or] = [
-        { name: { [Op.like]: `%${search}%` } },
-        { sku: { [Op.like]: `%${search}%` } }
-      ];
-    }
-    if (category) {
-      productWhere.category = category;
-    }
-
-    // For enterprise users, filter by physical store if store_id is provided
-    if (tenant.subscription_plan !== 'free' && store_id) {
-      productWhere.store_id = store_id;
-    }
-
-    // Build StoreProduct where clause
-    const storeProductWhere = {
-      online_store_id: onlineStore.id,
-      is_published: true
-    };
-
-    // If collection_id is provided, filter products in that collection
-    if (collection_id) {
-      storeProductWhere['$Product.StoreCollectionProducts.collection_id$'] = collection_id;
-    }
-
-    // Get ALL products for this online store (with optional collection filter)
-    const { count, rows } = await models.StoreProduct.findAndCountAll({
-      where: storeProductWhere,
-      include: [
-        {
-          model: models.Product,
-          where: productWhere,
-          required: true,
-          include: [{
-            model: models.StoreCollectionProduct,
-            required: collection_id ? true : false, // Required only if filtering by collection
-            attributes: ['id', 'collection_id'],
-            ...(collection_id ? { where: { collection_id } } : {})
-          }]
-        }
-      ],
-      limit: limitNum,
-      offset: offset,
-      order: [['created_at', 'DESC']],
-      subQuery: false,
-      group: ['StoreProduct.id'],
-      distinct: true
-    });
-
-    // Normalize image URLs
+    // Helper to normalize URLs
     function getFullUrl(relativePath) {
       if (!relativePath) return null;
       if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
@@ -1213,13 +1163,176 @@ async function getPublicProducts(req, res) {
       return `${protocol}://${host}${relativePath}`;
     }
 
-    const products = rows.map(sp => {
-      const productData = sp.Product.toJSON();
-      if (productData.image_url) {
-        productData.image_url = getFullUrl(productData.image_url);
+    let products = [];
+    let totalCount = 0;
+
+    if (isFreePlan) {
+      // Free users: use raw SQL to avoid online_store_id issues
+      // Build WHERE conditions
+      let whereConditions = [
+        'sp.tenant_id = :tenantId',
+        'sp.is_published = 1',
+        'p.is_active = 1'
+      ];
+      const replacements = { tenantId: tenant_id };
+
+      // Add search filter
+      if (search) {
+        whereConditions.push('(p.name LIKE :search OR p.sku LIKE :search)');
+        replacements.search = `%${search}%`;
       }
-      return productData;
-    });
+
+      // Add category filter
+      if (category) {
+        whereConditions.push('p.category = :category');
+        replacements.category = category;
+      }
+
+      // Add collection filter
+      if (collection_id) {
+        whereConditions.push('scp.collection_id = :collectionId');
+        replacements.collectionId = collection_id;
+      }
+
+      const whereClause = whereConditions.join(' AND ');
+
+      // Build the query
+      let countQuery = `
+        SELECT COUNT(DISTINCT sp.id) as count
+        FROM store_products sp
+        INNER JOIN products p ON sp.product_id = p.id
+      `;
+      
+      let dataQuery = `
+        SELECT DISTINCT sp.id, sp.tenant_id, sp.product_id, sp.is_published, sp.featured, sp.sort_order, sp.created_at, sp.updated_at,
+               p.id as 'Product.id', p.tenant_id as 'Product.tenant_id', p.name as 'Product.name', 
+               p.description as 'Product.description', p.sku as 'Product.sku', p.barcode as 'Product.barcode',
+               p.price as 'Product.price', p.stock as 'Product.stock', p.low_stock_threshold as 'Product.low_stock_threshold',
+               p.category as 'Product.category', p.image_url as 'Product.image_url', p.expiry_date as 'Product.expiry_date',
+               p.is_active as 'Product.is_active', p.created_at as 'Product.created_at', p.updated_at as 'Product.updated_at'
+        FROM store_products sp
+        INNER JOIN products p ON sp.product_id = p.id
+      `;
+
+      // Add collection join if filtering by collection
+      if (collection_id) {
+        countQuery += ` INNER JOIN store_collection_products scp ON p.id = scp.product_id`;
+        dataQuery += ` INNER JOIN store_collection_products scp ON p.id = scp.product_id`;
+      } else {
+        // If not filtering by collection, we still want to exclude products in collections (optional)
+        // But for now, let's return all products
+      }
+
+      countQuery += ` WHERE ${whereClause}`;
+      dataQuery += ` WHERE ${whereClause}`;
+      dataQuery += ` ORDER BY sp.created_at DESC LIMIT :limit OFFSET :offset`;
+      
+      replacements.limit = limitNum;
+      replacements.offset = offset;
+
+      // Get count
+      const [countResult] = await sequelize.query(countQuery, {
+        replacements,
+        type: Sequelize.QueryTypes.SELECT
+      });
+      totalCount = parseInt(countResult?.count || 0);
+
+      // Get products
+      const productRows = await sequelize.query(dataQuery, {
+        replacements,
+        type: Sequelize.QueryTypes.SELECT
+      });
+
+      // Transform raw results to match expected format
+      products = productRows.map(row => {
+        const productData = {
+          id: row['Product.id'],
+          tenant_id: row['Product.tenant_id'],
+          name: row['Product.name'],
+          description: row['Product.description'],
+          sku: row['Product.sku'],
+          barcode: row['Product.barcode'],
+          price: row['Product.price'],
+          stock: row['Product.stock'],
+          low_stock_threshold: row['Product.low_stock_threshold'],
+          category: row['Product.category'],
+          image_url: row['Product.image_url'],
+          expiry_date: row['Product.expiry_date'],
+          is_active: row['Product.is_active'],
+          created_at: row['Product.created_at'],
+          updated_at: row['Product.updated_at']
+        };
+        
+        if (productData.image_url) {
+          productData.image_url = getFullUrl(productData.image_url);
+        }
+        
+        return productData;
+      });
+    } else {
+      // Enterprise users: use Sequelize
+      // Build product where clause
+      const productWhere = { is_active: true };
+      if (search) {
+        productWhere[Op.or] = [
+          { name: { [Op.like]: `%${search}%` } },
+          { sku: { [Op.like]: `%${search}%` } }
+        ];
+      }
+      if (category) {
+        productWhere.category = category;
+      }
+
+      // For enterprise users, filter by physical store if store_id is provided
+      if (store_id) {
+        productWhere.store_id = store_id;
+      }
+
+      // Build StoreProduct where clause
+      const storeProductWhere = {
+        online_store_id: onlineStore.id,
+        is_published: true
+      };
+
+      // If collection_id is provided, filter products in that collection
+      if (collection_id) {
+        storeProductWhere['$Product.StoreCollectionProducts.collection_id$'] = collection_id;
+      }
+
+      // Get ALL products for this online store (with optional collection filter)
+      const { count, rows } = await models.StoreProduct.findAndCountAll({
+        where: storeProductWhere,
+        include: [
+          {
+            model: models.Product,
+            where: productWhere,
+            required: true,
+            include: [{
+              model: models.StoreCollectionProduct,
+              required: collection_id ? true : false, // Required only if filtering by collection
+              attributes: ['id', 'collection_id'],
+              ...(collection_id ? { where: { collection_id } } : {})
+            }]
+          }
+        ],
+        limit: limitNum,
+        offset: offset,
+        order: [['created_at', 'DESC']],
+        subQuery: false,
+        group: ['StoreProduct.id'],
+        distinct: true
+      });
+
+      totalCount = Array.isArray(count) ? count.length : count;
+      
+      products = rows.map(sp => {
+        const productData = sp.Product.toJSON();
+        if (productData.image_url) {
+          productData.image_url = getFullUrl(productData.image_url);
+        }
+        return productData;
+      });
+    }
 
     res.json({
       success: true,
@@ -1228,8 +1341,8 @@ async function getPublicProducts(req, res) {
         pagination: {
           page: pageNum,
           limit: limitNum,
-          total_pages: Math.ceil(count.length / limitNum),
-          total_items: count.length
+          total_pages: Math.ceil(totalCount / limitNum),
+          total_items: totalCount
         }
       }
     });
