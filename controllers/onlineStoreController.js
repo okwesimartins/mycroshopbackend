@@ -4377,10 +4377,12 @@ async function getPreviewProduct(req, res) {
         ? 'WHERE pv.product_id = :productId AND pv.tenant_id = :tenantId'
         : 'WHERE pv.product_id = :productId';
       
+      // For free users: product_variation_options table doesn't have barcode column
+      // Only include columns that exist in the database
       const variations = await req.db.query(`
         SELECT pv.id, pv.variation_name, pv.variation_type, pv.is_required, pv.sort_order,
                pvo.id as 'option_id', pvo.option_value, pvo.option_display_name, 
-               pvo.price_adjustment, pvo.stock, pvo.sku, pvo.barcode, pvo.image_url, 
+               pvo.price_adjustment, pvo.stock, pvo.sku, pvo.image_url, 
                pvo.is_default, pvo.is_available, pvo.sort_order as 'option_sort_order',
                pvo.created_at as 'option_created_at'
         FROM product_variations pv
@@ -4410,6 +4412,7 @@ async function getPreviewProduct(req, res) {
           };
         }
         if (v.option_id) {
+          // For free users: barcode column doesn't exist in product_variation_options table
           variationsMap[v.id].options.push({
             id: v.option_id,
             option_value: v.option_value,
@@ -4417,7 +4420,7 @@ async function getPreviewProduct(req, res) {
             price_adjustment: v.price_adjustment,
             stock: v.stock,
             sku: v.sku,
-            barcode: v.barcode,
+            // barcode not included for free users (column doesn't exist)
             image_url: v.image_url,
             is_default: v.is_default,
             is_available: v.is_available,
@@ -4525,20 +4528,28 @@ async function getPreviewProduct(req, res) {
               optionData.image_url = getFullUrl(optionData.image_url);
             }
             
-            return {
+            // For enterprise users: include barcode (column exists)
+            // For free users: barcode is not included (column doesn't exist in their table)
+            const optionResult = {
               id: optionData.id,
               option_value: optionData.option_value,
               option_display_name: optionData.option_display_name,
               price_adjustment: optionData.price_adjustment,
               stock: optionData.stock,
               sku: optionData.sku,
-              barcode: optionData.barcode,
               image_url: optionData.image_url,
               is_default: optionData.is_default,
               is_available: optionData.is_available,
               sort_order: optionData.sort_order,
               created_at: optionData.created_at
             };
+            
+            // Only include barcode for enterprise users (free users don't have this column)
+            if (!isFreePlan && optionData.barcode !== undefined) {
+              optionResult.barcode = optionData.barcode;
+            }
+            
+            return optionResult;
           })
         };
       });
