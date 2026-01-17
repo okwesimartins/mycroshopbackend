@@ -1136,7 +1136,19 @@ async function getPublicProducts(req, res) {
     // Determine if this is a free user
     // CRITICAL: Free users don't have online_store_id in store_products table
     // Also, they don't have seo_title, seo_description, seo_keywords columns
-    const isFreePlan = tenant.subscription_plan === 'free' || !tenant.subscription_plan;
+    // Default to 'free' if subscription_plan is not explicitly 'enterprise'
+    const subscriptionPlan = tenant.subscription_plan || 'free';
+    const isFreePlan = subscriptionPlan !== 'enterprise';
+    
+    // Log for debugging (remove in production if needed)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[getPublicProducts] Plan detection:', {
+        tenant_id,
+        subscription_plan: tenant.subscription_plan,
+        subscriptionPlan,
+        isFreePlan
+      });
+    }
 
     // Find online store
     const onlineStore = await models.OnlineStore.findOne({
@@ -1276,6 +1288,19 @@ async function getPublicProducts(req, res) {
       });
     } else {
       // Enterprise users: use Sequelize
+      // SAFETY CHECK: If somehow we got here for a free user, use raw SQL instead
+      if (isFreePlan || subscriptionPlan !== 'enterprise') {
+        console.error('[getPublicProducts] SAFETY: Preventing enterprise query for free user', {
+          tenant_id,
+          subscription_plan: tenant.subscription_plan,
+          subscriptionPlan,
+          isFreePlan
+        });
+        // Force raw SQL path for free users (fallback)
+        // This should never happen, but safety check
+        throw new Error('Invalid plan detection: free user detected in enterprise path');
+      }
+      
       // Build product where clause
       const productWhere = { is_active: true };
       if (search) {
