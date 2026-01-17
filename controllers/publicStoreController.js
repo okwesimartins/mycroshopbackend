@@ -1385,7 +1385,7 @@ async function getPublicProducts(req, res) {
     console.error('Error getting public products:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get products',
+      message: error.message,
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
