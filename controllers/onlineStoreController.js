@@ -4372,6 +4372,61 @@ async function getPreviewProduct(req, res) {
         });
       }
 
+      // Get product variations with options
+      const variationWhereClause = isFreePlan 
+        ? 'WHERE pv.product_id = :productId AND pv.tenant_id = :tenantId'
+        : 'WHERE pv.product_id = :productId';
+      
+      const variations = await req.db.query(`
+        SELECT pv.id, pv.variation_name, pv.variation_type, pv.is_required, pv.sort_order,
+               pvo.id as 'option_id', pvo.option_value, pvo.option_display_name, 
+               pvo.price_adjustment, pvo.stock, pvo.sku, pvo.barcode, pvo.image_url, 
+               pvo.is_default, pvo.is_available, pvo.sort_order as 'option_sort_order',
+               pvo.created_at as 'option_created_at'
+        FROM product_variations pv
+        LEFT JOIN product_variation_options pvo ON pv.id = pvo.variation_id
+          ${isFreePlan ? 'AND pvo.tenant_id = :tenantId' : ''}
+        ${variationWhereClause}
+        ORDER BY pv.sort_order ASC, pvo.sort_order ASC
+      `, {
+        replacements: { 
+          productId: product_id,
+          ...(isFreePlan ? { tenantId: req.user.tenantId } : {})
+        },
+        type: Sequelize.QueryTypes.SELECT
+      });
+
+      // Group variations and their options
+      const variationsMap = {};
+      variations.forEach(v => {
+        if (!variationsMap[v.id]) {
+          variationsMap[v.id] = {
+            id: v.id,
+            variation_name: v.variation_name,
+            variation_type: v.variation_type,
+            is_required: v.is_required,
+            sort_order: v.sort_order,
+            options: []
+          };
+        }
+        if (v.option_id) {
+          variationsMap[v.id].options.push({
+            id: v.option_id,
+            option_value: v.option_value,
+            option_display_name: v.option_display_name,
+            price_adjustment: v.price_adjustment,
+            stock: v.stock,
+            sku: v.sku,
+            barcode: v.barcode,
+            image_url: v.image_url,
+            is_default: v.is_default,
+            is_available: v.is_available,
+            sort_order: v.option_sort_order,
+            created_at: v.option_created_at
+          });
+        }
+      });
+
       product = {
         id: row.id,
         tenant_id: row.tenant_id,
@@ -4388,16 +4443,7 @@ async function getPreviewProduct(req, res) {
         is_active: row.is_active,
         created_at: row.created_at,
         updated_at: row.updated_at,
-        StoreProducts: [{
-          id: row['StoreProduct.id'],
-          tenant_id: row['StoreProduct.tenant_id'],
-          product_id: row['StoreProduct.product_id'],
-          is_published: row['StoreProduct.is_published'],
-          featured: row['StoreProduct.featured'],
-          sort_order: row['StoreProduct.sort_order'],
-          created_at: row['StoreProduct.created_at'],
-          updated_at: row['StoreProduct.updated_at']
-        }]
+        variations: Object.values(variationsMap)
       };
       product.toJSON = () => product;
     } else {
@@ -4407,13 +4453,25 @@ async function getPreviewProduct(req, res) {
           id: product_id,
           is_active: true
         },
-        include: [{
-          model: models.StoreProduct,
-          where: {
-            online_store_id: onlineStore.id
+        include: [
+          {
+            model: models.StoreProduct,
+            where: {
+              online_store_id: onlineStore.id
+            },
+            required: true,
+            attributes: [] // Don't include StoreProduct data in response
           },
-          required: true
-        }]
+          {
+            model: models.ProductVariation,
+            include: [{
+              model: models.ProductVariationOption,
+              order: [['sort_order', 'ASC']]
+            }],
+            order: [['sort_order', 'ASC']],
+            required: false
+          }
+        ]
       });
 
       if (!product) {
@@ -4439,8 +4497,72 @@ async function getPreviewProduct(req, res) {
     const productData = product && typeof product.toJSON === 'function' 
       ? product.toJSON() 
       : product;
+    
     if (productData && productData.image_url) {
       productData.image_url = getFullUrl(productData.image_url);
+    }
+
+    // Normalize variations if they exist (for Sequelize instances)
+    if (productData.ProductVariations) {
+      productData.variations = productData.ProductVariations.map(variation => {
+        const variationData = variation && typeof variation.toJSON === 'function' 
+          ? variation.toJSON() 
+          : variation;
+        
+        return {
+          id: variationData.id,
+          variation_name: variationData.variation_name,
+          variation_type: variationData.variation_type,
+          is_required: variationData.is_required,
+          sort_order: variationData.sort_order,
+          options: (variationData.ProductVariationOptions || []).map(option => {
+            const optionData = option && typeof option.toJSON === 'function' 
+              ? option.toJSON() 
+              : option;
+            
+            // Normalize option image URL if it exists
+            if (optionData.image_url) {
+              optionData.image_url = getFullUrl(optionData.image_url);
+            }
+            
+            return {
+              id: optionData.id,
+              option_value: optionData.option_value,
+              option_display_name: optionData.option_display_name,
+              price_adjustment: optionData.price_adjustment,
+              stock: optionData.stock,
+              sku: optionData.sku,
+              barcode: optionData.barcode,
+              image_url: optionData.image_url,
+              is_default: optionData.is_default,
+              is_available: optionData.is_available,
+              sort_order: optionData.sort_order,
+              created_at: optionData.created_at
+            };
+          })
+        };
+      });
+      
+      // Remove ProductVariations from response (we've converted it to variations)
+      delete productData.ProductVariations;
+    }
+
+    // Normalize variation option image URLs for free users (raw SQL results)
+    if (productData.variations && Array.isArray(productData.variations)) {
+      productData.variations.forEach(variation => {
+        if (variation.options && Array.isArray(variation.options)) {
+          variation.options.forEach(option => {
+            if (option.image_url) {
+              option.image_url = getFullUrl(option.image_url);
+            }
+          });
+        }
+      });
+    }
+
+    // Remove StoreProducts array if it exists (not needed in response)
+    if (productData.StoreProducts) {
+      delete productData.StoreProducts;
     }
 
     res.json({
