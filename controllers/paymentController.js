@@ -253,6 +253,15 @@ async function verifyPayment(req, res) {
       });
     }
 
+    // Check if PaymentGateway is loaded
+    if (!transaction.PaymentGateway) {
+      console.error('PaymentGateway not loaded for transaction:', transaction.id);
+      return res.status(500).json({
+        success: false,
+        message: 'Payment gateway information not found for this transaction'
+      });
+    }
+
     const secretKey = decryptSecretKey(transaction.PaymentGateway.secret_key);
     let verificationResult;
 
@@ -279,14 +288,27 @@ async function verifyPayment(req, res) {
 
     // Update order status if payment successful
     if (newStatus === 'success' && transaction.order_id) {
+      // Build where clause for order update (for free users, filter by tenant_id)
+      const orderWhere = { id: transaction.order_id };
+      if (isFreePlan && transaction.tenant_id) {
+        orderWhere.tenant_id = transaction.tenant_id;
+      }
+      
       await models.OnlineStoreOrder.update(
         { payment_status: 'paid', status: 'confirmed' },
-        { where: { id: transaction.order_id } }
+        { where: orderWhere }
       );
 
       // Send order confirmation email after successful payment
       try {
-        const order = await models.OnlineStoreOrder.findByPk(transaction.order_id, {
+        // Build where clause for order fetch (for free users, filter by tenant_id)
+        const orderFindWhere = { id: transaction.order_id };
+        if (isFreePlan && transaction.tenant_id) {
+          orderFindWhere.tenant_id = transaction.tenant_id;
+        }
+        
+        const order = await models.OnlineStoreOrder.findOne({
+          where: orderFindWhere,
           include: [
             {
               model: models.OnlineStoreOrderItem
@@ -300,12 +322,15 @@ async function verifyPayment(req, res) {
           const tenantForEmail = await getTenantById(transactionTenantId);
           if (tenantForEmail) {
             const { sendOrderConfirmationEmail } = require('../services/emailService');
+            const orderJson = order.toJSON();
+            // Access items from JSON (Sequelize pluralizes association names in JSON)
+            const items = orderJson.OnlineStoreOrderItems || order.OnlineStoreOrderItems || [];
             await sendOrderConfirmationEmail({
               tenant: tenantForEmail,
-              order: order.toJSON(),
+              order: orderJson,
               customerEmail: transaction.customer_email,
               customerName: transaction.customer_name || order.customer_name || 'Customer',
-              items: order.OnlineStoreOrderItems || []
+              items: items
             });
           }
         }
@@ -317,9 +342,15 @@ async function verifyPayment(req, res) {
 
     // Update invoice status if payment successful
     if (newStatus === 'success' && transaction.invoice_id) {
+      // Build where clause for invoice update (for free users, filter by tenant_id)
+      const invoiceWhere = { id: transaction.invoice_id };
+      if (isFreePlan && transaction.tenant_id) {
+        invoiceWhere.tenant_id = transaction.tenant_id;
+      }
+      
       await models.Invoice.update(
         { status: 'paid', payment_date: new Date() },
-        { where: { id: transaction.invoice_id } }
+        { where: invoiceWhere }
       );
     }
 
@@ -339,9 +370,15 @@ async function verifyPayment(req, res) {
     });
   } catch (error) {
     console.error('Error verifying payment:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to verify payment'
+      message: 'Failed to verify payment',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      errorDetails: process.env.NODE_ENV === 'development' ? {
+        stack: error.stack,
+        name: error.name
+      } : undefined
     });
   }
 }
