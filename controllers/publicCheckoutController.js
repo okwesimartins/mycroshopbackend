@@ -159,52 +159,60 @@ async function createPublicOrder(req, res) {
     const isFreePlan = tenant.subscription_plan === 'free';
     const orderTenantId = isFreePlan ? tenant_id : null;
 
-    // Check for duplicate order using idempotency key
+    // Start transaction early to prevent race conditions
+    const transaction = await sequelize.transaction();
+
+    // Check for duplicate order using idempotency key (INSIDE transaction to prevent race conditions)
     if (idempotency_key) {
-      const whereClause = {
-        idempotency_key: idempotency_key,
-        online_store_id: online_store_id
-      };
-      
-      // For free users, also filter by tenant_id
-      if (isFreePlan && orderTenantId) {
-        whereClause.tenant_id = orderTenantId;
-      }
+      try {
+        const whereClause = {
+          idempotency_key: idempotency_key,
+          online_store_id: online_store_id
+        };
+        
+        // For free users, also filter by tenant_id
+        if (isFreePlan && orderTenantId) {
+          whereClause.tenant_id = orderTenantId;
+        }
 
-      // For free users: don't include Store (they don't have physical stores)
-      const existingOrder = await models.OnlineStoreOrder.findOne({
-        where: whereClause,
-        include: [
-          {
-            model: models.OnlineStore,
-            attributes: ['id', 'username', 'store_name']
-          },
-          // Only include Store for enterprise users (free users don't have physical stores)
-          ...(isFreePlan ? [] : [{
-            model: models.Store,
-            attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
-            required: false
-          }]),
-          {
-            model: models.OnlineStoreOrderItem
-          }
-        ]
-      });
-
-      if (existingOrder) {
-        // Return existing order - this is a duplicate request
-        return res.status(200).json({
-          success: true,
-          message: 'Order already exists (duplicate request detected)',
-          data: {
-            order: existingOrder,
-            is_duplicate: true
-          }
+        // For free users: don't include Store (they don't have physical stores)
+        const existingOrder = await models.OnlineStoreOrder.findOne({
+          where: whereClause,
+          transaction, // Check within transaction to prevent race conditions
+          include: [
+            {
+              model: models.OnlineStore,
+              attributes: ['id', 'username', 'store_name']
+            },
+            // Only include Store for enterprise users (free users don't have physical stores)
+            ...(isFreePlan ? [] : [{
+              model: models.Store,
+              attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
+              required: false
+            }]),
+            {
+              model: models.OnlineStoreOrderItem
+            }
+          ]
         });
+
+        if (existingOrder) {
+          // Rollback transaction and return existing order - this is a duplicate request
+          await transaction.rollback();
+          return res.status(200).json({
+            success: true,
+            message: 'Order already exists (duplicate request detected)',
+            data: {
+              order: existingOrder,
+              is_duplicate: true
+            }
+          });
+        }
+      } catch (checkError) {
+        await transaction.rollback();
+        throw checkError;
       }
     }
-
-    const transaction = await sequelize.transaction();
 
     try {
       // Verify online store exists and is published
@@ -307,12 +315,12 @@ async function createPublicOrder(req, res) {
             const { Sequelize } = require('sequelize');
             const variationOptionQuery = isFreePlan && orderTenantId
               ? `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name, 
-                        pv.variation_name, pv.product_id
+                        pvo.price_adjustment, pv.variation_name, pv.product_id
                  FROM product_variation_options pvo
                  INNER JOIN product_variations pv ON pvo.variation_id = pv.id
                  WHERE pvo.id = :optionId AND pv.product_id = :productId AND pvo.tenant_id = :tenantId`
               : `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name, 
-                        pv.variation_name, pv.product_id
+                        pvo.price_adjustment, pv.variation_name, pv.product_id
                  FROM product_variation_options pvo
                  INNER JOIN product_variations pv ON pvo.variation_id = pv.id
                  WHERE pvo.id = :optionId AND pv.product_id = :productId`;
@@ -340,7 +348,8 @@ async function createPublicOrder(req, res) {
               id: variationOptionRow.id,
               variation_id: variationOptionRow.variation_id,
               option_value: variationOptionRow.option_value,
-              option_display_name: variationOptionRow.option_display_name
+              option_display_name: variationOptionRow.option_display_name,
+              price_adjustment: parseFloat(variationOptionRow.price_adjustment || 0)
             };
             variationName = variationOptionRow.variation_name;
             variationOptionValue = variationOptionRow.option_display_name || variationOptionRow.option_value;
@@ -377,6 +386,25 @@ async function createPublicOrder(req, res) {
             variationName = variationRows[0].variation_name;
           }
         }
+
+        // Calculate correct price: product base price + variation price adjustment (if applicable)
+        const productBasePrice = parseFloat(product.price || 0);
+        const variationPriceAdjustment = variationOption ? (variationOption.price_adjustment || 0) : 0;
+        const calculatedPrice = productBasePrice + variationPriceAdjustment;
+        const passedPrice = parseFloat(unit_price || 0);
+
+        // Validate that the passed price matches the calculated price (with small tolerance for floating point)
+        const priceTolerance = 0.01; // Allow 0.01 difference for floating point precision
+        if (Math.abs(passedPrice - calculatedPrice) > priceTolerance) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Price mismatch for product ${product.name}${variationOptionValue ? ` (${variationOptionValue})` : ''}. Expected: ${calculatedPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
+          });
+        }
+
+        // Use calculated price for security (don't trust client-provided price)
+        const finalUnitPrice = calculatedPrice;
 
         // Check stock - for variations, check stock on the variation option
         // For free users: check stock directly from products table or variation options
@@ -422,7 +450,7 @@ async function createPublicOrder(req, res) {
           }
         }
 
-        const itemTotal = quantity * unit_price;
+        const itemTotal = quantity * finalUnitPrice;
         subtotal += itemTotal;
 
         orderItems.push({
@@ -430,7 +458,7 @@ async function createPublicOrder(req, res) {
           product_name: product.name,
           product_sku: product.sku || null,
           quantity,
-          unit_price,
+          unit_price: finalUnitPrice, // Use calculated price, not client-provided price
           total: itemTotal,
           variation_id: variation_id || null,
           variation_option_id: variation_option_id || null,
