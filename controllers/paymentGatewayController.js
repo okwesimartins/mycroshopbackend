@@ -116,57 +116,69 @@ async function addPaymentGateway(req, res) {
 
     // If Paystack, create subaccount FIRST before saving payment gateway
     // Payment gateway should NOT be saved if subaccount creation fails
+    // NOTE: Only free users need subaccounts (enterprise users don't pay transaction fees)
     let subaccountDetails = null;
     if (gateway_name === 'paystack') {
       try {
-        // Get tenant to check subscription plan
+        // Get tenant to check subscription plan and get transaction fee
         const { getTenantById } = require('../config/tenant');
         const tenant = await getTenantById(req.user.tenantId);
         const isFreePlan = tenant && tenant.subscription_plan === 'free';
 
-        // Get user's online store
-        // For free users: tenant_id is set in online_stores table
-        // For enterprise users: tenant_id is NULL (database isolation)
-        const onlineStoreWhere = isFreePlan
-          ? { tenant_id: req.user.tenantId }
-          : {}; // Enterprise users - all stores in their DB belong to them
+        // Only create subaccount for free users (enterprise users don't need it)
+        if (!isFreePlan) {
+          // Enterprise users don't need subaccounts - they don't pay transaction fees
+          // Just save the payment gateway without subaccount
+        } else {
+          // FREE USER: Create subaccount with split payment configuration
+          // Get user's online store
+          const onlineStore = await req.db.models.OnlineStore.findOne({
+            where: { tenant_id: req.user.tenantId },
+            order: [['created_at', 'DESC']] // Get most recent online store
+          });
 
-        const onlineStore = await req.db.models.OnlineStore.findOne({
-          where: onlineStoreWhere,
-          order: [['created_at', 'DESC']] // Get most recent online store
-        });
+          if (!onlineStore) {
+            return res.status(400).json({
+              success: false,
+              message: 'No online store found. Please create an online store before adding Paystack payment gateway.'
+            });
+          }
 
-        if (!onlineStore) {
-          return res.status(400).json({
-            success: false,
-            message: 'No online store found. Please create an online store before adding Paystack payment gateway.'
+          // Get transaction_fee_percentage from tenant (default: 3.00%)
+          const transactionFeePercentage = parseFloat(tenant.transaction_fee_percentage || 3.00);
+          
+          // Calculate percentage_charge for Paystack subaccount
+          // percentage_charge = 100% - transaction_fee_percentage
+          // Example: If transaction_fee_percentage = 3%, then percentage_charge = 97%
+          // This means 97% goes to merchant, 3% goes to platform
+          const percentageCharge = 100 - transactionFeePercentage;
+
+          // Create Paystack subaccount BEFORE saving payment gateway
+          // Use MycroShop account details for settlement
+          subaccountDetails = await createPaystackSubaccount({
+            secretKey: secret_key, // Use unencrypted key for API call
+            businessName: onlineStore.store_name || 'MycroShop Store',
+            settlementBank: '101', // Providus Bank
+            accountNumber: '1307737031', // MycroShop account
+            percentageCharge: percentageCharge, // e.g., 97% if transaction_fee_percentage is 3%
+            testMode: test_mode
+          });
+
+          // Verify subaccount was created successfully
+          if (!subaccountDetails || !subaccountDetails.subaccount_code) {
+            return res.status(500).json({
+              success: false,
+              message: 'Paystack subaccount creation failed: Subaccount code not returned',
+              error: 'Missing subaccount_code in Paystack response'
+            });
+          }
+
+          // Save subaccount code and ID to online store
+          await onlineStore.update({
+            paystack_subaccount_code: subaccountDetails.subaccount_code,
+            paystack_subaccount_id: subaccountDetails.subaccount_id || null
           });
         }
-
-        // Create Paystack subaccount BEFORE saving payment gateway
-        // Use MycroShop account details for settlement
-        subaccountDetails = await createPaystackSubaccount({
-          secretKey: secret_key, // Use unencrypted key for API call
-          businessName: onlineStore.store_name || 'MycroShop Store',
-          settlementBank: '101', // Providus Bank
-          accountNumber: '1307737031', // MycroShop account
-          testMode: test_mode
-        });
-
-        // Verify subaccount was created successfully
-        if (!subaccountDetails || !subaccountDetails.subaccount_code) {
-          return res.status(500).json({
-            success: false,
-            message: 'Paystack subaccount creation failed: Subaccount code not returned',
-            error: 'Missing subaccount_code in Paystack response'
-          });
-        }
-
-        // Save subaccount code and ID to online store
-        await onlineStore.update({
-          paystack_subaccount_code: subaccountDetails.subaccount_code,
-          paystack_subaccount_id: subaccountDetails.subaccount_id || null
-        });
 
       } catch (subaccountError) {
         // Return exact error from Paystack service

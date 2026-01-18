@@ -50,7 +50,7 @@ async function initializePayment(req, res) {
 
     // Calculate platform fee with 500 NGN cap
     const calculatedFee = (parseFloat(amount) * transactionFeePercentage) / 100;
-    const platformFee = Math.min(calculatedFee, 500); // Cap at 500 NGN
+    const platformFee = Math.min(calculatedFee, 500.00); // Cap at 500 NGN maximum
     const merchantAmount = parseFloat(amount) - platformFee;
 
     // Get online store if order_id is provided (for split payments)

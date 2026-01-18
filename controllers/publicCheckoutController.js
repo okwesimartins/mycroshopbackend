@@ -953,13 +953,15 @@ async function initializePublicPayment(req, res) {
       });
     }
 
-    // Calculate platform fee
+    // Calculate platform fee (only for free users, enterprise users pay 0%)
+    // Transaction fee is capped at 500 NGN maximum
     const transactionFeePercentage = tenant.subscription_plan === 'free' 
       ? parseFloat(tenant.transaction_fee_percentage || 3.00)
       : 0.00;
 
+    // Calculate fee: (amount * percentage) / 100, then cap at 500 NGN
     const calculatedFee = (parseFloat(amount) * transactionFeePercentage) / 100;
-    const platformFee = Math.min(calculatedFee, 500); // Cap at 500 NGN
+    const platformFee = Math.min(calculatedFee, 500.00); // Cap at 500 NGN maximum
     const merchantAmount = parseFloat(amount) - platformFee;
 
     // Get online store if order_id is provided (for split payments)
