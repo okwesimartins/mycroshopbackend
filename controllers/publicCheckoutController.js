@@ -272,7 +272,8 @@ async function createPublicOrder(req, res) {
         where: {
           id: online_store_id,
           is_published: true
-        }
+        },
+        attributes: ['id', 'tenant_id', 'username', 'store_name', 'is_published'] // Include tenant_id
       });
 
       if (!onlineStore) {
@@ -281,6 +282,31 @@ async function createPublicOrder(req, res) {
           success: false,
           message: 'Online store not found or not published'
         });
+      }
+
+      // For free users: Verify tenant_id from online_store matches the tenant_id from request
+      // This ensures we're using the correct tenant_id for the order
+      // IMPORTANT: Use tenant_id from online_store, not from request body (for security)
+      let finalTenantId = null;
+      
+      if (isFreePlan) {
+        // Verify tenant_id from online_store matches the tenant_id from request
+        if (!onlineStore.tenant_id || onlineStore.tenant_id !== parsedTenantId) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Tenant ID mismatch. Online store belongs to tenant ${onlineStore.tenant_id || 'unknown'}, but order request specified tenant ${parsedTenantId}`
+          });
+        }
+        // Use tenant_id from online_store for consistency (ensure it's an integer)
+        finalTenantId = parseInt(onlineStore.tenant_id, 10);
+        if (isNaN(finalTenantId) || finalTenantId <= 0) {
+          await transaction.rollback();
+          return res.status(500).json({
+            success: false,
+            message: `Invalid tenant_id in online store. Got: ${onlineStore.tenant_id}`
+          });
+        }
       }
 
       // Handle store_id - free users don't have physical stores
@@ -563,8 +589,8 @@ async function createPublicOrder(req, res) {
 
       // Create order
       // Ensure tenant_id is always set for free users (required for shared database)
-      // Use parsedTenantId to ensure it's an integer, not 0 or string
-      const finalTenantId = isFreePlan ? parsedTenantId : null;
+      // finalTenantId is already set above from online_store.tenant_id for free users
+      // For enterprise users: tenant_id is NULL (separate database)
       
       // Ensure idempotency_key is trimmed (empty strings become NULL)
       const finalIdempotencyKey = (idempotency_key && idempotency_key.trim() !== '') 
@@ -608,11 +634,11 @@ async function createPublicOrder(req, res) {
           transaction
         });
         
-        if (!savedOrder || savedOrder.tenant_id !== parsedTenantId) {
+        if (!savedOrder || savedOrder.tenant_id !== finalTenantId) {
           await transaction.rollback();
           return res.status(500).json({
             success: false,
-            message: `Failed to save tenant_id. Expected: ${parsedTenantId}, Got: ${savedOrder?.tenant_id || 'null'}. Order creation aborted.`
+            message: `Failed to save tenant_id. Expected: ${finalTenantId}, Got: ${savedOrder?.tenant_id || 'null'}. Order creation aborted.`
           });
         }
       }
