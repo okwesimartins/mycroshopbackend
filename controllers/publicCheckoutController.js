@@ -317,7 +317,7 @@ async function createPublicOrder(req, res) {
                  INNER JOIN product_variations pv ON pvo.variation_id = pv.id
                  WHERE pvo.id = :optionId AND pv.product_id = :productId`;
             
-            const variationOptionRows = await req.db.query(variationOptionQuery, {
+            const variationOptionRows = await sequelize.query(variationOptionQuery, {
               replacements: { 
                 optionId: variation_option_id,
                 productId: product_id,
@@ -356,7 +356,7 @@ async function createPublicOrder(req, res) {
                  FROM product_variations 
                  WHERE id = :variationId AND product_id = :productId`;
             
-            const variationRows = await req.db.query(variationQuery, {
+            const variationRows = await sequelize.query(variationQuery, {
               replacements: { 
                 variationId: variation_id,
                 productId: product_id,
@@ -385,7 +385,7 @@ async function createPublicOrder(req, res) {
           // Check stock on variation option
           const { Sequelize } = require('sequelize');
           const stockQuery = `SELECT stock FROM product_variation_options WHERE id = :optionId`;
-          const stockRows = await req.db.query(stockQuery, {
+          const stockRows = await sequelize.query(stockQuery, {
             replacements: { optionId: variation_option_id },
             type: Sequelize.QueryTypes.SELECT,
             transaction
@@ -527,7 +527,7 @@ async function createPublicOrder(req, res) {
         
         if (variation_option_id) {
           // Update stock on variation option
-          await req.db.query(
+          await sequelize.query(
             `UPDATE product_variation_options 
              SET stock = stock - :quantity 
              WHERE id = :optionId AND stock IS NOT NULL`,
