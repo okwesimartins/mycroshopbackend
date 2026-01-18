@@ -108,7 +108,9 @@ async function initializeFlutterwavePayment(paymentData, secretKey, testMode) {
 async function createPublicOrder(req, res) {
   try {
     const {
-      tenant_id, // Required - to identify which tenant database
+      tenant_id, // Required for BOTH free and enterprise users - to identify which tenant database to connect to
+      // NOTE: For enterprise users, tenant_id is NOT saved in the order record (NULL), but still needed to determine database
+      // NOTE: For free users, tenant_id IS saved in the order record (from online_store.tenant_id)
       online_store_id,
       store_id, // Physical store to fulfill order (optional)
       idempotency_key, // Optional - Unique key to prevent duplicate orders
@@ -284,29 +286,45 @@ async function createPublicOrder(req, res) {
         });
       }
 
-      // For free users: Verify tenant_id from online_store matches the tenant_id from request
-      // This ensures we're using the correct tenant_id for the order
-      // IMPORTANT: Use tenant_id from online_store, not from request body (for security)
+      // DETERMINE tenant_id for order creation:
+      // - FREE users: Share one database, MUST have tenant_id (from online_store)
+      // - ENTERPRISE users: Have separate database, tenant_id is NULL (column doesn't exist)
       let finalTenantId = null;
       
       if (isFreePlan) {
-        // Verify tenant_id from online_store matches the tenant_id from request
-        if (!onlineStore.tenant_id || onlineStore.tenant_id !== parsedTenantId) {
-          await transaction.rollback();
-          return res.status(400).json({
-            success: false,
-            message: `Tenant ID mismatch. Online store belongs to tenant ${onlineStore.tenant_id || 'unknown'}, but order request specified tenant ${parsedTenantId}`
-          });
-        }
-        // Use tenant_id from online_store for consistency (ensure it's an integer)
-        finalTenantId = parseInt(onlineStore.tenant_id, 10);
-        if (isNaN(finalTenantId) || finalTenantId <= 0) {
+        // FREE USER: Must use tenant_id from online_store (required for shared database)
+        // Verify online_store has tenant_id
+        if (!onlineStore.tenant_id) {
           await transaction.rollback();
           return res.status(500).json({
             success: false,
-            message: `Invalid tenant_id in online store. Got: ${onlineStore.tenant_id}`
+            message: `Online store is missing tenant_id. This is required for free users. Please contact support.`
           });
         }
+        
+        // Verify tenant_id from online_store matches the tenant_id from request (security check)
+        const onlineStoreTenantId = parseInt(onlineStore.tenant_id, 10);
+        if (isNaN(onlineStoreTenantId) || onlineStoreTenantId <= 0) {
+          await transaction.rollback();
+          return res.status(500).json({
+            success: false,
+            message: `Invalid tenant_id in online store: ${onlineStore.tenant_id}. Please contact support.`
+          });
+        }
+        
+        if (onlineStoreTenantId !== parsedTenantId) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Tenant ID mismatch. Online store belongs to tenant ${onlineStoreTenantId}, but order request specified tenant ${parsedTenantId}`
+          });
+        }
+        
+        // Use tenant_id from online_store (always integer)
+        finalTenantId = onlineStoreTenantId;
+      } else {
+        // ENTERPRISE USER: tenant_id is NULL (they have separate database)
+        finalTenantId = null;
       }
 
       // Handle store_id - free users don't have physical stores
@@ -597,15 +615,18 @@ async function createPublicOrder(req, res) {
         ? idempotency_key.trim() 
         : null;
       
-      console.log('[Order Creation] finalTenantId:', finalTenantId, 'isFreePlan:', isFreePlan, 'parsedTenantId:', parsedTenantId, 'tenant_id from request:', tenant_id);
+      console.log('[Order Creation] isFreePlan:', isFreePlan);
+      console.log('[Order Creation] finalTenantId:', finalTenantId, '(should be integer for free users, null for enterprise)');
+      console.log('[Order Creation] parsedTenantId from request:', parsedTenantId);
+      console.log('[Order Creation] onlineStore.tenant_id:', onlineStore.tenant_id);
       console.log('[Order Creation] finalIdempotencyKey:', finalIdempotencyKey);
       
-      const order = await models.OnlineStoreOrder.create({
-        tenant_id: finalTenantId, // Always set for free users (parsed integer from request), NULL for enterprise
+      // Create order with explicit tenant_id handling
+      const orderData = {
         online_store_id,
         store_id: finalStoreId,
         order_number: orderNumber,
-        idempotency_key: finalIdempotencyKey, // Store trimmed idempotency key to prevent duplicates
+        idempotency_key: finalIdempotencyKey,
         customer_name,
         customer_email: customer_email || null,
         customer_phone: customer_phone || null,
@@ -624,21 +645,50 @@ async function createPublicOrder(req, res) {
         payment_status: 'pending',
         payment_method: payment_method || null,
         notes: notes || null
-      }, { transaction });
-
-      // CRITICAL: Verify tenant_id was saved correctly (for free users)
+      };
+      
+      // Only add tenant_id if it's a free user (enterprise users don't have this column)
       if (isFreePlan && finalTenantId) {
-        // Reload order from database to verify tenant_id was saved
+        orderData.tenant_id = finalTenantId;
+      }
+      
+      console.log('[Order Creation] Order data (tenant_id included):', JSON.stringify({
+        ...orderData,
+        tenant_id: orderData.tenant_id || 'NULL (enterprise user)'
+      }, null, 2));
+      
+      const order = await models.OnlineStoreOrder.create(orderData, { transaction });
+
+      // CRITICAL: Verify tenant_id was saved correctly (for free users only)
+      if (isFreePlan && finalTenantId) {
+        // Reload order from database to verify tenant_id was persisted correctly
         const savedOrder = await models.OnlineStoreOrder.findByPk(order.id, {
           attributes: ['id', 'tenant_id', 'idempotency_key'],
           transaction
         });
         
-        if (!savedOrder || savedOrder.tenant_id !== finalTenantId) {
+        if (!savedOrder) {
           await transaction.rollback();
           return res.status(500).json({
             success: false,
-            message: `Failed to save tenant_id. Expected: ${finalTenantId}, Got: ${savedOrder?.tenant_id || 'null'}. Order creation aborted.`
+            message: 'Failed to retrieve created order from database. Order creation aborted.'
+          });
+        }
+        
+        // Verify tenant_id matches (both must be integers)
+        const savedTenantId = savedOrder.tenant_id ? parseInt(savedOrder.tenant_id, 10) : null;
+        if (savedTenantId !== finalTenantId) {
+          await transaction.rollback();
+          return res.status(500).json({
+            success: false,
+            message: `Failed to save tenant_id. Expected: ${finalTenantId} (integer), Got: ${savedOrder.tenant_id} (${typeof savedOrder.tenant_id}). Order creation aborted.`,
+            debug: {
+              expected: finalTenantId,
+              got: savedOrder.tenant_id,
+              gotType: typeof savedOrder.tenant_id,
+              isFreePlan,
+              onlineStoreTenantId: onlineStore.tenant_id
+            }
           });
         }
       }
