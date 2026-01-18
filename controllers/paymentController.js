@@ -2,6 +2,8 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { decryptSecretKey } = require('./paymentGatewayController');
 const { getTenantById } = require('../config/tenant');
+const { getTenantConnection } = require('../config/database');
+const initModels = require('../models');
 
 /**
  * Initialize payment (create payment link/transaction)
@@ -180,11 +182,13 @@ async function initializePayment(req, res) {
 
 /**
  * Verify payment (webhook or callback)
+ * Public endpoint - requires tenant_id query parameter
  */
 async function verifyPayment(req, res) {
   try {
     const { reference } = req.query; // For Paystack
     const { tx_ref } = req.query; // For Flutterwave
+    const { tenant_id } = req.query; // Required for public endpoint
 
     const transactionReference = reference || tx_ref;
 
@@ -195,12 +199,48 @@ async function verifyPayment(req, res) {
       });
     }
 
+    if (!tenant_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id query parameter is required'
+      });
+    }
+
+    // Parse tenant_id as integer (query params are strings)
+    const parsedTenantId = parseInt(tenant_id, 10);
+    if (isNaN(parsedTenantId) || parsedTenantId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant_id provided'
+      });
+    }
+
+    // Get tenant database connection
+    const tenant = await getTenantById(parsedTenantId);
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Store not found'
+      });
+    }
+
+    const sequelize = await getTenantConnection(parsedTenantId, tenant.subscription_plan || 'enterprise');
+    const models = initModels(sequelize);
+
     // Find transaction
-    const transaction = await req.db.models.PaymentTransaction.findOne({
-      where: { transaction_reference: transactionReference },
+    // For free users, must filter by tenant_id since they share a database
+    const isFreePlan = tenant.subscription_plan === 'free';
+    
+    const transactionWhere = { transaction_reference: transactionReference };
+    if (isFreePlan) {
+      transactionWhere.tenant_id = parsedTenantId;
+    }
+
+    const transaction = await models.PaymentTransaction.findOne({
+      where: transactionWhere,
       include: [
         {
-          model: req.db.models.PaymentGateway,
+          model: models.PaymentGateway,
           attributes: ['gateway_name', 'secret_key', 'test_mode']
         }
       ]
@@ -239,27 +279,29 @@ async function verifyPayment(req, res) {
 
     // Update order status if payment successful
     if (newStatus === 'success' && transaction.order_id) {
-      await req.db.models.OnlineStoreOrder.update(
+      await models.OnlineStoreOrder.update(
         { payment_status: 'paid', status: 'confirmed' },
         { where: { id: transaction.order_id } }
       );
 
       // Send order confirmation email after successful payment
       try {
-        const order = await req.db.models.OnlineStoreOrder.findByPk(transaction.order_id, {
+        const order = await models.OnlineStoreOrder.findByPk(transaction.order_id, {
           include: [
             {
-              model: req.db.models.OnlineStoreOrderItem
+              model: models.OnlineStoreOrderItem
             }
           ]
         });
 
         if (order && transaction.customer_email) {
-          const tenant = await getTenantById(req.user.tenantId);
-          if (tenant) {
+          // Use tenant_id from transaction or from query parameter
+          const transactionTenantId = transaction.tenant_id || parsedTenantId;
+          const tenantForEmail = await getTenantById(transactionTenantId);
+          if (tenantForEmail) {
             const { sendOrderConfirmationEmail } = require('../services/emailService');
             await sendOrderConfirmationEmail({
-              tenant,
+              tenant: tenantForEmail,
               order: order.toJSON(),
               customerEmail: transaction.customer_email,
               customerName: transaction.customer_name || order.customer_name || 'Customer',
@@ -275,7 +317,7 @@ async function verifyPayment(req, res) {
 
     // Update invoice status if payment successful
     if (newStatus === 'success' && transaction.invoice_id) {
-      await req.db.models.Invoice.update(
+      await models.Invoice.update(
         { status: 'paid', payment_date: new Date() },
         { where: { id: transaction.invoice_id } }
       );
@@ -299,7 +341,7 @@ async function verifyPayment(req, res) {
     console.error('Error verifying payment:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Failed to verify payment'
     });
   }
 }
