@@ -217,11 +217,15 @@ async function createPublicOrder(req, res) {
         });
 
         if (existingOrder) {
-          // Duplicate found - rollback transaction and return existing order immediately
+          // Duplicate found - rollback transaction IMMEDIATELY to prevent any insertion
           await transaction.rollback();
-          console.log('[Duplicate Check] ✅ Duplicate order found, returning existing order:', existingOrder.id);
+          console.log('[Duplicate Check] ✅ Duplicate order found with idempotency_key:', trimmedIdempotencyKey, 'tenant_id:', parsedTenantId);
           
-          // Fetch complete order details for response (outside transaction)
+          // Fetch complete order details with all includes (outside transaction)
+          const productAttributesForOrder = isFreePlan 
+            ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
+            : undefined;
+          
           const completeExistingOrder = await models.OnlineStoreOrder.findByPk(existingOrder.id, {
             include: [
               {
@@ -238,9 +242,7 @@ async function createPublicOrder(req, res) {
                 include: [
                   {
                     model: models.Product,
-                    attributes: isFreePlan 
-                      ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
-                      : undefined,
+                    attributes: productAttributesForOrder,
                     required: false
                   }
                 ]
@@ -248,6 +250,7 @@ async function createPublicOrder(req, res) {
             ]
           });
           
+          // Return existing order - do NOT create a new one
           return res.status(200).json({
             success: true,
             message: 'Order already exists (duplicate request detected)',
@@ -259,7 +262,6 @@ async function createPublicOrder(req, res) {
         }
       } catch (checkError) {
         await transaction.rollback();
-        console.error('[Duplicate Check] Error during duplicate check:', checkError);
         throw checkError;
       }
     }
@@ -572,15 +574,6 @@ async function createPublicOrder(req, res) {
       console.log('[Order Creation] finalTenantId:', finalTenantId, 'isFreePlan:', isFreePlan, 'parsedTenantId:', parsedTenantId, 'tenant_id from request:', tenant_id);
       console.log('[Order Creation] finalIdempotencyKey:', finalIdempotencyKey);
       
-      // CRITICAL: Validate tenant_id will be saved correctly
-      if (isFreePlan && (!finalTenantId || finalTenantId <= 0)) {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: `Failed to save tenant_id. Expected positive integer for free users, got: ${finalTenantId}. Original tenant_id: ${tenant_id}`
-        });
-      }
-      
       const order = await models.OnlineStoreOrder.create({
         tenant_id: finalTenantId, // Always set for free users (parsed integer from request), NULL for enterprise
         online_store_id,
@@ -607,10 +600,11 @@ async function createPublicOrder(req, res) {
         notes: notes || null
       }, { transaction });
 
-      // Verify tenant_id was saved correctly
-      if (isFreePlan) {
+      // CRITICAL: Verify tenant_id was saved correctly (for free users)
+      if (isFreePlan && finalTenantId) {
+        // Reload order from database to verify tenant_id was saved
         const savedOrder = await models.OnlineStoreOrder.findByPk(order.id, {
-          attributes: ['id', 'tenant_id'],
+          attributes: ['id', 'tenant_id', 'idempotency_key'],
           transaction
         });
         
@@ -622,11 +616,11 @@ async function createPublicOrder(req, res) {
           });
         }
       }
-      
+
       // Create order items
       for (const item of orderItems) {
         await models.OnlineStoreOrderItem.create({
-          tenant_id: parsedTenantId, // Use parsed tenant_id for free users (matching order)
+          tenant_id: orderTenantId, // Use parsed tenant_id for free users
           order_id: order.id,
           ...item
         }, { transaction });
