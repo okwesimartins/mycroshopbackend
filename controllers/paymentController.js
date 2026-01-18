@@ -299,7 +299,7 @@ async function verifyPayment(req, res) {
     console.error('Error verifying payment:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to verify payment'
+      message: error.message
     });
   }
 }
