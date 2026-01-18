@@ -652,44 +652,86 @@ async function createPublicOrder(req, res) {
         orderData.tenant_id = finalTenantId;
       }
       
-      console.log('[Order Creation] Order data (tenant_id included):', JSON.stringify({
-        ...orderData,
-        tenant_id: orderData.tenant_id || 'NULL (enterprise user)'
-      }, null, 2));
-      
       const order = await models.OnlineStoreOrder.create(orderData, { transaction });
 
       // CRITICAL: Verify tenant_id was saved correctly (for free users only)
       if (isFreePlan && finalTenantId) {
-        // Reload order from database to verify tenant_id was persisted correctly
-        const savedOrder = await models.OnlineStoreOrder.findByPk(order.id, {
-          attributes: ['id', 'tenant_id', 'idempotency_key'],
-          transaction
-        });
+        // Build debug info to return in response if there's an error
+        const debugInfo = {
+          expected: finalTenantId,
+          expectedType: typeof finalTenantId,
+          isFreePlan,
+          onlineStoreTenantId: onlineStore.tenant_id,
+          onlineStoreTenantIdType: typeof onlineStore.tenant_id,
+          orderDataTenantId: orderData.tenant_id,
+          orderDataTenantIdType: typeof orderData.tenant_id,
+          orderDataKeys: Object.keys(orderData),
+          orderId: order.id,
+          orderTenantId: order.tenant_id,
+          orderTenantIdType: typeof order.tenant_id,
+          orderDataValuesTenantId: order.dataValues?.tenant_id,
+          orderDataValuesKeys: Object.keys(order.dataValues || {})
+        };
         
-        if (!savedOrder) {
-          await transaction.rollback();
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to retrieve created order from database. Order creation aborted.'
-          });
-        }
-        
-        // Verify tenant_id matches (both must be integers)
-        const savedTenantId = savedOrder.tenant_id ? parseInt(savedOrder.tenant_id, 10) : null;
-        if (savedTenantId !== finalTenantId) {
-          await transaction.rollback();
-          return res.status(500).json({
-            success: false,
-            message: `Failed to save tenant_id. Expected: ${finalTenantId} (integer), Got: ${savedOrder.tenant_id} (${typeof savedOrder.tenant_id}). Order creation aborted.`,
-            debug: {
-              expected: finalTenantId,
-              got: savedOrder.tenant_id,
-              gotType: typeof savedOrder.tenant_id,
-              isFreePlan,
-              onlineStoreTenantId: onlineStore.tenant_id
+        // First check the order object immediately after creation
+        const orderTenantId = order.tenant_id || order.dataValues?.tenant_id;
+        if (orderTenantId && parseInt(orderTenantId, 10) === finalTenantId) {
+          // tenant_id is correct in the order object, verification passed
+        } else {
+          // Reload order from database to verify tenant_id was persisted correctly
+          // Use raw query to ensure we get the actual database value
+          try {
+            const savedOrderRows = await sequelize.query(
+              'SELECT id, tenant_id, idempotency_key FROM online_store_orders WHERE id = :orderId',
+              {
+                replacements: { orderId: order.id },
+                type: sequelize.QueryTypes.SELECT,
+                transaction
+              }
+            );
+            
+            const savedOrder = savedOrderRows && savedOrderRows.length > 0 ? savedOrderRows[0] : null;
+            
+            if (!savedOrder) {
+              await transaction.rollback();
+              return res.status(500).json({
+                success: false,
+                message: 'Failed to retrieve created order from database. Order creation aborted.',
+                debug: {
+                  ...debugInfo,
+                  rawQueryResult: savedOrderRows,
+                  savedOrderFound: false
+                }
+              });
             }
-          });
+            
+            // Add raw query results to debug info
+            debugInfo.rawQueryTenantId = savedOrder.tenant_id;
+            debugInfo.rawQueryTenantIdType = typeof savedOrder.tenant_id;
+            debugInfo.rawQueryResult = savedOrder;
+            
+            // Verify tenant_id matches (both must be integers)
+            const savedTenantId = savedOrder.tenant_id ? parseInt(savedOrder.tenant_id, 10) : null;
+            if (savedTenantId !== finalTenantId) {
+              await transaction.rollback();
+              return res.status(500).json({
+                success: false,
+                message: `Failed to save tenant_id. Expected: ${finalTenantId} (integer), Got: ${savedOrder.tenant_id} (${typeof savedOrder.tenant_id}). Order creation aborted.`,
+                debug: debugInfo
+              });
+            }
+          } catch (queryError) {
+            await transaction.rollback();
+            return res.status(500).json({
+              success: false,
+              message: 'Error verifying tenant_id in database. Order creation aborted.',
+              error: queryError.message,
+              debug: {
+                ...debugInfo,
+                queryError: queryError.toString()
+              }
+            });
+          }
         }
       }
 
