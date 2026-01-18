@@ -562,6 +562,11 @@ async function createPublicOrder(req, res) {
 
       // Fetch complete order
       // For free users: don't include Store (they don't have physical stores)
+      // For free users: exclude store_id and other enterprise-only columns from Product
+      const productAttributesForOrder = isFreePlan 
+        ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
+        : undefined; // Enterprise users: select all columns
+      
       const completeOrder = await models.OnlineStoreOrder.findByPk(order.id, {
         include: [
           {
@@ -575,7 +580,14 @@ async function createPublicOrder(req, res) {
             required: false
           }]),
           {
-            model: models.OnlineStoreOrderItem
+            model: models.OnlineStoreOrderItem,
+            include: [
+              {
+                model: models.Product,
+                attributes: productAttributesForOrder,
+                required: false
+              }
+            ]
           }
         ]
       });
