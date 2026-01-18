@@ -157,23 +157,30 @@ async function createPublicOrder(req, res) {
 
     // Get tenant_id for order queries (for free users)
     const isFreePlan = tenant.subscription_plan === 'free';
+    // For free users: always use tenant_id from request (they share database)
+    // For enterprise users: tenant_id is NULL (separate database)
     const orderTenantId = isFreePlan ? tenant_id : null;
 
     // Start transaction early to prevent race conditions
     const transaction = await sequelize.transaction();
 
     // Check for duplicate order using idempotency key (INSIDE transaction to prevent race conditions)
-    if (idempotency_key) {
+    // Only check if idempotency_key is provided and not empty
+    if (idempotency_key && idempotency_key.trim() !== '') {
       try {
-        const whereClause = {
-          idempotency_key: idempotency_key,
-          online_store_id: online_store_id
-        };
-        
-        // For free users, also filter by tenant_id
-        if (isFreePlan && orderTenantId) {
-          whereClause.tenant_id = orderTenantId;
-        }
+        // Build where clause to match the unique constraint exactly
+        // For free users: unique constraint is (tenant_id, idempotency_key)
+        // For enterprise users: unique constraint is (idempotency_key)
+        const trimmedIdempotencyKey = idempotency_key.trim();
+        const whereClause = isFreePlan && orderTenantId
+          ? {
+              tenant_id: orderTenantId, // Must match unique constraint
+              idempotency_key: trimmedIdempotencyKey // Must match unique constraint
+            }
+          : {
+              idempotency_key: trimmedIdempotencyKey, // Must match unique constraint
+              online_store_id: online_store_id // Additional safety filter for enterprise
+            };
 
         // For free users: don't include Store (they don't have physical stores)
         const existingOrder = await models.OnlineStoreOrder.findOne({
@@ -510,12 +517,20 @@ async function createPublicOrder(req, res) {
       }
 
       // Create order
+      // Ensure tenant_id is always set for free users (required for shared database)
+      const finalTenantId = isFreePlan ? tenant_id : null;
+      
+      // Ensure idempotency_key is trimmed (empty strings become NULL)
+      const finalIdempotencyKey = (idempotency_key && idempotency_key.trim() !== '') 
+        ? idempotency_key.trim() 
+        : null;
+      
       const order = await models.OnlineStoreOrder.create({
-        tenant_id: orderTenantId,
+        tenant_id: finalTenantId, // Always set for free users (from request), NULL for enterprise
         online_store_id,
         store_id: finalStoreId,
         order_number: orderNumber,
-        idempotency_key: idempotency_key || null, // Store idempotency key to prevent duplicates
+        idempotency_key: finalIdempotencyKey, // Store trimmed idempotency key to prevent duplicates
         customer_name,
         customer_email: customer_email || null,
         customer_phone: customer_phone || null,
@@ -636,16 +651,18 @@ async function createPublicOrder(req, res) {
       // Handle duplicate idempotency key error
       if (error.name === 'SequelizeUniqueConstraintError' && error.errors) {
         const uniqueError = error.errors.find(e => e.path === 'idempotency_key' || e.path?.includes('idempotency'));
-        if (uniqueError && idempotency_key) {
+        if (uniqueError && idempotency_key && idempotency_key.trim() !== '') {
           // Duplicate idempotency key - fetch and return existing order
-          const whereClause = {
-            idempotency_key: idempotency_key,
-            online_store_id: online_store_id
-          };
-          
-          if (isFreePlan && orderTenantId) {
-            whereClause.tenant_id = orderTenantId;
-          }
+          const trimmedIdempotencyKey = idempotency_key.trim();
+          const whereClause = isFreePlan && orderTenantId
+            ? {
+                tenant_id: orderTenantId, // Match unique constraint
+                idempotency_key: trimmedIdempotencyKey // Match unique constraint
+              }
+            : {
+                idempotency_key: trimmedIdempotencyKey, // Match unique constraint
+                online_store_id: online_store_id // Additional safety filter
+              };
 
           const existingOrder = await models.OnlineStoreOrder.findOne({
             where: whereClause,
