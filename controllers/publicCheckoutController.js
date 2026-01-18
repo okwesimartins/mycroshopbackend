@@ -938,12 +938,31 @@ async function initializePublicPayment(req, res) {
     const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
+    // Determine if this is a free plan user
+    const isFreePlan = tenant.subscription_plan === 'free';
+
+    // Parse tenant_id as integer (JSON body may send it as string)
+    const parsedTenantId = parseInt(tenant_id, 10);
+    if (isNaN(parsedTenantId) || parsedTenantId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant_id provided'
+      });
+    }
+
     // Get default payment gateway
+    // For free users, must filter by tenant_id since they share a database
+    const gatewayWhere = {
+      is_active: true,
+      is_default: true
+    };
+    
+    if (isFreePlan) {
+      gatewayWhere.tenant_id = parsedTenantId;
+    }
+    
     const gateway = await models.PaymentGateway.findOne({
-      where: {
-        is_active: true,
-        is_default: true
-      }
+      where: gatewayWhere
     });
 
     if (!gateway) {
@@ -987,8 +1006,7 @@ async function initializePublicPayment(req, res) {
     const transactionReference = generateTransactionReference();
 
     // Get tenant_id for transaction creation (for free users)
-    const isFreePlan = tenant.subscription_plan === 'free';
-    const transactionTenantId = isFreePlan ? tenant_id : null;
+    const transactionTenantId = isFreePlan ? parsedTenantId : null;
 
     // Create payment transaction record
     const paymentTransaction = await models.PaymentTransaction.create({
@@ -1013,7 +1031,7 @@ async function initializePublicPayment(req, res) {
     // Build metadata
     const paymentMetadata = {
       ...metadata,
-      tenant_id: tenant_id,
+      tenant_id: parsedTenantId,
       transaction_id: paymentTransaction.id
     };
 
