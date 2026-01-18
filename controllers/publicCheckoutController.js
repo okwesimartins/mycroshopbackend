@@ -648,11 +648,37 @@ async function createPublicOrder(req, res) {
       };
       
       // Only add tenant_id if it's a free user (enterprise users don't have this column)
+      // CRITICAL: Use set() method to ensure Sequelize recognizes tenant_id
       if (isFreePlan && finalTenantId) {
         orderData.tenant_id = finalTenantId;
+        // Explicitly ensure it's an integer (not string or undefined)
+        if (typeof orderData.tenant_id !== 'number' || orderData.tenant_id <= 0) {
+          await transaction.rollback();
+          return res.status(500).json({
+            success: false,
+            message: `Invalid tenant_id in orderData: ${orderData.tenant_id} (${typeof orderData.tenant_id}). Must be a positive integer.`
+          });
+        }
       }
       
+      // Create order - use set() after creation to ensure tenant_id is saved if Sequelize didn't pick it up
       const order = await models.OnlineStoreOrder.create(orderData, { transaction });
+      
+      // CRITICAL FIX: If tenant_id wasn't saved (check dataValues), explicitly update it
+      if (isFreePlan && finalTenantId) {
+        if (!order.dataValues.tenant_id || order.dataValues.tenant_id === 0) {
+          // Tenant_id wasn't saved - explicitly update it using raw query
+          await sequelize.query(
+            'UPDATE online_store_orders SET tenant_id = :tenantId WHERE id = :orderId',
+            {
+              replacements: { tenantId: finalTenantId, orderId: order.id },
+              transaction
+            }
+          );
+          // Reload order after update
+          await order.reload({ transaction });
+        }
+      }
 
       // CRITICAL: Verify tenant_id was saved correctly (for free users only)
       if (isFreePlan && finalTenantId) {
