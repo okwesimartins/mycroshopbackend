@@ -237,13 +237,7 @@ async function verifyPayment(req, res) {
     }
 
     const transaction = await models.PaymentTransaction.findOne({
-      where: transactionWhere,
-      include: [
-        {
-          model: models.PaymentGateway,
-          attributes: ['gateway_name', 'secret_key', 'test_mode']
-        }
-      ]
+      where: transactionWhere
     });
 
     if (!transaction) {
@@ -253,22 +247,40 @@ async function verifyPayment(req, res) {
       });
     }
 
-    // Check if PaymentGateway is loaded
-    if (!transaction.PaymentGateway) {
-      console.error('PaymentGateway not loaded for transaction:', transaction.id);
+    // Fetch PaymentGateway separately (no association exists)
+    // Use tenant_id from transaction if available, otherwise use parsed tenant_id from query
+    const gatewayTenantId = transaction.tenant_id || parsedTenantId;
+    
+    // Build where clause for PaymentGateway (for free users, filter by tenant_id)
+    const gatewayWhere = {
+      gateway_name: transaction.gateway_name,
+      is_active: true
+    };
+    
+    if (isFreePlan) {
+      gatewayWhere.tenant_id = gatewayTenantId;
+    }
+
+    const gateway = await models.PaymentGateway.findOne({
+      where: gatewayWhere,
+      attributes: ['id', 'gateway_name', 'secret_key', 'test_mode']
+    });
+
+    if (!gateway) {
+      console.error('PaymentGateway not found for transaction:', transaction.id, 'gateway_name:', transaction.gateway_name);
       return res.status(500).json({
         success: false,
-        message: 'Payment gateway information not found for this transaction'
+        message: 'Payment gateway not found for this transaction'
       });
     }
 
-    const secretKey = decryptSecretKey(transaction.PaymentGateway.secret_key);
+    const secretKey = decryptSecretKey(gateway.secret_key);
     let verificationResult;
 
     // Verify with gateway
-    if (transaction.gateway_name === 'paystack') {
+    if (gateway.gateway_name === 'paystack') {
       verificationResult = await verifyPaystackPayment(transactionReference, secretKey);
-    } else if (transaction.gateway_name === 'flutterwave') {
+    } else if (gateway.gateway_name === 'flutterwave') {
       verificationResult = await verifyFlutterwavePayment(transactionReference, secretKey);
     } else {
       return res.status(400).json({
