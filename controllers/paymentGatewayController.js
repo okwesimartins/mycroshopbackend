@@ -114,27 +114,8 @@ async function addPaymentGateway(req, res) {
       });
     }
 
-    // If setting as default, unset other defaults
-    if (is_default) {
-      await req.db.models.PaymentGateway.update(
-        { is_default: false },
-        { where: { tenant_id: req.user.tenantId } }
-      );
-    }
-
-    // Create payment gateway
-    const gateway = await req.db.models.PaymentGateway.create({
-      tenant_id: req.user.tenantId,
-      gateway_name,
-      public_key,
-      secret_key: encryptedSecretKey,
-      webhook_secret: webhook_secret || null,
-      test_mode: test_mode || false,
-      is_default: is_default || false,
-      is_active: true
-    });
-
-    // If Paystack, create subaccount and link to online store
+    // If Paystack, create subaccount FIRST before saving payment gateway
+    // Payment gateway should NOT be saved if subaccount creation fails
     let subaccountDetails = null;
     if (gateway_name === 'paystack') {
       try {
@@ -155,38 +136,92 @@ async function addPaymentGateway(req, res) {
           order: [['created_at', 'DESC']] // Get most recent online store
         });
 
-        if (onlineStore) {
-          console.log(`Creating Paystack subaccount for online store: ${onlineStore.id} (${onlineStore.store_name})`);
-
-          // Create Paystack subaccount
-          // Use MycroShop account details for settlement
-          subaccountDetails = await createPaystackSubaccount({
-            secretKey: secret_key, // Use unencrypted key for API call
-            businessName: onlineStore.store_name || 'MycroShop Store',
-            settlementBank: '101', // Providus Bank
-            accountNumber: '1307737031', // MycroShop account
-            testMode: test_mode
+        if (!onlineStore) {
+          return res.status(400).json({
+            success: false,
+            message: 'No online store found. Please create an online store before adding Paystack payment gateway.'
           });
-
-          // Save subaccount code and ID to online store
-          await onlineStore.update({
-            paystack_subaccount_code: subaccountDetails.subaccount_code,
-            paystack_subaccount_id: subaccountDetails.subaccount_id || null
-          });
-
-          console.log(`✅ Paystack subaccount created and linked to online store ${onlineStore.id}`);
-          console.log(`   Subaccount ID: ${subaccountDetails.subaccount_id || 'N/A'}`);
-          console.log(`   Subaccount Code: ${subaccountDetails.subaccount_code}`);
-          console.log(`   Account Name: ${subaccountDetails.account_name}`);
-        } else {
-          console.warn('No online store found for user. Subaccount created but not linked.');
         }
+
+        // Create Paystack subaccount BEFORE saving payment gateway
+        // Use MycroShop account details for settlement
+        subaccountDetails = await createPaystackSubaccount({
+          secretKey: secret_key, // Use unencrypted key for API call
+          businessName: onlineStore.store_name || 'MycroShop Store',
+          settlementBank: '101', // Providus Bank
+          accountNumber: '1307737031', // MycroShop account
+          testMode: test_mode
+        });
+
+        // Verify subaccount was created successfully
+        if (!subaccountDetails || !subaccountDetails.subaccount_code) {
+          return res.status(500).json({
+            success: false,
+            message: 'Paystack subaccount creation failed: Subaccount code not returned',
+            error: 'Missing subaccount_code in Paystack response'
+          });
+        }
+
+        // Save subaccount code and ID to online store
+        await onlineStore.update({
+          paystack_subaccount_code: subaccountDetails.subaccount_code,
+          paystack_subaccount_id: subaccountDetails.subaccount_id || null
+        });
+
       } catch (subaccountError) {
-        console.error('Error creating Paystack subaccount:', subaccountError);
-        // Don't fail gateway creation if subaccount creation fails
-        // Gateway is still created, user can manually configure subaccount later
+        // Return exact error from Paystack service
+        const errorMessage = subaccountError.message || 'Unknown error';
+        
+        // Extract Paystack error details
+        let paystackErrorDetails = null;
+        if (subaccountError.paystackResponse) {
+          paystackErrorDetails = {
+            message: subaccountError.paystackResponse.message || errorMessage,
+            status: subaccountError.status || null,
+            statusText: subaccountError.statusText || null,
+            errors: subaccountError.paystackResponse.errors || null,
+            full_response: subaccountError.paystackResponse
+          };
+        } else if (subaccountError.originalError?.response?.data) {
+          paystackErrorDetails = subaccountError.originalError.response.data;
+        }
+        
+        // Determine appropriate status code
+        const statusCode = subaccountError.status && subaccountError.status >= 400 && subaccountError.status < 600
+          ? subaccountError.status
+          : subaccountError.isNetworkError ? 503
+          : 400;
+        
+        return res.status(statusCode).json({
+          success: false,
+          message: 'Failed to create Paystack subaccount. Payment gateway not saved.',
+          error: errorMessage,
+          paystack_error: paystackErrorDetails,
+          error_type: subaccountError.name || 'PaystackSubaccountError',
+          is_network_error: subaccountError.isNetworkError || false
+        });
       }
     }
+
+    // If setting as default, unset other defaults
+    if (is_default) {
+      await req.db.models.PaymentGateway.update(
+        { is_default: false },
+        { where: { tenant_id: req.user.tenantId } }
+      );
+    }
+
+    // Create payment gateway (only if subaccount creation succeeded for Paystack)
+    const gateway = await req.db.models.PaymentGateway.create({
+      tenant_id: req.user.tenantId,
+      gateway_name,
+      public_key,
+      secret_key: encryptedSecretKey,
+      webhook_secret: webhook_secret || null,
+      test_mode: test_mode || false,
+      is_default: is_default || false,
+      is_active: true
+    });
 
     res.status(201).json({
       success: true,

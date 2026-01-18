@@ -73,6 +73,7 @@ async function createPaystackSubaccount(options = {}) {
     const subaccountData = response.data.data;
 
     return {
+      subaccount_id: subaccountData.id || subaccountData.subaccount_id || null, // Paystack subaccount ID
       subaccount_code: subaccountData.subaccount_code,
       business_name: subaccountData.business_name,
       settlement_bank: subaccountData.settlement_bank,
@@ -87,13 +88,30 @@ async function createPaystackSubaccount(options = {}) {
   } catch (error) {
     console.error('Error creating Paystack subaccount:', error.response?.data || error.message);
     
+    // Create a detailed error object with Paystack response
+    const paystackError = new Error();
+    paystackError.name = 'PaystackSubaccountError';
+    
     // Handle specific Paystack errors
     if (error.response?.data) {
-      const paystackError = error.response.data;
-      throw new Error(paystackError.message || 'Failed to create Paystack subaccount');
+      const paystackResponse = error.response.data;
+      paystackError.message = paystackResponse.message || 'Failed to create Paystack subaccount';
+      paystackError.paystackResponse = paystackResponse;
+      paystackError.status = error.response.status;
+      paystackError.statusText = error.response.statusText;
+    } else if (error.request) {
+      // Request was made but no response received
+      paystackError.message = 'No response from Paystack API. Please check your network connection and API credentials.';
+      paystackError.isNetworkError = true;
+    } else {
+      // Error in setting up the request
+      paystackError.message = 'Failed to create Paystack subaccount: ' + error.message;
     }
     
-    throw new Error('Failed to create Paystack subaccount: ' + error.message);
+    // Attach original error for debugging
+    paystackError.originalError = error;
+    
+    throw paystackError;
   }
 }
 
