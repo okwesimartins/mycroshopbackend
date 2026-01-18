@@ -1167,9 +1167,36 @@ async function getPublicOrderByNumber(req, res) {
       });
     }
 
+    // Helper function to convert relative image URLs to full URLs
+    function getFullImageUrl(relativePath) {
+      if (!relativePath) return null;
+      // If already a full URL, return as is
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      // Use base URL from environment or default to backend.mycroshop.com
+      const baseUrl = process.env.BASE_URL || process.env.API_URL || 'https://backend.mycroshop.com';
+      // Ensure baseUrl doesn't have trailing slash and path has leading slash
+      const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
+      const normalizedPath = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
+      return `${normalizedBaseUrl}${normalizedPath}`;
+    }
+
+    // Convert order to JSON to modify nested image URLs
+    const orderData = order.toJSON();
+
+    // Update image URLs to full paths for all order items
+    if (orderData.OnlineStoreOrderItems && Array.isArray(orderData.OnlineStoreOrderItems)) {
+      orderData.OnlineStoreOrderItems.forEach(item => {
+        if (item.Product && item.Product.image_url) {
+          item.Product.image_url = getFullImageUrl(item.Product.image_url);
+        }
+      });
+    }
+
     res.json({
       success: true,
-      data: { order }
+      data: { order: orderData }
     });
   } catch (error) {
     console.error('Error getting public order:', error);

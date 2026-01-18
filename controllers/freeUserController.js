@@ -58,7 +58,7 @@ async function registerFreeUser(req, res) {
       business_type,
       business_category,
       subscription_plan: 'free',
-      transaction_fee_percentage: 3.00, // Default 3% transaction fee
+      transaction_fee_percentage: 4.00, // Default 4% transaction fee
       status: 'active'
     });
 
