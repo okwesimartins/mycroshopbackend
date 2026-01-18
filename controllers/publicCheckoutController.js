@@ -257,7 +257,7 @@ async function createPublicOrder(req, res) {
       const orderItems = [];
 
       for (const item of items) {
-        const { 
+        let { 
           product_id, 
           quantity, 
           unit_price,
