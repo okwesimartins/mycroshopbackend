@@ -247,6 +247,28 @@ async function verifyPayment(req, res) {
       });
     }
 
+    // Check if transaction has already been processed successfully
+    // Prevent duplicate processing and duplicate email sends
+    if (transaction.status === 'success') {
+      console.log('Transaction already verified:', transaction.transaction_reference);
+      return res.json({
+        success: true,
+        message: 'Transaction already verified',
+        data: {
+          transaction: {
+            id: transaction.id,
+            reference: transaction.transaction_reference,
+            status: transaction.status,
+            amount: transaction.amount,
+            platform_fee: transaction.platform_fee,
+            merchant_amount: transaction.merchant_amount,
+            paid_at: transaction.paid_at
+          },
+          already_verified: true
+        }
+      });
+    }
+
     // Fetch PaymentGateway separately (no association exists)
     // Use tenant_id from transaction if available, otherwise use parsed tenant_id from query
     const gatewayTenantId = transaction.tenant_id || parsedTenantId;
@@ -290,96 +312,173 @@ async function verifyPayment(req, res) {
     }
 
     // Update transaction status
+    // Only update if status is different (prevents unnecessary database writes)
     const newStatus = verificationResult.status === 'success' ? 'success' : 'failed';
-    await transaction.update({
-      status: newStatus,
-      gateway_response: verificationResult,
-      paid_at: newStatus === 'success' ? new Date() : null,
-      failure_reason: newStatus === 'failed' ? verificationResult.message : null
-    });
+    
+    // Use transaction to prevent race conditions
+    const dbTransaction = await sequelize.transaction();
+    
+    try {
+      // Reload transaction within transaction to get latest status (prevents race conditions)
+      // Use row locking to prevent concurrent updates
+      const { Sequelize } = require('sequelize');
+      const currentTransaction = await models.PaymentTransaction.findOne({
+        where: transactionWhere,
+        lock: true, // FOR UPDATE lock
+        transaction: dbTransaction
+      });
 
-    // Update order status if payment successful
-    if (newStatus === 'success' && transaction.order_id) {
-      // Build where clause for order update (for free users, filter by tenant_id)
-      const orderWhere = { id: transaction.order_id };
-      if (isFreePlan && transaction.tenant_id) {
-        orderWhere.tenant_id = transaction.tenant_id;
-      }
-      
-      await models.OnlineStoreOrder.update(
-        { payment_status: 'paid', status: 'confirmed' },
-        { where: orderWhere }
-      );
-
-      // Send order confirmation email after successful payment
-      try {
-        // Build where clause for order fetch (for free users, filter by tenant_id)
-        const orderFindWhere = { id: transaction.order_id };
-        if (isFreePlan && transaction.tenant_id) {
-          orderFindWhere.tenant_id = transaction.tenant_id;
-        }
-        
-        const order = await models.OnlineStoreOrder.findOne({
-          where: orderFindWhere,
-          include: [
-            {
-              model: models.OnlineStoreOrderItem
-            }
-          ]
+      if (!currentTransaction) {
+        await dbTransaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: 'Transaction not found'
         });
+      }
 
-        if (order && transaction.customer_email) {
-          // Use tenant_id from transaction or from query parameter
-          const transactionTenantId = transaction.tenant_id || parsedTenantId;
-          const tenantForEmail = await getTenantById(transactionTenantId);
-          if (tenantForEmail) {
-            const { sendOrderConfirmationEmail } = require('../services/emailService');
-            const orderJson = order.toJSON();
-            // Access items from JSON (Sequelize pluralizes association names in JSON)
-            const items = orderJson.OnlineStoreOrderItems || order.OnlineStoreOrderItems || [];
-            await sendOrderConfirmationEmail({
-              tenant: tenantForEmail,
-              order: orderJson,
-              customerEmail: transaction.customer_email,
-              customerName: transaction.customer_name || order.customer_name || 'Customer',
-              items: items
+      // Check if transaction has already been processed successfully
+      if (currentTransaction.status === 'success') {
+        await dbTransaction.rollback();
+        console.log('Transaction already verified:', currentTransaction.transaction_reference);
+        return res.json({
+          success: true,
+          message: 'Transaction already verified',
+          data: {
+            transaction: {
+              id: currentTransaction.id,
+              reference: currentTransaction.transaction_reference,
+              status: currentTransaction.status,
+              amount: currentTransaction.amount,
+              platform_fee: currentTransaction.platform_fee,
+              merchant_amount: currentTransaction.merchant_amount,
+              paid_at: currentTransaction.paid_at
+            },
+            already_verified: true
+          }
+        });
+      }
+
+      await currentTransaction.update({
+        status: newStatus,
+        gateway_response: verificationResult,
+        paid_at: newStatus === 'success' ? new Date() : null,
+        failure_reason: newStatus === 'failed' ? verificationResult.message : null
+      }, { transaction: dbTransaction });
+
+      let emailSent = false;
+
+      // Update order status if payment successful (only if not already updated)
+      if (newStatus === 'success' && currentTransaction.order_id) {
+        // Build where clause for order update (for free users, filter by tenant_id)
+        // Only update if order is not already paid (prevents duplicate updates)
+        const orderWhere = { id: currentTransaction.order_id };
+        if (isFreePlan && currentTransaction.tenant_id) {
+          orderWhere.tenant_id = currentTransaction.tenant_id;
+        }
+        // Add condition to only update if not already paid
+        const { Sequelize } = require('sequelize');
+        orderWhere.payment_status = { [Sequelize.Op.ne]: 'paid' };
+        
+        const orderUpdateResult = await models.OnlineStoreOrder.update(
+          { payment_status: 'paid', status: 'confirmed' },
+          { where: orderWhere, transaction: dbTransaction }
+        );
+
+        // Send order confirmation email after successful payment
+        // Only send if order was actually updated (orderUpdateResult[0] > 0)
+        if (orderUpdateResult[0] > 0) {
+          try {
+            // Build where clause for order fetch (for free users, filter by tenant_id)
+            const orderFindWhere = { id: currentTransaction.order_id };
+            if (isFreePlan && currentTransaction.tenant_id) {
+              orderFindWhere.tenant_id = currentTransaction.tenant_id;
+            }
+            
+            const order = await models.OnlineStoreOrder.findOne({
+              where: orderFindWhere,
+              include: [
+                {
+                  model: models.OnlineStoreOrderItem
+                }
+              ],
+              transaction: dbTransaction
             });
+
+            if (order && currentTransaction.customer_email) {
+              // Use tenant_id from transaction or from query parameter
+              const transactionTenantId = currentTransaction.tenant_id || parsedTenantId;
+              const tenantForEmail = await getTenantById(transactionTenantId);
+              if (tenantForEmail) {
+                const { sendOrderConfirmationEmail } = require('../services/emailService');
+                const orderJson = order.toJSON();
+                // Access items from JSON (Sequelize pluralizes association names in JSON)
+                const items = orderJson.OnlineStoreOrderItems || order.OnlineStoreOrderItems || [];
+                
+                // Commit transaction before sending email (email service doesn't need DB transaction)
+                await dbTransaction.commit();
+                emailSent = true;
+                
+                // Send email outside transaction
+                await sendOrderConfirmationEmail({
+                  tenant: tenantForEmail,
+                  order: orderJson,
+                  customerEmail: currentTransaction.customer_email,
+                  customerName: currentTransaction.customer_name || order.customer_name || 'Customer',
+                  items: items
+                });
+              }
+            }
+          } catch (emailError) {
+            console.error('Error sending order confirmation email:', emailError);
+            // Don't fail payment verification if email fails
           }
         }
-      } catch (emailError) {
-        console.error('Error sending order confirmation email:', emailError);
-        // Don't fail payment verification if email fails
       }
-    }
 
-    // Update invoice status if payment successful
-    if (newStatus === 'success' && transaction.invoice_id) {
-      // Build where clause for invoice update (for free users, filter by tenant_id)
-      const invoiceWhere = { id: transaction.invoice_id };
-      if (isFreePlan && transaction.tenant_id) {
-        invoiceWhere.tenant_id = transaction.tenant_id;
+      // Update invoice status if payment successful (only if not already paid)
+      if (newStatus === 'success' && currentTransaction.invoice_id && !emailSent) {
+        // Build where clause for invoice update (for free users, filter by tenant_id)
+        // Only update if invoice is not already paid
+        const invoiceWhere = { id: currentTransaction.invoice_id };
+        if (isFreePlan && currentTransaction.tenant_id) {
+          invoiceWhere.tenant_id = currentTransaction.tenant_id;
+        }
+        // Add condition to only update if not already paid
+        const { Sequelize } = require('sequelize');
+        invoiceWhere.status = { [Sequelize.Op.ne]: 'paid' };
+        
+        await models.Invoice.update(
+          { status: 'paid', payment_date: new Date() },
+          { where: invoiceWhere, transaction: dbTransaction }
+        );
       }
       
-      await models.Invoice.update(
-        { status: 'paid', payment_date: new Date() },
-        { where: invoiceWhere }
-      );
-    }
-
-    res.json({
-      success: newStatus === 'success',
-      message: verificationResult.message,
-      data: {
-        transaction: {
-          id: transaction.id,
-          reference: transaction.transaction_reference,
-          status: newStatus,
-          amount: transaction.amount,
-          platform_fee: transaction.platform_fee,
-          merchant_amount: transaction.merchant_amount
-        }
+      // Commit transaction if not already committed (email was sent)
+      if (!emailSent) {
+        await dbTransaction.commit();
       }
-    });
+      
+      // Return success response
+      return res.json({
+        success: newStatus === 'success',
+        message: verificationResult.message,
+        data: {
+          transaction: {
+            id: currentTransaction.id,
+            reference: currentTransaction.transaction_reference,
+            status: newStatus,
+            amount: currentTransaction.amount,
+            platform_fee: currentTransaction.platform_fee,
+            merchant_amount: currentTransaction.merchant_amount
+          }
+        }
+      });
+    } catch (dbError) {
+      if (!dbTransaction.finished) {
+        await dbTransaction.rollback();
+      }
+      throw dbError;
+    }
   } catch (error) {
     console.error('Error verifying payment:', error);
     console.error('Error stack:', error.stack);
