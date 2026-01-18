@@ -159,7 +159,15 @@ async function createPublicOrder(req, res) {
     const isFreePlan = tenant.subscription_plan === 'free';
     // For free users: always use tenant_id from request (they share database)
     // For enterprise users: tenant_id is NULL (separate database)
-    const orderTenantId = isFreePlan ? tenant_id : null;
+    // Ensure tenant_id is parsed as integer (in case it comes as string)
+    const parsedTenantId = parseInt(tenant_id, 10);
+    if (isNaN(parsedTenantId) || parsedTenantId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant_id provided'
+      });
+    }
+    const orderTenantId = isFreePlan ? parsedTenantId : null;
 
     // Start transaction early to prevent race conditions
     const transaction = await sequelize.transaction();
@@ -172,15 +180,20 @@ async function createPublicOrder(req, res) {
         // For free users: unique constraint is (tenant_id, idempotency_key)
         // For enterprise users: unique constraint is (idempotency_key)
         const trimmedIdempotencyKey = idempotency_key.trim();
-        const whereClause = isFreePlan && orderTenantId
+        // CRITICAL: Use parsedTenantId (integer) to match unique constraint
+        // The unique constraint is (tenant_id, idempotency_key) for free users
+        const whereClause = isFreePlan && parsedTenantId
           ? {
-              tenant_id: orderTenantId, // Must match unique constraint
+              tenant_id: parsedTenantId, // Must match unique constraint - use parsed integer, not orderTenantId
               idempotency_key: trimmedIdempotencyKey // Must match unique constraint
             }
           : {
               idempotency_key: trimmedIdempotencyKey, // Must match unique constraint
               online_store_id: online_store_id // Additional safety filter for enterprise
             };
+        
+        console.log('[Duplicate Check] Where clause:', JSON.stringify(whereClause));
+        console.log('[Duplicate Check] isFreePlan:', isFreePlan, 'parsedTenantId:', parsedTenantId, 'orderTenantId:', orderTenantId);
 
         // For free users: don't include Store (they don't have physical stores)
         const existingOrder = await models.OnlineStoreOrder.findOne({
@@ -518,15 +531,19 @@ async function createPublicOrder(req, res) {
 
       // Create order
       // Ensure tenant_id is always set for free users (required for shared database)
-      const finalTenantId = isFreePlan ? tenant_id : null;
+      // Use parsedTenantId to ensure it's an integer, not 0 or string
+      const finalTenantId = isFreePlan ? parsedTenantId : null;
       
       // Ensure idempotency_key is trimmed (empty strings become NULL)
       const finalIdempotencyKey = (idempotency_key && idempotency_key.trim() !== '') 
         ? idempotency_key.trim() 
         : null;
       
+      console.log('[Order Creation] finalTenantId:', finalTenantId, 'isFreePlan:', isFreePlan, 'parsedTenantId:', parsedTenantId, 'tenant_id from request:', tenant_id);
+      console.log('[Order Creation] finalIdempotencyKey:', finalIdempotencyKey);
+      
       const order = await models.OnlineStoreOrder.create({
-        tenant_id: finalTenantId, // Always set for free users (from request), NULL for enterprise
+        tenant_id: finalTenantId, // Always set for free users (parsed integer from request), NULL for enterprise
         online_store_id,
         store_id: finalStoreId,
         order_number: orderNumber,
@@ -554,52 +571,15 @@ async function createPublicOrder(req, res) {
       // Create order items
       for (const item of orderItems) {
         await models.OnlineStoreOrderItem.create({
-          tenant_id: orderTenantId,
+          tenant_id: orderTenantId, // Use parsed tenant_id for free users
           order_id: order.id,
           ...item
         }, { transaction });
       }
 
-      // Update stock
-      // For variations: update stock on variation options
-      // For free users: update stock on products table directly (if no variation)
-      // For enterprise users: update stock on product_stores table if store_id is provided (if no variation)
-      
-      for (const item of items) {
-        const { product_id, quantity, variation_option_id } = item;
-        
-        if (variation_option_id) {
-          // Update stock on variation option
-          await sequelize.query(
-            `UPDATE product_variation_options 
-             SET stock = stock - :quantity 
-             WHERE id = :optionId AND stock IS NOT NULL`,
-            {
-              replacements: { optionId: variation_option_id, quantity },
-              transaction
-            }
-          );
-        } else if (isFreePlan) {
-          // Free users: update stock on products table directly
-          const product = await models.Product.findByPk(product_id, { transaction });
-          if (product && product.stock !== null) {
-            await product.update({
-              stock: product.stock - quantity
-            }, { transaction });
-          }
-        } else if (finalStoreId) {
-          // Enterprise users: update stock on product_stores table
-          const productStore = await models.ProductStore.findOne({
-            where: { product_id, store_id: finalStoreId }
-          }, { transaction });
-
-          if (productStore && productStore.stock !== null) {
-            await productStore.update({
-              stock: productStore.stock - quantity
-            }, { transaction });
-          }
-        }
-      }
+      // NOTE: Stock deduction removed - stock should only be deducted AFTER payment is confirmed
+      // Stock will be deducted in the payment webhook handler or payment verification function
+      // This prevents stock from being reserved for unpaid orders
 
       await transaction.commit();
 
@@ -654,15 +634,19 @@ async function createPublicOrder(req, res) {
         if (uniqueError && idempotency_key && idempotency_key.trim() !== '') {
           // Duplicate idempotency key - fetch and return existing order
           const trimmedIdempotencyKey = idempotency_key.trim();
-          const whereClause = isFreePlan && orderTenantId
+          // CRITICAL: Use parsedTenantId (integer) to match unique constraint
+          const whereClause = isFreePlan && parsedTenantId
             ? {
-                tenant_id: orderTenantId, // Match unique constraint
+                tenant_id: parsedTenantId, // Match unique constraint - use parsed integer
                 idempotency_key: trimmedIdempotencyKey // Match unique constraint
               }
             : {
                 idempotency_key: trimmedIdempotencyKey, // Match unique constraint
                 online_store_id: online_store_id // Additional safety filter
               };
+          
+          console.log('[Duplicate Error Handler] Where clause:', JSON.stringify(whereClause));
+          console.log('[Duplicate Error Handler] parsedTenantId:', parsedTenantId);
 
           const existingOrder = await models.OnlineStoreOrder.findOne({
             where: whereClause,
