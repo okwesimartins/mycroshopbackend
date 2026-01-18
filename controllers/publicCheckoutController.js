@@ -217,19 +217,49 @@ async function createPublicOrder(req, res) {
         });
 
         if (existingOrder) {
-          // Rollback transaction and return existing order - this is a duplicate request
+          // Duplicate found - rollback transaction and return existing order immediately
           await transaction.rollback();
+          console.log('[Duplicate Check] ✅ Duplicate order found, returning existing order:', existingOrder.id);
+          
+          // Fetch complete order details for response (outside transaction)
+          const completeExistingOrder = await models.OnlineStoreOrder.findByPk(existingOrder.id, {
+            include: [
+              {
+                model: models.OnlineStore,
+                attributes: ['id', 'username', 'store_name']
+              },
+              ...(isFreePlan ? [] : [{
+                model: models.Store,
+                attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
+                required: false
+              }]),
+              {
+                model: models.OnlineStoreOrderItem,
+                include: [
+                  {
+                    model: models.Product,
+                    attributes: isFreePlan 
+                      ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
+                      : undefined,
+                    required: false
+                  }
+                ]
+              }
+            ]
+          });
+          
           return res.status(200).json({
             success: true,
             message: 'Order already exists (duplicate request detected)',
             data: {
-              order: existingOrder,
+              order: completeExistingOrder,
               is_duplicate: true
             }
           });
         }
       } catch (checkError) {
         await transaction.rollback();
+        console.error('[Duplicate Check] Error during duplicate check:', checkError);
         throw checkError;
       }
     }
@@ -542,6 +572,15 @@ async function createPublicOrder(req, res) {
       console.log('[Order Creation] finalTenantId:', finalTenantId, 'isFreePlan:', isFreePlan, 'parsedTenantId:', parsedTenantId, 'tenant_id from request:', tenant_id);
       console.log('[Order Creation] finalIdempotencyKey:', finalIdempotencyKey);
       
+      // CRITICAL: Validate tenant_id will be saved correctly
+      if (isFreePlan && (!finalTenantId || finalTenantId <= 0)) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Failed to save tenant_id. Expected positive integer for free users, got: ${finalTenantId}. Original tenant_id: ${tenant_id}`
+        });
+      }
+      
       const order = await models.OnlineStoreOrder.create({
         tenant_id: finalTenantId, // Always set for free users (parsed integer from request), NULL for enterprise
         online_store_id,
@@ -568,10 +607,26 @@ async function createPublicOrder(req, res) {
         notes: notes || null
       }, { transaction });
 
+      // Verify tenant_id was saved correctly
+      if (isFreePlan) {
+        const savedOrder = await models.OnlineStoreOrder.findByPk(order.id, {
+          attributes: ['id', 'tenant_id'],
+          transaction
+        });
+        
+        if (!savedOrder || savedOrder.tenant_id !== parsedTenantId) {
+          await transaction.rollback();
+          return res.status(500).json({
+            success: false,
+            message: `Failed to save tenant_id. Expected: ${parsedTenantId}, Got: ${savedOrder?.tenant_id || 'null'}. Order creation aborted.`
+          });
+        }
+      }
+      
       // Create order items
       for (const item of orderItems) {
         await models.OnlineStoreOrderItem.create({
-          tenant_id: orderTenantId, // Use parsed tenant_id for free users
+          tenant_id: parsedTenantId, // Use parsed tenant_id for free users (matching order)
           order_id: order.id,
           ...item
         }, { transaction });
@@ -967,7 +1022,6 @@ async function getPublicOrderByNumber(req, res) {
     });
   }
 }
-
 
 module.exports = {
   createPublicOrder,
