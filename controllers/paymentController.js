@@ -644,6 +644,10 @@ async function verifyFlutterwavePayment(txRef, secretKey) {
 /**
  * Handle payment webhook (Paystack)
  * POST /api/v1/payments/webhook?online_store_id=123
+ * 
+ * This webhook handles cases where:
+ * 1. Transaction exists in database (normal flow)
+ * 2. Transaction doesn't exist (network failure during verifyPayment) - creates it from webhook data
  */
 async function handlePaymentWebhook(req, res) {
   try {
@@ -683,59 +687,165 @@ async function handlePaymentWebhook(req, res) {
 
     console.log(`Paystack webhook received: ${event} for online_store_id: ${online_store_id || 'N/A'}`);
 
+    // Extract tenant_id from metadata (required to connect to correct database)
+    const metadata = data.metadata || {};
+    const tenantId = metadata.tenant_id;
+    
+    if (!tenantId) {
+      console.error('Missing tenant_id in webhook metadata');
+      // Still return 200 to acknowledge receipt, but log error
+      return res.status(200).json({ 
+        received: true, 
+        warning: 'Missing tenant_id in metadata - cannot process webhook' 
+      });
+    }
+
+    // Get tenant database connection
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      console.error(`Tenant not found: ${tenantId}`);
+      return res.status(200).json({ 
+        received: true, 
+        warning: `Tenant ${tenantId} not found` 
+      });
+    }
+
+    const sequelize = await getTenantConnection(tenantId, tenant.subscription_plan || 'enterprise');
+    const models = initModels(sequelize);
+    const isFreePlan = tenant.subscription_plan === 'free';
+    const parsedTenantId = parseInt(tenantId, 10);
+
     if (event === 'charge.success') {
       // Payment successful
       const reference = data.reference;
       const amount = data.amount / 100; // Convert from kobo
       const customerEmail = data.customer?.email;
-      const metadata = data.metadata || {};
+      const customerName = data.customer ? `${data.customer.first_name || ''} ${data.customer.last_name || ''}`.trim() : null;
 
-      // Find transaction by reference
-      const transaction = await req.db.models.PaymentTransaction.findOne({
-        where: { transaction_reference: reference }
+      // Find transaction by reference (with tenant_id filter for free users)
+      const transactionWhere = { transaction_reference: reference };
+      if (isFreePlan) {
+        transactionWhere.tenant_id = parsedTenantId;
+      }
+
+      let transaction = await models.PaymentTransaction.findOne({
+        where: transactionWhere
       });
 
-      if (transaction) {
-    // Update transaction status
+      // If transaction doesn't exist, create it from webhook data
+      // This handles the case where verifyPayment failed due to network issues
+      if (!transaction) {
+        console.warn(`Transaction not found for reference: ${reference}. Creating from webhook data...`);
+        
+        // Try to get order_id and invoice_id from metadata
+        const orderId = metadata.order_id || metadata.transaction_id || null;
+        const invoiceId = metadata.invoice_id || null;
+        
+        // Get gateway name from metadata or default to paystack
+        const gatewayName = metadata.gateway_name || 'paystack';
+        
+        // Calculate platform fee if available in metadata, otherwise estimate
+        const platformFee = metadata.platform_fee || 0;
+        const merchantAmount = amount - platformFee;
+        
+        try {
+          // Create transaction from webhook data
+          transaction = await models.PaymentTransaction.create({
+            tenant_id: isFreePlan ? parsedTenantId : null,
+            order_id: orderId,
+            invoice_id: invoiceId,
+            transaction_reference: reference,
+            gateway_name: gatewayName,
+            gateway_transaction_id: reference,
+            amount: amount,
+            currency: data.currency || 'NGN',
+            platform_fee: platformFee,
+            merchant_amount: merchantAmount,
+            customer_email: customerEmail,
+            customer_name: customerName,
+            status: 'success',
+            gateway_response: data,
+            paid_at: new Date(data.paid_at || new Date()),
+            failure_reason: null
+          });
+          
+          console.log(`✅ Created missing transaction from webhook: ${transaction.id}`);
+        } catch (createError) {
+          console.error('Error creating transaction from webhook:', createError);
+          // Continue processing - might be duplicate reference or other issue
+          // Try to find it again in case it was created concurrently
+          transaction = await models.PaymentTransaction.findOne({
+            where: transactionWhere
+          });
+          
+          if (!transaction) {
+            console.error('Could not create or find transaction. Webhook data may be incomplete.');
+            return res.status(200).json({ 
+              received: true, 
+              warning: 'Transaction not found and could not be created' 
+            });
+          }
+        }
+      }
+
+      // Update transaction status (only if not already success to prevent duplicate processing)
+      if (transaction.status !== 'success') {
         await transaction.update({
           status: 'success',
           gateway_response: data,
           paid_at: new Date(data.paid_at || new Date()),
           failure_reason: null
         });
+      }
 
-        // Update order status if payment successful
-        if (transaction.order_id) {
-          const order = await req.db.models.OnlineStoreOrder.findByPk(transaction.order_id, {
+      // Update order status if payment successful (only if not already paid)
+      if (transaction.order_id) {
+        const orderWhere = { id: transaction.order_id };
+        if (isFreePlan && transaction.tenant_id) {
+          orderWhere.tenant_id = transaction.tenant_id;
+        }
+        // Only update if not already paid
+        const { Sequelize } = require('sequelize');
+        orderWhere.payment_status = { [Sequelize.Op.ne]: 'paid' };
+        
+        const orderUpdateResult = await models.OnlineStoreOrder.update(
+          {
+            payment_status: 'paid',
+            status: 'confirmed',
+            paid_at: new Date()
+          },
+          { where: orderWhere }
+        );
+
+        // Only fetch and send email if order was actually updated
+        if (orderUpdateResult[0] > 0) {
+          const orderFindWhere = { id: transaction.order_id };
+          if (isFreePlan && transaction.tenant_id) {
+            orderFindWhere.tenant_id = transaction.tenant_id;
+          }
+          
+          const order = await models.OnlineStoreOrder.findOne({
+            where: orderFindWhere,
             include: [
               {
-                model: req.db.models.OnlineStoreOrderItem
+                model: models.OnlineStoreOrderItem
               }
             ]
           });
 
           if (order) {
-            await order.update({
-              payment_status: 'paid',
-              status: 'confirmed',
-              paid_at: new Date()
-            });
-
             // Send order confirmation email after successful payment
             try {
-              const tenantId = transaction.tenant_id;
-              if (tenantId) {
-                const tenant = await getTenantById(tenantId);
-                if (tenant && (transaction.customer_email || order.customer_email)) {
-                  const { sendOrderConfirmationEmail } = require('../services/emailService');
-                  await sendOrderConfirmationEmail({
-                    tenant,
-                    order: order.toJSON(),
-                    customerEmail: transaction.customer_email || order.customer_email,
-                    customerName: transaction.customer_name || order.customer_name || 'Customer',
-                    items: order.OnlineStoreOrderItems || []
-                  });
-                }
+              if (tenant && (transaction.customer_email || order.customer_email)) {
+                const { sendOrderConfirmationEmail } = require('../services/emailService');
+                const orderJson = order.toJSON();
+                await sendOrderConfirmationEmail({
+                  tenant,
+                  order: orderJson,
+                  customerEmail: transaction.customer_email || order.customer_email,
+                  customerName: transaction.customer_name || order.customer_name || 'Customer',
+                  items: orderJson.OnlineStoreOrderItems || []
+                });
               }
             } catch (emailError) {
               console.error('Error sending order confirmation email:', emailError);
@@ -743,38 +853,89 @@ async function handlePaymentWebhook(req, res) {
             }
           }
         }
-
-        // Update invoice status if payment successful
-        if (transaction.invoice_id) {
-          await req.db.models.Invoice.update(
-            { 
-              status: 'paid', 
-              payment_date: new Date(),
-              payment_method: data.authorization?.channel || 'card'
-            },
-            { where: { id: transaction.invoice_id } }
-          );
-        }
-
-        console.log(`Payment webhook processed: Transaction ${transaction.id} marked as success`);
-      } else {
-        console.warn(`Transaction not found for reference: ${reference}`);
       }
+
+      // Update invoice status if payment successful (only if not already paid)
+      if (transaction.invoice_id) {
+        const invoiceWhere = { id: transaction.invoice_id };
+        if (isFreePlan && transaction.tenant_id) {
+          invoiceWhere.tenant_id = transaction.tenant_id;
+        }
+        // Only update if not already paid
+        const { Sequelize } = require('sequelize');
+        invoiceWhere.status = { [Sequelize.Op.ne]: 'paid' };
+        
+        await models.Invoice.update(
+          { 
+            status: 'paid', 
+            payment_date: new Date(),
+            payment_method: data.authorization?.channel || 'card'
+          },
+          { where: invoiceWhere }
+        );
+      }
+
+      console.log(`✅ Payment webhook processed: Transaction ${transaction.id} marked as success`);
     } else if (event === 'charge.failed') {
       // Payment failed
       const reference = data.reference;
-      const transaction = await req.db.models.PaymentTransaction.findOne({
-        where: { transaction_reference: reference }
+      const transactionWhere = { transaction_reference: reference };
+      if (isFreePlan) {
+        transactionWhere.tenant_id = parsedTenantId;
+      }
+      
+      let transaction = await models.PaymentTransaction.findOne({
+        where: transactionWhere
       });
 
-      if (transaction) {
+      // If transaction doesn't exist, create it from webhook data
+      if (!transaction) {
+        console.warn(`Transaction not found for failed reference: ${reference}. Creating from webhook data...`);
+        
+        const orderId = metadata.order_id || metadata.transaction_id || null;
+        const invoiceId = metadata.invoice_id || null;
+        const gatewayName = metadata.gateway_name || 'paystack';
+        const platformFee = metadata.platform_fee || 0;
+        const merchantAmount = (data.amount / 100) - platformFee;
+        
+        try {
+          transaction = await models.PaymentTransaction.create({
+            tenant_id: isFreePlan ? parsedTenantId : null,
+            order_id: orderId,
+            invoice_id: invoiceId,
+            transaction_reference: reference,
+            gateway_name: gatewayName,
+            gateway_transaction_id: reference,
+            amount: data.amount / 100,
+            currency: data.currency || 'NGN',
+            platform_fee: platformFee,
+            merchant_amount: merchantAmount,
+            customer_email: data.customer?.email,
+            customer_name: data.customer ? `${data.customer.first_name || ''} ${data.customer.last_name || ''}`.trim() : null,
+            status: 'failed',
+            gateway_response: data,
+            failure_reason: data.gateway_response || 'Payment failed',
+            paid_at: null
+          });
+          
+          console.log(`✅ Created missing failed transaction from webhook: ${transaction.id}`);
+        } catch (createError) {
+          console.error('Error creating failed transaction from webhook:', createError);
+          // Try to find it again
+          transaction = await models.PaymentTransaction.findOne({
+            where: transactionWhere
+          });
+        }
+      }
+
+      if (transaction && transaction.status !== 'failed') {
         await transaction.update({
           status: 'failed',
           gateway_response: data,
           failure_reason: data.gateway_response || 'Payment failed'
         });
 
-        console.log(`Payment webhook processed: Transaction ${transaction.id} marked as failed`);
+        console.log(`✅ Payment webhook processed: Transaction ${transaction.id} marked as failed`);
       }
     }
 
