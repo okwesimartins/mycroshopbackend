@@ -795,12 +795,40 @@ async function getWebhookUrl(req, res) {
   try {
     const { online_store_id } = req.params;
 
+    if (!req.user || !req.user.tenantId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    // Get tenant database connection
+    const tenant = await getTenantById(req.user.tenantId);
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Store not found'
+      });
+    }
+
+    const sequelize = await getTenantConnection(req.user.tenantId, tenant.subscription_plan || 'enterprise');
+    const models = initModels(sequelize);
+
+    // Determine if this is a free plan user
+    const isFreePlan = tenant.subscription_plan === 'free';
+    const parsedTenantId = parseInt(req.user.tenantId, 10);
+
     // Verify online store exists and belongs to user
-    const onlineStore = await req.db.models.OnlineStore.findOne({
-      where: {
-        id: online_store_id,
-        tenant_id: req.user.tenantId
-      }
+    const onlineStoreWhere = {
+      id: online_store_id
+    };
+    
+    if (isFreePlan) {
+      onlineStoreWhere.tenant_id = parsedTenantId;
+    }
+
+    const onlineStore = await models.OnlineStore.findOne({
+      where: onlineStoreWhere
     });
 
     if (!onlineStore) {
@@ -811,7 +839,8 @@ async function getWebhookUrl(req, res) {
     }
 
     // Build webhook URL with online_store_id parameter
-    const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://localhost:3000';
+    // Use backend.mycroshop.com as base URL
+    const baseUrl = process.env.BASE_URL || process.env.API_URL || 'https://backend.mycroshop.com';
     const webhookUrl = `${baseUrl}/api/v1/payments/webhook?online_store_id=${online_store_id}`;
 
     res.json({
