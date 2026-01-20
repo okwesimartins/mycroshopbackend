@@ -14,6 +14,7 @@ const { generateStampImage, convertImageToEscPos } = require('./receiptStampServ
 async function generateEscPosReceipt(receiptData, options = {}) {
   const {
     includeStamp = true,
+    includeCompanyName = false, // Show company name in header by default
     stampStyle = 'rectangular',
     maxWidth = 200 // 80mm paper width
   } = options;

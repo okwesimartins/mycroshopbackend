@@ -452,8 +452,17 @@ async function generateStandaloneReceipt(req, res) {
         return null;
       };
 
+      const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
       pdfUrl = normalizePath(pdfPath);
       previewUrl = normalizePath(previewPath);
+      
+      // Convert relative paths to full URLs
+      if (pdfUrl && !pdfUrl.startsWith('http')) {
+        pdfUrl = `${baseUrl}${pdfUrl}`;
+      }
+      if (previewUrl && !previewUrl.startsWith('http')) {
+        previewUrl = `${baseUrl}${previewUrl}`;
+      }
     } catch (pdfError) {
       console.error('Error generating PDF/preview for standalone receipt:', pdfError);
       // Continue without PDF - ESC/POS will still work
@@ -476,6 +485,8 @@ async function generateStandaloneReceipt(req, res) {
       escPosCommandsBase64 = escPosCommands.toString('base64');
     } catch (escPosError) {
       console.error('Error generating ESC/POS commands for standalone receipt:', escPosError);
+      console.error('ESC/POS error details:', escPosError.message);
+      // ESC/POS generation failed - receipt can still be saved without it
     }
 
     // Save receipt to database (if receipts table exists)
