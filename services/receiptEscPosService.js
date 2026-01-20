@@ -34,9 +34,10 @@ async function generateEscPosReceipt(receiptData, options = {}) {
   commands.push(Buffer.from([0x1D, 0x21, 0x00])); // GS ! 0 (Normal size)
   commands.push(Buffer.from([0x1B, 0x61, 0x00])); // ESC a 0 (Left align)
 
-  // Company name
-  const companyName = receiptData.company_name || 'Business Name';
-  commands.push(Buffer.from(`${companyName}\n`, 'ascii'));
+  // Company name (optional - only if provided and includeCompanyName is true)
+  if (includeCompanyName && receiptData.company_name) {
+    commands.push(Buffer.from(`${receiptData.company_name}\n`, 'ascii'));
+  }
   commands.push(Buffer.from('─'.repeat(32) + '\n', 'ascii'));
 
   // Receipt number
@@ -101,7 +102,8 @@ async function generateEscPosReceipt(receiptData, options = {}) {
   commands.push(Buffer.from(`Payment: ${paymentMethod}\n`, 'ascii'));
   commands.push(Buffer.from('\n', 'ascii'));
 
-  // Digital Stamp
+  // Digital Stamp (optional - can be disabled for simple receipts)
+  const companyName = receiptData.company_name || '';
   if (includeStamp && companyName) {
     try {
       // Generate stamp image

@@ -76,7 +76,7 @@ async function generateReceiptFromInvoice(req, res) {
         const colorPromise = extractColorsFromLogo(logoUrl);
         const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 5000));
         brandColors = await Promise.race([colorPromise, timeoutPromise]) || {};
-      } catch (error) {
+    } catch (error) {
         console.warn('Could not extract colors from logo, using defaults:', error.message);
       }
     }
@@ -285,17 +285,27 @@ async function generateStandaloneReceipt(req, res) {
 
     // Get tenant info
     const tenant = req.tenant || req.user?.tenant;
-    const isFreePlan = tenant?.subscription_plan === 'free';
-    const tenantId = isFreePlan ? tenant?.id : null;
+    if (!tenant) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant information not found. Please ensure you are authenticated.'
+      });
+    }
+    
+    const isFreePlan = tenant.subscription_plan === 'free';
+    const tenantId = isFreePlan ? tenant.id : null;
 
-    // Optional: find store for branding information (if store_id provided)
+    // Get store for branding information (if store_id provided and user is enterprise)
+    // For free users: use tenant information directly (they don't have physical stores)
     let store = {};
-    if (store_id) {
-      const where = { id: store_id };
-      if (isFreePlan && tenantId) {
-        where.tenant_id = tenantId;
-      }
-      const foundStore = await req.db.models.Store.findOne({ where });
+    let logoUrl = null;
+    let companyName = tenant.name || 'Business';
+    
+    if (store_id && !isFreePlan) {
+      // Enterprise users: try to find store
+      const foundStore = await req.db.models.Store.findOne({ 
+        where: { id: store_id }
+      });
       if (!foundStore) {
         return res.status(404).json({
           success: false,
@@ -303,9 +313,24 @@ async function generateStandaloneReceipt(req, res) {
         });
       }
       store = foundStore.toJSON ? foundStore.toJSON() : foundStore;
+      logoUrl = store.logo_url || tenant.logo_url || null;
+      companyName = store.name || tenant.name || 'Business';
+    } else {
+      // Free users OR no store_id provided: use tenant information for branding
+      logoUrl = tenant.logo_url || null;
+      companyName = tenant.name || 'Business';
+      // Set store object to have tenant info for consistency
+      store = {
+        name: tenant.name,
+        logo_url: tenant.logo_url,
+        address: tenant.address,
+        phone: tenant.phone,
+        email: null, // Tenants don't have email, stores do
+        city: null,
+        state: null,
+        country: tenant.country || 'Nigeria'
+      };
     }
-
-    const logoUrl = store.logo_url || null;
 
     // Extract colors from logo (optional, with timeout)
     let brandColors = {};
@@ -374,7 +399,7 @@ async function generateStandaloneReceipt(req, res) {
           total: lineTotal
         };
       }),
-      company_name: store.name || 'Business',
+      company_name: companyName,
       customer_name: customer_name || null,
       customer_phone: customer_phone || null,
       customer_email: customer_email || null,
@@ -390,7 +415,7 @@ async function generateStandaloneReceipt(req, res) {
       logoUrl: logoUrl,
       colors: brandColors,
       digitalStamp: {
-        company_name: store.name || 'Business',
+        company_name: companyName,
         style: 'rectangular'
       }
     });
@@ -439,8 +464,12 @@ async function generateStandaloneReceipt(req, res) {
     let escPosCommandsBase64 = null;
 
     try {
+      // For standalone receipts on thermal printers, simplify:
+      // - Skip company logo/name header (saves space, faster printing)
+      // - Skip digital stamp (simpler receipt, faster)
       escPosCommands = await generateEscPosReceipt(receiptData, {
-        includeStamp: true,
+        includeStamp: false, // Disable stamp for simpler thermal receipts
+        includeCompanyName: false, // Skip company name header for simplicity
         stampStyle: 'rectangular',
         maxWidth: 200
       });
@@ -626,9 +655,241 @@ async function getReceiptsByInvoice(req, res) {
   }
 }
 
+/**
+ * Sync receipt from offline client
+ * POST /api/v1/receipts/sync
+ * 
+ * Allows mobile app to sync receipt data when back online after printing offline.
+ * Handles duplicate prevention using receipt_number as unique identifier.
+ */
+async function syncReceipt(req, res) {
+  try {
+    const {
+      receipt_number,
+      receipt_data,
+      esc_pos_commands_base64,
+      store_id,
+      offline_print_time, // Timestamp when receipt was printed offline
+      ...otherFields
+    } = req.body;
+
+    // Basic validation
+    if (!receipt_number) {
+      return res.status(400).json({
+        success: false,
+        message: 'receipt_number is required'
+      });
+    }
+
+    if (!receipt_data) {
+      return res.status(400).json({
+        success: false,
+        message: 'receipt_data is required'
+      });
+    }
+
+    // Get tenant info
+    const tenant = req.tenant || req.user?.tenant;
+    if (!tenant) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant information not found. Please ensure you are authenticated.'
+      });
+    }
+
+    const isFreePlan = tenant.subscription_plan === 'free';
+    const tenantId = isFreePlan ? tenant.id : null;
+
+    // Check if receipt already exists (duplicate prevention)
+    const existingReceiptQuery = isFreePlan && tenantId
+      ? `SELECT * FROM receipts WHERE tenant_id = ? AND receipt_number = ? LIMIT 1`
+      : `SELECT * FROM receipts WHERE receipt_number = ? LIMIT 1`;
+    
+    const existingReceiptParams = isFreePlan && tenantId 
+      ? [tenantId, receipt_number] 
+      : [receipt_number];
+
+    const [existingReceipts] = await req.db.query(existingReceiptQuery, {
+      replacements: existingReceiptParams
+    });
+
+    // If receipt already exists, return success (idempotent - safe to retry)
+    if (existingReceipts && existingReceipts.length > 0) {
+      const existing = existingReceipts[0];
+      return res.json({
+        success: true,
+        message: 'Receipt already synced',
+        data: {
+          receipt: {
+            id: existing.id,
+            receipt_number: existing.receipt_number,
+            invoice_id: existing.invoice_id,
+            transaction_date: existing.transaction_date,
+            transaction_time: existing.transaction_time,
+            total: existing.total,
+            currency: existing.currency,
+            payment_method: existing.payment_method,
+            customer_name: existing.customer_name,
+            synced_at: existing.created_at
+          },
+          already_synced: true
+        }
+      });
+    }
+
+    // Generate ESC/POS commands if not provided (for receipts that were printed offline)
+    let escPosCommandsBase64 = esc_pos_commands_base64;
+    let escPosCommands = null;
+
+    if (!escPosCommandsBase64) {
+      try {
+        escPosCommands = await generateEscPosReceipt(receipt_data, {
+          includeStamp: false,
+          includeCompanyName: false,
+          stampStyle: 'rectangular',
+          maxWidth: 200
+        });
+        escPosCommandsBase64 = escPosCommands.toString('base64');
+      } catch (escPosError) {
+        console.warn('Could not generate ESC/POS commands during sync:', escPosError.message);
+        // Continue without ESC/POS - receipt will still be saved
+      }
+    } else {
+      // Decode base64 to get Buffer for length calculation
+      try {
+        escPosCommands = Buffer.from(escPosCommandsBase64, 'base64');
+      } catch (decodeError) {
+        console.warn('Could not decode ESC/POS commands:', decodeError.message);
+      }
+    }
+
+    // Get store information for PDF generation (if store_id provided)
+    let store = {};
+    if (store_id && !isFreePlan) {
+      try {
+        const foundStore = await req.db.models.Store.findOne({ 
+          where: { id: store_id }
+        });
+        if (foundStore) {
+          store = foundStore.toJSON ? foundStore.toJSON() : foundStore;
+        }
+      } catch (storeError) {
+        console.warn('Could not fetch store info during sync:', storeError.message);
+      }
+    } else if (!store_id) {
+      // Free users or no store_id: use tenant info
+      store = {
+        name: tenant.name,
+        logo_url: tenant.logo_url,
+        address: tenant.address,
+        phone: tenant.phone
+      };
+    }
+
+    // Generate PDF and preview (optional - might not be available offline)
+    let previewUrl = null;
+    let pdfUrl = null;
+
+    try {
+      // Try to generate PDF/preview from receipt_data
+      // This uses the same logic as generateStandaloneReceipt
+      const result = await generateInvoicePdfAndPreview({
+        html: generateReceiptTemplate({
+          receipt: receipt_data,
+          store: store,
+          items: receipt_data.items || []
+        }),
+        filename: `receipt-${receipt_number}`,
+        type: 'receipt'
+      });
+
+      const normalizePath = (localPath) => {
+        if (!localPath) return null;
+        let normalized = String(localPath).replace(/\\/g, '/');
+        const uploadsIndex = normalized.indexOf('/uploads');
+        if (uploadsIndex !== -1) {
+          return normalized.substring(uploadsIndex);
+        }
+        const filename = normalized.split('/').pop();
+        if (filename.endsWith('.pdf')) {
+          return `/uploads/invoices/pdfs/${filename}`;
+        } else if (filename.match(/\.(png|jpg|jpeg)$/i)) {
+          return `/uploads/invoices/previews/${filename}`;
+        }
+        return null;
+      };
+
+      pdfUrl = normalizePath(result.pdfPath);
+      previewUrl = normalizePath(result.previewPath);
+    } catch (pdfError) {
+      console.warn('Could not generate PDF/preview during sync:', pdfError.message);
+      // Continue without PDF - receipt will still be saved
+    }
+
+    // Save receipt to database
+    const receiptInsertQuery = isFreePlan && tenantId
+      ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`
+      : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
+         VALUES (?, ?, ?, ?, ?, NOW())`;
+
+    const receiptParams = isFreePlan && tenantId
+      ? [tenantId, null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64]
+      : [null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64];
+
+    await req.db.query(receiptInsertQuery, {
+      replacements: receiptParams
+    });
+
+    // Fetch saved receipt
+    const [savedReceipts] = await req.db.query(
+      isFreePlan && tenantId
+        ? `SELECT * FROM receipts WHERE tenant_id = ? AND receipt_number = ? ORDER BY id DESC LIMIT 1`
+        : `SELECT * FROM receipts WHERE receipt_number = ? ORDER BY id DESC LIMIT 1`,
+      {
+        replacements: isFreePlan && tenantId ? [tenantId, receipt_number] : [receipt_number]
+      }
+    );
+
+    const savedReceipt = savedReceipts && savedReceipts.length > 0 ? savedReceipts[0] : null;
+
+    return res.json({
+      success: true,
+      message: 'Receipt synced successfully',
+      data: {
+        receipt: {
+          id: savedReceipt?.id || null,
+          receipt_number: receipt_number,
+          invoice_id: null,
+          transaction_date: receipt_data.transaction_date,
+          transaction_time: receipt_data.transaction_time,
+          total: receipt_data.total,
+          currency: receipt_data.currency,
+          payment_method: receipt_data.payment_method,
+          customer_name: receipt_data.customer_name || null,
+          offline_print_time: offline_print_time || null,
+          synced_at: savedReceipt?.created_at || new Date().toISOString()
+        },
+        preview_url: previewUrl,
+        pdf_url: pdfUrl,
+        esc_pos_commands: escPosCommandsBase64,
+        esc_pos_commands_length: escPosCommands ? escPosCommands.length : 0
+      }
+    });
+  } catch (error) {
+    console.error('Error syncing receipt:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to sync receipt',
+      error: error.message
+    });
+  }
+}
+
 module.exports = {
   generateReceiptFromInvoice,
   generateStandaloneReceipt,
   getReceiptById,
-  getReceiptsByInvoice
+  getReceiptsByInvoice,
+  syncReceipt
 };

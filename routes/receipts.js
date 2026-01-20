@@ -16,6 +16,9 @@ router.post('/invoices/:id/generate', receiptController.generateReceiptFromInvoi
 // Generate standalone receipt (walk-in customers, quick sales)
 router.post('/standalone', receiptController.generateStandaloneReceipt);
 
+// Sync receipt from offline client (for offline-first mobile apps)
+router.post('/sync', receiptController.syncReceipt);
+
 // Get receipt by ID
 router.get('/:id', receiptController.getReceiptById);
 
