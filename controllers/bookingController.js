@@ -129,7 +129,6 @@ async function createBooking(req, res) {
       scheduled_at,
       timezone = 'Africa/Lagos',
       location_type = 'in_person',
-      meeting_link,
       staff_name,
       notes
     } = req.body;
@@ -252,7 +251,7 @@ async function createBooking(req, res) {
       duration_minutes: duration,
       timezone,
       location_type: location_type || service.location_type,
-      meeting_link: meeting_link || null,
+      meeting_link: null, // Not used - focusing on in-person services only
       staff_name: staff_name || null,
       status: 'pending',
       notes: notes || null

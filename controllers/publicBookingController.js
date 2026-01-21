@@ -169,7 +169,6 @@ async function createPublicBooking(req, res) {
       scheduled_at,
       timezone = 'Africa/Lagos',
       location_type = 'in_person',
-      meeting_link,
       staff_name,
       notes,
       payment_transaction_id, // Payment transaction ID (required for paid services)
@@ -201,6 +200,9 @@ async function createPublicBooking(req, res) {
 
     const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
+
+    // Determine if free plan (needed for tenant_id filtering)
+    const isFreePlan = tenant.subscription_plan === 'free';
 
     // Determine final store_id (for free users, store_id may not be provided)
     let finalStoreId = store_id;
@@ -246,35 +248,65 @@ async function createPublicBooking(req, res) {
 
     const servicePrice = parseFloat(service.price || 0);
 
-    // Only online store bookings require payment
-    if (isOnlineStoreBooking && servicePrice > 0) {
-      // Online store booking requires payment - verify payment was made
-      if (!payment_transaction_id && !payment_reference) {
-        return res.status(400).json({
-          success: false,
-          message: 'Payment is required for online store bookings. Please initialize payment first and provide payment_transaction_id or payment_reference.'
+    // Check if booking already exists from verifyPayment (automatic creation)
+    // This prevents duplicate bookings when verifyPayment already created it
+    if (payment_transaction_id || payment_reference) {
+      let paymentTransaction = null;
+      
+      if (payment_transaction_id) {
+        paymentTransaction = await models.PaymentTransaction.findByPk(payment_transaction_id);
+      } else if (payment_reference) {
+        paymentTransaction = await models.PaymentTransaction.findOne({
+          where: { transaction_reference: payment_reference }
         });
       }
 
-      // Verify payment transaction exists and is successful
-      if (payment_transaction_id) {
-        const paymentTransaction = await models.PaymentTransaction.findByPk(payment_transaction_id);
-        if (!paymentTransaction || paymentTransaction.status !== 'success') {
-          return res.status(400).json({
-            success: false,
-            message: 'Invalid or unsuccessful payment transaction. Please complete payment first.'
-          });
+      if (paymentTransaction) {
+        // Check if booking already exists for this payment transaction
+        const existingBookingWhere = {
+          payment_transaction_id: paymentTransaction.id
+        };
+        if (isFreePlan) {
+          existingBookingWhere.tenant_id = tenant_id;
         }
-      } else if (payment_reference) {
-        const paymentTransaction = await models.PaymentTransaction.findOne({
-          where: { transaction_reference: payment_reference }
+
+        const existingBooking = await models.Booking.findOne({
+          where: existingBookingWhere,
+          include: [
+            { model: models.Store, attributes: ['id', 'name'] },
+            { model: models.StoreService, attributes: ['id', 'service_title'] }
+          ]
         });
-        if (!paymentTransaction || paymentTransaction.status !== 'success') {
-          return res.status(400).json({
-            success: false,
-            message: 'Invalid or unsuccessful payment. Please complete payment first.'
+
+        if (existingBooking) {
+          // Booking already created by verifyPayment - return it
+          return res.json({
+            success: true,
+            message: 'Booking already exists (created automatically during payment verification)',
+            data: { booking: existingBooking },
+            already_exists: true
           });
         }
+
+        // Payment exists but booking doesn't - verify payment was successful
+        if (paymentTransaction.status !== 'success') {
+          return res.status(400).json({
+            success: false,
+            message: 'Payment transaction is not successful. Please complete payment first.'
+          });
+        }
+      }
+    }
+
+    // Only online store bookings require payment
+    if (isOnlineStoreBooking && servicePrice > 0) {
+      // For paid bookings, verifyPayment should have created the booking automatically
+      // This endpoint is mainly for free bookings or fallback cases
+      if (!payment_transaction_id && !payment_reference) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment is required for paid online store bookings. Please use the payment verification flow (verifyPayment endpoint) which automatically creates bookings. This endpoint is primarily for free bookings (price = 0).'
+        });
       }
     }
 
@@ -315,7 +347,6 @@ async function createPublicBooking(req, res) {
       customer = await models.Customer.findOne({ where: { phone: customer_phone } });
     }
 
-    const isFreePlan = tenant.subscription_plan === 'free';
     const orderTenantId = isFreePlan ? tenant_id : null;
 
     if (!customer && customer_name) {
@@ -346,7 +377,7 @@ async function createPublicBooking(req, res) {
       duration_minutes: duration,
       timezone,
       location_type: location_type || service.location_type,
-      meeting_link: meeting_link || null,
+      meeting_link: null, // Not used - focusing on in-person services only
       staff_name: staff_name || null,
       status: (isOnlineStoreBooking && servicePrice > 0) ? 'confirmed' : 'pending', // Auto-confirm if online store booking with payment
       payment_transaction_id: (isOnlineStoreBooking && servicePrice > 0) ? (payment_transaction_id || null) : null,

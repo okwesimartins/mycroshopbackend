@@ -11,6 +11,7 @@ const initModels = require('../models');
 async function initializePayment(req, res) {
   try {
     const {
+      tenant_id, // Required for public endpoint
       order_id,
       invoice_id,
       amount,
@@ -28,13 +29,46 @@ async function initializePayment(req, res) {
       });
     }
 
+    if (!tenant_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id is required in request body'
+      });
+    }
+
+    // Parse tenant_id as integer
+    const parsedTenantId = parseInt(tenant_id, 10);
+    if (isNaN(parsedTenantId) || parsedTenantId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant_id provided'
+      });
+    }
+
+    // Get tenant database connection (public endpoint - no authentication required)
+    const tenant = await getTenantById(parsedTenantId);
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Store not found'
+      });
+    }
+
+    const sequelize = await getTenantConnection(parsedTenantId, tenant.subscription_plan || 'enterprise');
+    const models = initModels(sequelize);
+    const isFreePlan = tenant.subscription_plan === 'free';
+
     // Get default payment gateway
-    const gateway = await req.db.models.PaymentGateway.findOne({
-      where: {
-        tenant_id: req.user.tenantId,
-        is_active: true,
-        is_default: true
-      }
+    const gatewayWhere = {
+      is_active: true,
+      is_default: true
+    };
+    if (isFreePlan) {
+      gatewayWhere.tenant_id = parsedTenantId;
+    }
+
+    const gateway = await models.PaymentGateway.findOne({
+      where: gatewayWhere
     });
 
     if (!gateway) {
@@ -43,9 +77,6 @@ async function initializePayment(req, res) {
         message: 'No active payment gateway configured. Please configure a payment gateway first.'
       });
     }
-
-    // Get tenant to check subscription plan and transaction fee
-    const tenant = await getTenantById(req.user.tenantId);
     const transactionFeePercentage = tenant.subscription_plan === 'free' 
       ? parseFloat(tenant.transaction_fee_percentage || 3.00)
       : 0.00;
@@ -59,9 +90,18 @@ async function initializePayment(req, res) {
     let onlineStore = null;
     let splitOptions = null;
     if (order_id) {
-      const order = await req.db.models.OnlineStoreOrder.findByPk(order_id);
+      const orderWhere = { id: order_id };
+      if (isFreePlan) {
+        orderWhere.tenant_id = parsedTenantId;
+      }
+      const order = await models.OnlineStoreOrder.findOne({ where: orderWhere });
       if (order && order.online_store_id) {
-        onlineStore = await req.db.models.OnlineStore.findByPk(order.online_store_id);
+        // Lookup online store with tenant_id filter for free users
+        const onlineStoreWhere = { id: order.online_store_id };
+        if (isFreePlan) {
+          onlineStoreWhere.tenant_id = parsedTenantId;
+        }
+        onlineStore = await models.OnlineStore.findOne({ where: onlineStoreWhere });
         
         // If online store has Paystack subaccount configured, use split payment
         if (onlineStore && onlineStore.paystack_subaccount_code && platformFee > 0) {
@@ -87,8 +127,8 @@ async function initializePayment(req, res) {
     const transactionReference = `TXN-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
     // Create payment transaction record
-    const paymentTransaction = await req.db.models.PaymentTransaction.create({
-      tenant_id: req.user.tenantId,
+    const paymentTransaction = await models.PaymentTransaction.create({
+      tenant_id: isFreePlan ? parsedTenantId : null,
       order_id: order_id || null,
       invoice_id: invoice_id || null,
       transaction_reference: transactionReference,
@@ -109,7 +149,7 @@ async function initializePayment(req, res) {
     // Build metadata
     const paymentMetadata = {
       ...metadata,
-      tenant_id: req.user.tenantId,
+      tenant_id: parsedTenantId,
       transaction_id: paymentTransaction.id
     };
     
@@ -139,7 +179,7 @@ async function initializePayment(req, res) {
         },
         meta: {
           ...metadata,
-          tenant_id: req.user.tenantId,
+          tenant_id: parsedTenantId,
           transaction_id: paymentTransaction.id
         }
       }, secretKey, gateway.test_mode);
@@ -503,7 +543,7 @@ async function verifyPayment(req, res) {
                 scheduled_at: metadata.scheduled_at,
                 timezone: metadata.timezone || 'Africa/Lagos',
                 location_type: metadata.location_type || 'in_person',
-                meeting_link: metadata.meeting_link || null,
+                meeting_link: null, // Not used - focusing on in-person services only
                 staff_name: metadata.staff_name || null,
                 notes: metadata.notes || null,
                 status: 'confirmed', // Auto-confirm since payment is successful
@@ -1080,7 +1120,7 @@ async function handlePaymentWebhook(req, res) {
                 scheduled_at: metadata.scheduled_at,
                 timezone: metadata.timezone || 'Africa/Lagos',
                 location_type: metadata.location_type || 'in_person',
-                meeting_link: metadata.meeting_link || null,
+                meeting_link: null, // Not used - focusing on in-person services only
                 staff_name: metadata.staff_name || null,
                 notes: metadata.notes || null,
                 status: 'confirmed', // Auto-confirm since payment is successful

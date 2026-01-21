@@ -3,8 +3,8 @@ const router = express.Router();
 const paymentController = require('../controllers/paymentController');
 const { authenticate } = require('../middleware/auth');
 
-// Initialize payment (authenticated users)
-router.post('/initialize', authenticate, paymentController.initializePayment);
+// Initialize payment (public - for customers booking services or buying products)
+router.post('/initialize', paymentController.initializePayment);
 
 // Verify payment (public - called by payment gateway)
 router.get('/verify', paymentController.verifyPayment);
