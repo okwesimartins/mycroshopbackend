@@ -32,7 +32,7 @@ async function generateReceiptFromInvoice(req, res) {
         {
           model: req.db.models.Store,
           required: false,
-          attributes: ['id', 'name', 'address', 'city', 'state', 'country', 'phone', 'email', 'logo_url']
+          attributes: ['id', 'name', 'address', 'city', 'state', 'country', 'phone', 'email']
         },
         {
           model: req.db.models.Customer,
@@ -66,20 +66,13 @@ async function generateReceiptFromInvoice(req, res) {
     }
 
     // Get store info
+    // For free users, they don't have physical stores, so use tenant info or empty store
     const store = invoice.Store || {};
-    const logoUrl = store.logo_url || null;
-
-    // Extract colors from logo (optional, with timeout)
-    let brandColors = {};
-    if (logoUrl) {
-      try {
-        const colorPromise = extractColorsFromLogo(logoUrl);
-        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 5000));
-        brandColors = await Promise.race([colorPromise, timeoutPromise]) || {};
-    } catch (error) {
-        console.warn('Could not extract colors from logo, using defaults:', error.message);
-      }
-    }
+    
+    // Receipts shouldn't contain logos - use default brand colors
+    const brandColors = {
+      primary: '#2563EB'
+    };
 
     // Generate receipt number
     const receiptNumber = `RCP-${invoice.invoice_number.replace('INV-', '')}`;
@@ -108,11 +101,12 @@ async function generateReceiptFromInvoice(req, res) {
     };
 
     // Generate receipt HTML
+    // Receipts don't include logos - pass null for logoUrl
     const receiptHtml = generateReceiptTemplate({
       receipt: receiptData,
       store: store,
       items: invoiceItems,
-      logoUrl: logoUrl,
+      logoUrl: null, // Receipts don't contain logos
       colors: brandColors,
       digitalStamp: include_stamp ? {
         company_name: store.name || 'Business',
