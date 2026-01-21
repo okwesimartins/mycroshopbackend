@@ -56,10 +56,18 @@ async function getAllOrders(req, res) {
     ];
 
     // If start_date/end_date provided, filter by payment date (paid_at) from PaymentTransaction instead
+    // Interpret start_date/end_date as calendar days, not exact timestamps
     if (start_date || end_date) {
       const paymentDateWhere = {};
-      if (start_date) paymentDateWhere[Sequelize.Op.gte] = start_date;
-      if (end_date) paymentDateWhere[Sequelize.Op.lte] = end_date;
+
+      if (start_date) {
+        // Start of day (00:00:00)
+        paymentDateWhere[Sequelize.Op.gte] = new Date(`${start_date}T00:00:00.000Z`);
+      }
+      if (end_date) {
+        // End of day (23:59:59.999)
+        paymentDateWhere[Sequelize.Op.lte] = new Date(`${end_date}T23:59:59.999Z`);
+      }
 
       include.push({
         model: req.db.models.PaymentTransaction,
