@@ -18,10 +18,10 @@ async function getAvailableTimeSlots(req, res) {
   try {
     const { tenant_id, store_id, service_id, date } = req.query;
 
-    if (!tenant_id || !store_id || !service_id || !date) {
+    if (!tenant_id || !service_id || !date) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id, store_id, service_id, and date are required'
+        message: 'tenant_id, service_id, and date are required'
       });
     }
 
@@ -37,9 +37,30 @@ async function getAvailableTimeSlots(req, res) {
     const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
+    // Determine final store_id
+    let finalStoreId = store_id;
+
+    // For free users or when store_id is not provided, try to infer from OnlineStoreService
+    if (!finalStoreId) {
+      const onlineStoreService = await models.OnlineStoreService.findOne({
+        where: { service_id: service_id }
+      });
+
+      if (onlineStoreService && onlineStoreService.store_id) {
+        finalStoreId = onlineStoreService.store_id;
+      }
+    }
+
+    if (!finalStoreId) {
+      return res.status(400).json({
+        success: false,
+        message: 'store_id is required or could not be inferred for this service'
+      });
+    }
+
     // Get service details
     const service = await models.StoreService.findOne({
-      where: { id: service_id, store_id, is_active: true }
+      where: { id: service_id, store_id: finalStoreId, is_active: true }
     });
 
     if (!service) {
@@ -52,7 +73,7 @@ async function getAvailableTimeSlots(req, res) {
     // Get availability settings for this store/service
     const availability = await models.BookingAvailability.findAll({
       where: {
-        store_id,
+        store_id: finalStoreId,
         service_id: service_id,
         is_available: true
       }
@@ -64,7 +85,7 @@ async function getAvailableTimeSlots(req, res) {
 
     const existingBookings = await models.Booking.findAll({
       where: {
-        store_id,
+        store_id: finalStoreId,
         service_id,
         scheduled_at: {
           [Sequelize.Op.between]: [startOfDay.toDate(), endOfDay.toDate()]
@@ -155,10 +176,10 @@ async function createPublicBooking(req, res) {
       payment_reference // Payment reference from gateway (alternative to transaction_id)
     } = req.body;
 
-    if (!tenant_id || !store_id || !service_id || !scheduled_at) {
+    if (!tenant_id || !service_id || !scheduled_at) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id, store_id, service_id, and scheduled_at are required'
+        message: 'tenant_id, service_id, and scheduled_at are required'
       });
     }
 
@@ -181,8 +202,30 @@ async function createPublicBooking(req, res) {
     const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
+    // Determine final store_id (for free users, store_id may not be provided)
+    let finalStoreId = store_id;
+
+    // Check if this is an online store booking (only online store bookings require payment)
+    const onlineStoreService = await models.OnlineStoreService.findOne({
+      where: { service_id: service_id }
+    });
+
+    const isOnlineStoreBooking = !!onlineStoreService;
+
+    // If store_id is not provided (common for free users), try to infer from OnlineStoreService
+    if (!finalStoreId && onlineStoreService && onlineStoreService.store_id) {
+      finalStoreId = onlineStoreService.store_id;
+    }
+
+    if (!finalStoreId) {
+      return res.status(400).json({
+        success: false,
+        message: 'store_id is required or could not be inferred for this service'
+      });
+    }
+
     // Verify store exists
-    const store = await models.Store.findByPk(store_id);
+    const store = await models.Store.findByPk(finalStoreId);
     if (!store) {
       return res.status(404).json({
         success: false,
@@ -192,7 +235,7 @@ async function createPublicBooking(req, res) {
 
     // Verify service exists and belongs to store
     const service = await models.StoreService.findOne({
-      where: { id: service_id, store_id, is_active: true }
+      where: { id: service_id, store_id: finalStoreId, is_active: true }
     });
     if (!service) {
       return res.status(404).json({
@@ -201,13 +244,7 @@ async function createPublicBooking(req, res) {
       });
     }
 
-    // Check if this is an online store booking (only online store bookings require payment)
-    const onlineStoreService = await models.OnlineStoreService.findOne({
-      where: { service_id: service_id }
-    });
-
     const servicePrice = parseFloat(service.price || 0);
-    const isOnlineStoreBooking = !!onlineStoreService;
 
     // Only online store bookings require payment
     if (isOnlineStoreBooking && servicePrice > 0) {
@@ -249,7 +286,7 @@ async function createPublicBooking(req, res) {
     // Check for overlapping bookings
     const conflictingBooking = await models.Booking.findOne({
       where: {
-        store_id,
+        store_id: finalStoreId,
         service_id,
         scheduled_at: {
           [Sequelize.Op.between]: [startTime.toDate(), endTime.toDate()]
@@ -297,7 +334,7 @@ async function createPublicBooking(req, res) {
     // Create booking
     const booking = await models.Booking.create({
       tenant_id: orderTenantId,
-      store_id,
+      store_id: finalStoreId,
       service_id,
       customer_id: finalCustomerId,
       customer_name: customer_name || null,

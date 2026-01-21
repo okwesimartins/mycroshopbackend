@@ -452,6 +452,156 @@ async function verifyPayment(req, res) {
           { where: invoiceWhere, transaction: dbTransaction }
         );
       }
+
+      // Handle booking creation if payment is for a service booking
+      // Check metadata for booking information (from transaction gateway_response or metadata field)
+      let bookingCreated = false;
+      if (newStatus === 'success') {
+        // Get metadata from transaction's gateway_response or from transaction metadata field
+        let metadata = {};
+        try {
+          const gatewayResponse = currentTransaction.gateway_response || {};
+          if (gatewayResponse.metadata) {
+            metadata = typeof gatewayResponse.metadata === 'string' 
+              ? JSON.parse(gatewayResponse.metadata) 
+              : gatewayResponse.metadata;
+          } else if (currentTransaction.metadata) {
+            metadata = typeof currentTransaction.metadata === 'string'
+              ? JSON.parse(currentTransaction.metadata)
+              : currentTransaction.metadata;
+          }
+        } catch (parseError) {
+          console.warn('Could not parse metadata:', parseError);
+        }
+        
+        const isBookingPayment = metadata.is_booking === true || metadata.booking_type === 'service';
+        
+        if (isBookingPayment && metadata.service_id && metadata.store_id && metadata.scheduled_at) {
+          try {
+            // Check if booking already exists for this transaction
+            const existingBookingWhere = {
+              payment_transaction_id: currentTransaction.id
+            };
+            if (isFreePlan && currentTransaction.tenant_id) {
+              existingBookingWhere.tenant_id = currentTransaction.tenant_id;
+            }
+            
+            const existingBooking = await models.Booking.findOne({
+              where: existingBookingWhere,
+              transaction: dbTransaction
+            });
+
+            if (!existingBooking) {
+              // Create booking automatically after successful payment
+              const bookingData = {
+                tenant_id: isFreePlan ? currentTransaction.tenant_id : null,
+                store_id: metadata.store_id,
+                service_id: metadata.service_id,
+                customer_name: currentTransaction.customer_name || metadata.customer_name,
+                customer_email: currentTransaction.customer_email || metadata.customer_email,
+                customer_phone: metadata.customer_phone || null,
+                scheduled_at: metadata.scheduled_at,
+                timezone: metadata.timezone || 'Africa/Lagos',
+                location_type: metadata.location_type || 'in_person',
+                meeting_link: metadata.meeting_link || null,
+                staff_name: metadata.staff_name || null,
+                notes: metadata.notes || null,
+                status: 'confirmed', // Auto-confirm since payment is successful
+                payment_transaction_id: currentTransaction.id
+              };
+
+              // Get or create customer if email provided
+              if (bookingData.customer_email) {
+                const customerWhere = { email: bookingData.customer_email };
+                if (isFreePlan && currentTransaction.tenant_id) {
+                  customerWhere.tenant_id = currentTransaction.tenant_id;
+                }
+                
+                let customer = await models.Customer.findOne({
+                  where: customerWhere,
+                  transaction: dbTransaction
+                });
+
+                if (!customer && bookingData.customer_phone) {
+                  const customerPhoneWhere = { phone: bookingData.customer_phone };
+                  if (isFreePlan && currentTransaction.tenant_id) {
+                    customerPhoneWhere.tenant_id = currentTransaction.tenant_id;
+                  }
+                  customer = await models.Customer.findOne({
+                    where: customerPhoneWhere,
+                    transaction: dbTransaction
+                  });
+                }
+
+                if (!customer && bookingData.customer_name) {
+                  customer = await models.Customer.create({
+                    tenant_id: isFreePlan ? currentTransaction.tenant_id : null,
+                    name: bookingData.customer_name,
+                    email: bookingData.customer_email,
+                    phone: bookingData.customer_phone
+                  }, { transaction: dbTransaction });
+                }
+
+                if (customer) {
+                  bookingData.customer_id = customer.id;
+                }
+              }
+
+              // Get service details
+              const service = await models.StoreService.findOne({
+                where: { id: metadata.service_id, store_id: metadata.store_id },
+                transaction: dbTransaction
+              });
+
+              if (service) {
+                bookingData.service_title = service.service_title;
+                bookingData.description = service.description;
+                bookingData.duration_minutes = service.duration_minutes || 60;
+              }
+
+              const booking = await models.Booking.create(bookingData, { transaction: dbTransaction });
+              bookingCreated = true;
+              
+              console.log(`✅ Booking created automatically after payment verification: ${booking.id}`);
+              
+              // Send booking confirmation email
+              if (bookingData.customer_email) {
+                const tenantForEmail = await getTenantById(parsedTenantId);
+                if (tenantForEmail) {
+                  // Commit transaction before sending email
+                  await dbTransaction.commit();
+                  emailSent = true;
+                  
+                  try {
+                    const { sendBookingConfirmationEmail } = require('../services/emailService');
+                    const completeBooking = await models.Booking.findByPk(booking.id, {
+                      include: [
+                        { model: models.Store },
+                        { model: models.StoreService },
+                        { model: models.Customer, required: false }
+                      ]
+                    });
+                    
+                    if (completeBooking) {
+                      await sendBookingConfirmationEmail({
+                        tenant: tenantForEmail,
+                        booking: completeBooking,
+                        customerEmail: bookingData.customer_email,
+                        customerName: bookingData.customer_name
+                      });
+                    }
+                  } catch (emailError) {
+                    console.error('Error sending booking confirmation email:', emailError);
+                  }
+                }
+              }
+            }
+          } catch (bookingError) {
+            console.error('Error creating booking from payment verification:', bookingError);
+            // Don't fail payment verification if booking creation fails
+          }
+        }
+      }
       
       // Commit transaction if not already committed (email was sent)
       if (!emailSent) {
@@ -459,19 +609,45 @@ async function verifyPayment(req, res) {
       }
       
       // Return success response
+      const responseData = {
+        transaction: {
+          id: currentTransaction.id,
+          reference: currentTransaction.transaction_reference,
+          status: newStatus,
+          amount: currentTransaction.amount,
+          platform_fee: currentTransaction.platform_fee,
+          merchant_amount: currentTransaction.merchant_amount
+        }
+      };
+
+      // Include booking info if booking was created
+      if (bookingCreated) {
+        const bookingWhere = { payment_transaction_id: currentTransaction.id };
+        if (isFreePlan && currentTransaction.tenant_id) {
+          bookingWhere.tenant_id = currentTransaction.tenant_id;
+        }
+        const createdBooking = await models.Booking.findOne({
+          where: bookingWhere,
+          include: [
+            { model: models.Store, attributes: ['id', 'name'] },
+            { model: models.StoreService, attributes: ['id', 'service_title'] }
+          ]
+        });
+        if (createdBooking) {
+          responseData.booking = {
+            id: createdBooking.id,
+            booking_number: createdBooking.booking_number,
+            status: createdBooking.status,
+            scheduled_at: createdBooking.scheduled_at
+          };
+          responseData.booking_created = true;
+        }
+      }
+
       return res.json({
         success: newStatus === 'success',
         message: verificationResult.message,
-        data: {
-          transaction: {
-            id: currentTransaction.id,
-            reference: currentTransaction.transaction_reference,
-            status: newStatus,
-            amount: currentTransaction.amount,
-            platform_fee: currentTransaction.platform_fee,
-            merchant_amount: currentTransaction.merchant_amount
-          }
-        }
+        data: responseData
       });
     } catch (dbError) {
       if (!dbTransaction.finished) {
@@ -873,6 +1049,120 @@ async function handlePaymentWebhook(req, res) {
           },
           { where: invoiceWhere }
         );
+      }
+
+      // Handle booking creation if payment is for a service booking
+      // This handles cases where verifyPayment failed due to network issues
+      if (metadata.is_booking === true || metadata.booking_type === 'service') {
+        try {
+          if (metadata.service_id && metadata.store_id && metadata.scheduled_at) {
+            // Check if booking already exists for this transaction
+            const existingBookingWhere = {
+              payment_transaction_id: transaction.id
+            };
+            if (isFreePlan && transaction.tenant_id) {
+              existingBookingWhere.tenant_id = transaction.tenant_id;
+            }
+            
+            const existingBooking = await models.Booking.findOne({
+              where: existingBookingWhere
+            });
+
+            if (!existingBooking) {
+              // Create booking automatically after successful payment
+              const bookingData = {
+                tenant_id: isFreePlan ? transaction.tenant_id : null,
+                store_id: metadata.store_id,
+                service_id: metadata.service_id,
+                customer_name: transaction.customer_name || metadata.customer_name,
+                customer_email: transaction.customer_email || metadata.customer_email,
+                customer_phone: metadata.customer_phone || null,
+                scheduled_at: metadata.scheduled_at,
+                timezone: metadata.timezone || 'Africa/Lagos',
+                location_type: metadata.location_type || 'in_person',
+                meeting_link: metadata.meeting_link || null,
+                staff_name: metadata.staff_name || null,
+                notes: metadata.notes || null,
+                status: 'confirmed', // Auto-confirm since payment is successful
+                payment_transaction_id: transaction.id
+              };
+
+              // Get or create customer if email provided
+              if (bookingData.customer_email) {
+                const customerWhere = { email: bookingData.customer_email };
+                if (isFreePlan && transaction.tenant_id) {
+                  customerWhere.tenant_id = transaction.tenant_id;
+                }
+                
+                let customer = await models.Customer.findOne({ where: customerWhere });
+
+                if (!customer && bookingData.customer_phone) {
+                  const customerPhoneWhere = { phone: bookingData.customer_phone };
+                  if (isFreePlan && transaction.tenant_id) {
+                    customerPhoneWhere.tenant_id = transaction.tenant_id;
+                  }
+                  customer = await models.Customer.findOne({ where: customerPhoneWhere });
+                }
+
+                if (!customer && bookingData.customer_name) {
+                  customer = await models.Customer.create({
+                    tenant_id: isFreePlan ? transaction.tenant_id : null,
+                    name: bookingData.customer_name,
+                    email: bookingData.customer_email,
+                    phone: bookingData.customer_phone
+                  });
+                }
+
+                if (customer) {
+                  bookingData.customer_id = customer.id;
+                }
+              }
+
+              // Get service details
+              const service = await models.StoreService.findOne({
+                where: { id: metadata.service_id, store_id: metadata.store_id }
+              });
+
+              if (service) {
+                bookingData.service_title = service.service_title;
+                bookingData.description = service.description;
+                bookingData.duration_minutes = service.duration_minutes || 60;
+              }
+
+              const booking = await models.Booking.create(bookingData);
+              
+              console.log(`✅ Booking created automatically from webhook: ${booking.id}`);
+              
+              // Send booking confirmation email
+              if (bookingData.customer_email && tenant) {
+                try {
+                  const { sendBookingConfirmationEmail } = require('../services/emailService');
+                  const completeBooking = await models.Booking.findByPk(booking.id, {
+                    include: [
+                      { model: models.Store },
+                      { model: models.StoreService },
+                      { model: models.Customer, required: false }
+                    ]
+                  });
+                  
+                  if (completeBooking) {
+                    await sendBookingConfirmationEmail({
+                      tenant: tenant,
+                      booking: completeBooking,
+                      customerEmail: bookingData.customer_email,
+                      customerName: bookingData.customer_name
+                    });
+                  }
+                } catch (emailError) {
+                  console.error('Error sending booking confirmation email from webhook:', emailError);
+                }
+              }
+            }
+          }
+        } catch (bookingError) {
+          console.error('Error creating booking from webhook:', bookingError);
+          // Don't fail webhook processing if booking creation fails
+        }
       }
 
       console.log(`✅ Payment webhook processed: Transaction ${transaction.id} marked as success`);

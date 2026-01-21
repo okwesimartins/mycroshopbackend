@@ -79,9 +79,15 @@ async function getAllOrders(req, res) {
     });
   } catch (error) {
     console.error('Error getting orders:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to get orders'
+      message: 'Failed to get orders',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      errorDetails: process.env.NODE_ENV === 'development' ? {
+        stack: error.stack,
+        name: error.name
+      } : undefined
     });
   }
 }
