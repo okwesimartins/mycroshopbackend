@@ -149,6 +149,15 @@ async function generateReceiptFromInvoice(req, res) {
 
       pdfUrl = normalizePath(pdfPath);
       previewUrl = normalizePath(previewPath);
+      
+      // Convert relative paths to full URLs
+      const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
+      if (pdfUrl && !pdfUrl.startsWith('http')) {
+        pdfUrl = `${baseUrl}${pdfUrl}`;
+      }
+      if (previewUrl && !previewUrl.startsWith('http')) {
+        previewUrl = `${baseUrl}${previewUrl}`;
+      }
     } catch (pdfError) {
       console.error('Error generating PDF/preview for receipt:', pdfError);
       // Continue without PDF - ESC/POS will still work
