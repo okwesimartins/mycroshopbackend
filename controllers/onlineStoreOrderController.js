@@ -33,33 +33,55 @@ async function getAllOrders(req, res) {
     if (payment_status) {
       where.payment_status = payment_status;
     }
+
+    // Build includes
+    const include = [
+      {
+        model: req.db.models.OnlineStore,
+        attributes: ['id', 'username', 'store_name']
+      },
+      {
+        model: req.db.models.Store,
+        attributes: ['id', 'name', 'store_type', 'address', 'city', 'state']
+      },
+      {
+        model: req.db.models.OnlineStoreOrderItem,
+        include: [
+          {
+            model: req.db.models.Product,
+            attributes: ['id', 'name', 'sku']
+          }
+        ]
+      }
+    ];
+
+    // If start_date/end_date provided, filter by payment date (paid_at) from PaymentTransaction instead
     if (start_date || end_date) {
-      where.created_at = {};
-      if (start_date) where.created_at[Sequelize.Op.gte] = start_date;
-      if (end_date) where.created_at[Sequelize.Op.lte] = end_date;
+      const paymentDateWhere = {};
+      if (start_date) paymentDateWhere[Sequelize.Op.gte] = start_date;
+      if (end_date) paymentDateWhere[Sequelize.Op.lte] = end_date;
+
+      include.push({
+        model: req.db.models.PaymentTransaction,
+        attributes: ['id', 'status', 'paid_at'],
+        required: true, // only orders with matching payment in this range
+        where: {
+          status: 'success',
+          paid_at: paymentDateWhere
+        }
+      });
+    } else {
+      // Optional include of payment info without filtering
+      include.push({
+        model: req.db.models.PaymentTransaction,
+        attributes: ['id', 'status', 'paid_at'],
+        required: false
+      });
     }
 
     const { count, rows } = await req.db.models.OnlineStoreOrder.findAndCountAll({
       where,
-      include: [
-        {
-          model: req.db.models.OnlineStore,
-          attributes: ['id', 'username', 'store_name']
-        },
-        {
-          model: req.db.models.Store,
-          attributes: ['id', 'name', 'store_type', 'address', 'city', 'state']
-        },
-        {
-          model: req.db.models.OnlineStoreOrderItem,
-          include: [
-            {
-              model: req.db.models.Product,
-              attributes: ['id', 'name', 'sku']
-            }
-          ]
-        }
-      ],
+      include,
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [['created_at', 'DESC']]

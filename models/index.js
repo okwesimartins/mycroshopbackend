@@ -1556,6 +1556,11 @@ function initializeModels(sequelize) {
       primaryKey: true,
       autoIncrement: true
     },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
+      comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+    },
     online_store_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
@@ -3032,9 +3037,16 @@ function initializeModels(sequelize) {
     updatedAt: 'updated_at'
   });
 
-    // Payment associations (these are the last associations after PaymentTransaction model)
+  // Payment associations (these are the last associations after PaymentTransaction model)
   PaymentTransaction.belongsTo(OnlineStoreOrder, { foreignKey: 'order_id' });
   PaymentTransaction.belongsTo(Invoice, { foreignKey: 'invoice_id' });
+  // Allow including transactions from orders/invoices
+  if (typeof OnlineStoreOrder !== 'undefined') {
+    OnlineStoreOrder.hasMany(PaymentTransaction, { foreignKey: 'order_id' });
+  }
+  if (typeof Invoice !== 'undefined') {
+    Invoice.hasMany(PaymentTransaction, { foreignKey: 'invoice_id' });
+  }
 
     // Verify Invoice model is defined before returning
     console.log('Checking Invoice model before return...');
