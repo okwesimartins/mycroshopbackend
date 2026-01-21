@@ -127,6 +127,10 @@ async function getAllOrders(req, res) {
  */
 async function getOrderById(req, res) {
   try {
+    // Get tenant info to determine if free or enterprise
+    const tenant = req.tenant || req.user?.tenant;
+    const isFreePlan = tenant?.subscription_plan === 'free';
+
     const order = await req.db.models.OnlineStoreOrder.findByPk(req.params.id, {
       include: [
         {
@@ -135,15 +139,25 @@ async function getOrderById(req, res) {
         },
         {
           model: req.db.models.Store,
-          attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'phone', 'email']
+          attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'phone', 'email'],
+          required: false // Optional - free users may not have stores
         },
         {
           model: req.db.models.OnlineStoreOrderItem,
           include: [
             {
-              model: req.db.models.Product
+              model: req.db.models.Product,
+              attributes: ['id', 'name', 'sku', 'description', 'image_url', 'price', 'category'], // Only include fields that exist
+              required: false, // Product might be deleted
+              // Don't include Store association from Product to avoid store_id column issue
+              include: []
             }
           ]
+        },
+        {
+          model: req.db.models.PaymentTransaction,
+          attributes: ['id', 'transaction_reference', 'status', 'amount', 'paid_at', 'gateway_name'],
+          required: false // Payment might not exist yet
         }
       ]
     });
