@@ -161,9 +161,15 @@ async function getOrderById(req, res) {
     });
   } catch (error) {
     console.error('Error getting order:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to get order'
+      message: 'Failed to get order',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      errorDetails: process.env.NODE_ENV === 'development' ? {
+        stack: error.stack,
+        name: error.name
+      } : undefined
     });
   }
 }
