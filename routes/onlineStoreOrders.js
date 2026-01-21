@@ -2,9 +2,13 @@ const express = require('express');
 const router = express.Router();
 const orderController = require('../controllers/onlineStoreOrderController');
 const { authenticate, authorize } = require('../middleware/auth');
+const { attachTenantDb } = require('../middleware/tenant');
+const { initializeTenantModels } = require('../middleware/models');
 
-// All routes require authentication
+// All routes require authentication and tenant DB/models
 router.use(authenticate);
+router.use(attachTenantDb);
+router.use(initializeTenantModels);
 
 // Get all orders
 router.get('/', orderController.getAllOrders);
