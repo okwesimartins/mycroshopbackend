@@ -65,6 +65,74 @@ async function generateReceiptFromInvoice(req, res) {
       });
     }
 
+    // Generate receipt number
+    const receiptNumber = `RCP-${invoice.invoice_number.replace('INV-', '')}`;
+
+    // Check if receipt already exists for this invoice (duplicate prevention)
+    let existingReceipt = null;
+    try {
+      const [tables] = await req.db.query(`
+        SELECT TABLE_NAME 
+        FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'receipts'
+      `);
+
+      if (tables && tables.length > 0) {
+        const existingReceiptQuery = isFreePlan && tenantId
+          ? `SELECT * FROM receipts WHERE tenant_id = ? AND invoice_id = ? ORDER BY id DESC LIMIT 1`
+          : `SELECT * FROM receipts WHERE invoice_id = ? ORDER BY id DESC LIMIT 1`;
+
+        const [existingReceipts] = await req.db.query(existingReceiptQuery, {
+          replacements: isFreePlan && tenantId ? [tenantId, invoice.id] : [invoice.id]
+        });
+
+        if (existingReceipts && existingReceipts.length > 0) {
+          existingReceipt = existingReceipts[0];
+        }
+      }
+    } catch (checkError) {
+      console.warn('Could not check for existing receipt:', checkError.message);
+      // Continue - will generate new receipt
+    }
+
+    // If receipt already exists, return it instead of generating a new one
+    if (existingReceipt) {
+      // Ensure URLs have base URL prefix
+      const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
+      let existingPreviewUrl = existingReceipt.preview_url || null;
+      let existingPdfUrl = existingReceipt.pdf_url || null;
+      
+      if (existingPreviewUrl && !existingPreviewUrl.startsWith('http')) {
+        existingPreviewUrl = `${baseUrl}${existingPreviewUrl}`;
+      }
+      if (existingPdfUrl && !existingPdfUrl.startsWith('http')) {
+        existingPdfUrl = `${baseUrl}${existingPdfUrl}`;
+      }
+
+      return res.json({
+        success: true,
+        message: 'Receipt already exists for this invoice',
+        data: {
+          receipt: {
+            id: existingReceipt.id,
+            receipt_number: existingReceipt.receipt_number,
+            invoice_id: existingReceipt.invoice_id,
+            transaction_date: invoice.issue_date || new Date().toISOString().split('T')[0],
+            transaction_time: new Date().toLocaleTimeString(),
+            total: Number(invoice.total || 0),
+            currency: invoice.currency || 'NGN',
+            payment_method: invoice.payment_method || 'Cash'
+          },
+          preview_url: existingPreviewUrl,
+          pdf_url: existingPdfUrl,
+          esc_pos_commands: existingReceipt.esc_pos_commands || null,
+          esc_pos_commands_length: existingReceipt.esc_pos_commands ? Buffer.from(existingReceipt.esc_pos_commands, 'base64').length : 0,
+          already_exists: true
+        }
+      });
+    }
+
     // Get store info
     // For free users, they don't have physical stores, so use tenant info or empty store
     const store = invoice.Store || {};
@@ -73,9 +141,6 @@ async function generateReceiptFromInvoice(req, res) {
     const brandColors = {
       primary: '#2563EB'
     };
-
-    // Generate receipt number
-    const receiptNumber = `RCP-${invoice.invoice_number.replace('INV-', '')}`;
 
     // Prepare receipt data
     const receiptData = {
