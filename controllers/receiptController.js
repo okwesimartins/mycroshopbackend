@@ -662,6 +662,18 @@ async function getReceiptById(req, res) {
 
     const receipt = receipts[0];
 
+    // Add base URL to preview_url and pdf_url if they exist
+    const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
+    let previewUrl = receipt.preview_url || null;
+    let pdfUrl = receipt.pdf_url || null;
+    
+    if (previewUrl && !previewUrl.startsWith('http')) {
+      previewUrl = `${baseUrl}${previewUrl}`;
+    }
+    if (pdfUrl && !pdfUrl.startsWith('http')) {
+      pdfUrl = `${baseUrl}${pdfUrl}`;
+    }
+
     return res.json({
       success: true,
       data: {
@@ -669,8 +681,8 @@ async function getReceiptById(req, res) {
           id: receipt.id,
           receipt_number: receipt.receipt_number,
           invoice_id: receipt.invoice_id,
-          preview_url: receipt.preview_url,
-          pdf_url: receipt.pdf_url,
+          preview_url: previewUrl,
+          pdf_url: pdfUrl,
           esc_pos_commands: receipt.esc_pos_commands,
           created_at: receipt.created_at
         }
@@ -709,6 +721,14 @@ async function getReceiptsByInvoice(req, res) {
       replacements: isFreePlan && tenantId ? [id, tenantId] : [id]
     });
 
+    // Add base URL to preview_url and pdf_url for each receipt
+    const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
+    const normalizeUrl = (url) => {
+      if (!url) return null;
+      if (url.startsWith('http')) return url;
+      return `${baseUrl}${url}`;
+    };
+
     return res.json({
       success: true,
       data: {
@@ -716,8 +736,8 @@ async function getReceiptsByInvoice(req, res) {
           id: r.id,
           receipt_number: r.receipt_number,
           invoice_id: r.invoice_id,
-          preview_url: r.preview_url,
-          pdf_url: r.pdf_url,
+          preview_url: normalizeUrl(r.preview_url),
+          pdf_url: normalizeUrl(r.pdf_url),
           created_at: r.created_at
         })),
         count: receipts.length
