@@ -153,110 +153,172 @@ async function initializePayment(req, res) {
       // Get the date for availability check
       const bookingDate = requestedTime.format('YYYY-MM-DD');
       const dayOfWeek = requestedTime.day(); // 0 = Sunday, 1 = Monday, etc.
+      const dayName = requestedTime.format('dddd').toLowerCase(); // "friday", "monday", etc.
 
-      // Get availability settings for this store/service for the specific day of week
-      // This ensures the customer cannot book a day that doesn't have availability configured
-      // For free users, store_id can be null
-      const availabilityWhere = {
-        service_id: service_id,
-        day_of_week: dayOfWeek,
-        is_available: true
-      };
-      
-      // Add tenant_id filter for free users
-      if (isFreePlan) {
-        availabilityWhere.tenant_id = parsedTenantId;
-      }
-      
-      // Add store_id filter only if we have one (for enterprise users or free users with stores)
-      if (finalStoreId) {
-        availabilityWhere.store_id = finalStoreId;
-      } else {
-        // For free users without stores, availability should not have store_id
-        availabilityWhere.store_id = null;
-      }
-      
-      const availability = await models.BookingAvailability.findAll({
-        where: availabilityWhere
-      });
-
-      // Validate that the day of week has availability configured
-      if (!availability || availability.length === 0) {
-        const dayName = requestedTime.format('dddd');
-        return res.status(400).json({
-          success: false,
-          message: `No availability configured for this service on ${dayName}. Please select a different day.`
-        });
-      }
-
-      // Check if requested time falls within any available time slot
-      const requestedTimeStr = requestedTime.format('HH:mm:ss');
-      let isWithinAvailableHours = false;
+      // Check availability from service's JSON availability field first
+      // Format: {"friday":{"available":true,"time_slots":["11:05"]}}
+      let serviceAvailability = null;
+      let dayAvailability = null;
       let matchingAvailability = null;
-
-      for (const avail of availability) {
-        const availStart = moment(avail.start_time, 'HH:mm:ss');
-        const availEnd = moment(avail.end_time, 'HH:mm:ss');
-        const requestedTimeOnly = moment(requestedTimeStr, 'HH:mm:ss');
-
-        if (requestedTimeOnly.isSameOrAfter(availStart) && requestedTimeOnly.isBefore(availEnd)) {
-          isWithinAvailableHours = true;
-          matchingAvailability = avail;
-          break;
+      
+      if (service.availability) {
+        try {
+          serviceAvailability = typeof service.availability === 'string' 
+            ? JSON.parse(service.availability) 
+            : service.availability;
+          
+          // Get availability for the requested day (lowercase day name)
+          dayAvailability = serviceAvailability[dayName];
+        } catch (parseError) {
+          console.warn('Could not parse service availability JSON:', parseError);
         }
       }
 
-      if (!isWithinAvailableHours) {
-        return res.status(400).json({
-          success: false,
-          message: `The requested time ${requestedTime.format('HH:mm')} is not within available hours for this service on ${requestedTime.format('dddd')}`
+      // If service has JSON availability, use it
+      if (dayAvailability && dayAvailability.available === true) {
+        // Validate that the requested time is in the time_slots
+        const requestedTimeStr = requestedTime.format('HH:mm');
+        const timeSlots = dayAvailability.time_slots || [];
+        
+        if (!timeSlots.includes(requestedTimeStr)) {
+          return res.status(400).json({
+            success: false,
+            message: `The requested time ${requestedTimeStr} is not available. Available time slots: ${timeSlots.join(', ')}`
+          });
+        }
+        
+        // Time slot is valid, create a mock availability object for duration validation
+        // Use the first and last time slots to determine the range
+        const sortedSlots = timeSlots.sort();
+        matchingAvailability = {
+          start_time: sortedSlots[0] + ':00',
+          end_time: sortedSlots[sortedSlots.length - 1] + ':00'
+        };
+      } else {
+        // Fallback to BookingAvailability table if JSON availability is not set
+        const availabilityWhere = {
+          service_id: service_id,
+          day_of_week: dayOfWeek,
+          is_available: true
+        };
+        
+        // Add tenant_id filter for free users
+        if (isFreePlan) {
+          availabilityWhere.tenant_id = parsedTenantId;
+        }
+        
+        // Add store_id filter only if we have one (for enterprise users or free users with stores)
+        if (finalStoreId) {
+          availabilityWhere.store_id = finalStoreId;
+        } else {
+          // For free users without stores, availability should not have store_id
+          availabilityWhere.store_id = null;
+        }
+        
+        const availability = await models.BookingAvailability.findAll({
+          where: availabilityWhere
         });
+
+        // Validate that the day of week has availability configured
+        if (!availability || availability.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: `No availability configured for this service on ${requestedTime.format('dddd')}. Please select a different day.`
+          });
+        }
+
+        // Check if requested time falls within any available time slot
+        const requestedTimeStr = requestedTime.format('HH:mm:ss');
+        let isWithinAvailableHours = false;
+
+        for (const avail of availability) {
+          const availStart = moment(avail.start_time, 'HH:mm:ss');
+          const availEnd = moment(avail.end_time, 'HH:mm:ss');
+          const requestedTimeOnly = moment(requestedTimeStr, 'HH:mm:ss');
+
+          if (requestedTimeOnly.isSameOrAfter(availStart) && requestedTimeOnly.isBefore(availEnd)) {
+            isWithinAvailableHours = true;
+            matchingAvailability = avail;
+            break;
+          }
+        }
+
+        if (!isWithinAvailableHours) {
+          return res.status(400).json({
+            success: false,
+            message: `The requested time ${requestedTime.format('HH:mm')} is not within available hours for this service on ${requestedTime.format('dddd')}`
+          });
+        }
       }
 
       // Check if the time slot aligns with service duration (must start at a valid slot)
       const duration = service.duration_minutes || 60;
-      const slotStart = moment(`${bookingDate} ${matchingAvailability.start_time}`, 'YYYY-MM-DD HH:mm:ss');
-      const slotEnd = moment(`${bookingDate} ${matchingAvailability.end_time}`, 'YYYY-MM-DD HH:mm:ss');
       
-      // Validate that the requested time is at a valid slot start (every duration minutes)
-      // Valid slots start at slotStart and increment by duration until slotEnd
-      // The requested time must exactly match one of these slot start times
-      let isValidSlot = false;
-      let currentSlot = moment(slotStart);
-      
-      // Generate all valid slot start times and check if requested time matches one
-      while (currentSlot.isBefore(slotEnd)) {
-        // Check if requested time exactly matches this slot start (within the same minute)
-        if (requestedTime.isSame(currentSlot, 'minute')) {
-          // Verify that there's enough time for the full duration from this slot
-          const slotEndTime = moment(currentSlot).add(duration, 'minutes');
-          if (slotEndTime.isBefore(slotEnd) || slotEndTime.isSame(slotEnd)) {
-            isValidSlot = true;
+      // If using JSON availability with specific time slots, the time slot validation is already done
+      // Just verify there's enough time for the duration
+      if (dayAvailability && dayAvailability.available === true) {
+        // For JSON availability, we already validated the time slot exists
+        // Just verify the booking won't exceed the day's availability
+        const requestedTimeStr = requestedTime.format('HH:mm');
+        const timeSlots = dayAvailability.time_slots || [];
+        const sortedSlots = timeSlots.sort();
+        const lastSlot = sortedSlots[sortedSlots.length - 1];
+        
+        // Check if the booking end time would exceed the last available slot
+        const bookingEndTime = moment(requestedTime).add(duration, 'minutes');
+        const lastSlotTime = moment(`${bookingDate} ${lastSlot}`, 'YYYY-MM-DD HH:mm');
+        
+        if (bookingEndTime.isAfter(lastSlotTime)) {
+          return res.status(400).json({
+            success: false,
+            message: `The booking duration (${duration} minutes) would exceed the available time slots. Please select an earlier time.`
+          });
+        }
+      } else {
+        // For BookingAvailability table, validate slot alignment
+        const slotStart = moment(`${bookingDate} ${matchingAvailability.start_time}`, 'YYYY-MM-DD HH:mm:ss');
+        const slotEnd = moment(`${bookingDate} ${matchingAvailability.end_time}`, 'YYYY-MM-DD HH:mm:ss');
+        
+        // Validate that the requested time is at a valid slot start (every duration minutes)
+        // Valid slots start at slotStart and increment by duration until slotEnd
+        // The requested time must exactly match one of these slot start times
+        let isValidSlot = false;
+        let currentSlot = moment(slotStart);
+        
+        // Generate all valid slot start times and check if requested time matches one
+        while (currentSlot.isBefore(slotEnd)) {
+          // Check if requested time exactly matches this slot start (within the same minute)
+          if (requestedTime.isSame(currentSlot, 'minute')) {
+            // Verify that there's enough time for the full duration from this slot
+            const slotEndTime = moment(currentSlot).add(duration, 'minutes');
+            if (slotEndTime.isBefore(slotEnd) || slotEndTime.isSame(slotEnd)) {
+              isValidSlot = true;
+              break;
+            }
+          }
+          
+          // Calculate next slot
+          const nextSlot = moment(currentSlot).add(duration, 'minutes');
+          
+          // If next slot would exceed slotEnd, stop (no more valid slots)
+          if (nextSlot.isAfter(slotEnd)) {
             break;
           }
+          
+          // If we've passed the requested time, no need to continue
+          if (nextSlot.isAfter(requestedTime)) {
+            break;
+          }
+          
+          currentSlot = nextSlot;
         }
-        
-        // Calculate next slot
-        const nextSlot = moment(currentSlot).add(duration, 'minutes');
-        
-        // If next slot would exceed slotEnd, stop (no more valid slots)
-        if (nextSlot.isAfter(slotEnd)) {
-          break;
-        }
-        
-        // If we've passed the requested time, no need to continue
-        if (nextSlot.isAfter(requestedTime)) {
-          break;
-        }
-        
-        currentSlot = nextSlot;
-      }
 
-      if (!isValidSlot) {
-        return res.status(400).json({
-          success: false,
-          message: `The requested time ${requestedTime.format('HH:mm')} is not a valid time slot. Time slots are available every ${duration} minutes starting from ${matchingAvailability.start_time} until ${matchingAvailability.end_time}.`
-        });
+        if (!isValidSlot) {
+          return res.status(400).json({
+            success: false,
+            message: `The requested time ${requestedTime.format('HH:mm')} is not a valid time slot. Time slots are available every ${duration} minutes starting from ${matchingAvailability.start_time} until ${matchingAvailability.end_time}.`
+          });
+        }
       }
 
       // Check for conflicts with existing bookings
