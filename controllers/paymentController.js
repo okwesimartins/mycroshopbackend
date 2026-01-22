@@ -21,12 +21,8 @@ async function initializePayment(req, res) {
       name,
       currency = 'NGN',
       callback_url,
-      redirect_url, // Redirect URL for Paystack/Flutterwave (alternative to callback_url)
       metadata
     } = req.body;
-
-    // Use redirect_url if provided, otherwise fall back to callback_url
-    const paymentRedirectUrl = redirect_url || callback_url;
 
     if (!amount || !email) {
       return res.status(400).json({
@@ -485,12 +481,26 @@ async function initializePayment(req, res) {
       paymentMetadata.online_store_id = onlineStore.id;
     }
 
+    // Use callback_url from request, or fallback to environment variable, or use backend URL
+    const defaultCallbackUrl = callback_url 
+      || process.env.FRONTEND_URL 
+      || process.env.BASE_URL 
+      || process.env.API_URL 
+      || 'https://backend.mycroshop.com';
+    
+    // Ensure callback_url is a full URL (add /payment/callback if it's just a base URL)
+    const finalCallbackUrl = callback_url 
+      ? callback_url 
+      : (defaultCallbackUrl.includes('/payment/callback') 
+          ? defaultCallbackUrl 
+          : `${defaultCallbackUrl}/payment/callback`);
+
     if (gateway.gateway_name === 'paystack') {
       paymentData = await initializePaystackPayment({
         amount: parseFloat(amount) * 100, // Paystack uses kobo (smallest currency unit)
         email,
         reference: transactionReference,
-        callback_url: paymentRedirectUrl || `${process.env.FRONTEND_URL || 'http://localhost:3001'}/payment/callback`,
+        callback_url: finalCallbackUrl,
         metadata: paymentMetadata
       }, secretKey, gateway.test_mode, splitOptions);
     } else if (gateway.gateway_name === 'flutterwave') {
@@ -499,7 +509,7 @@ async function initializePayment(req, res) {
         email,
         tx_ref: transactionReference,
         currency,
-        redirect_url: paymentRedirectUrl || `${process.env.FRONTEND_URL || 'http://localhost:3001'}/payment/callback`,
+        redirect_url: finalCallbackUrl,
         customer: {
           email,
           name: name || 'Customer'
