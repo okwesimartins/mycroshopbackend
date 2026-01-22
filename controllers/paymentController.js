@@ -64,27 +64,45 @@ async function initializePayment(req, res) {
     if (metadata && metadata.service_id && metadata.scheduled_at) {
       const { service_id, scheduled_at, store_id } = metadata;
 
-      // Determine final store_id (for free users, may need to infer from OnlineStoreService)
-      let finalStoreId = store_id;
-      if (!finalStoreId) {
+      // For free users, store_id is optional (services can exist without physical stores)
+      // For enterprise users, store_id is typically required
+      let finalStoreId = store_id || null;
+      
+      // Try to infer store_id from OnlineStoreService if not provided (for enterprise users)
+      if (!finalStoreId && !isFreePlan) {
         const onlineStoreService = await models.OnlineStoreService.findOne({
           where: { service_id: service_id }
         });
-        if (onlineStoreService && onlineStoreService.store_id) {
-          finalStoreId = onlineStoreService.store_id;
-        }
-      }
-
-      if (!finalStoreId) {
-        return res.status(400).json({
-          success: false,
-          message: 'store_id is required for booking payments or could not be inferred for this service'
-        });
+        // Note: OnlineStoreService doesn't have store_id, only online_store_id
+        // This is mainly for enterprise users who might have both
       }
 
       // Verify service exists and is active
+      // For free users, store_id can be null
+      // For enterprise users, store_id is typically required
+      const serviceWhere = { 
+        id: service_id, 
+        is_active: true 
+      };
+      
+      // Add tenant_id filter for free users
+      if (isFreePlan) {
+        serviceWhere.tenant_id = parsedTenantId;
+      }
+      
+      // Add store_id filter only if provided (for enterprise users or free users with stores)
+      if (finalStoreId) {
+        serviceWhere.store_id = finalStoreId;
+      } else if (!isFreePlan) {
+        // Enterprise users should have store_id
+        return res.status(400).json({
+          success: false,
+          message: 'store_id is required for booking payments for enterprise users'
+        });
+      }
+
       const service = await models.StoreService.findOne({
-        where: { id: service_id, store_id: finalStoreId, is_active: true }
+        where: serviceWhere
       });
 
       if (!service) {
@@ -128,13 +146,28 @@ async function initializePayment(req, res) {
 
       // Get availability settings for this store/service for the specific day of week
       // This ensures the customer cannot book a day that doesn't have availability configured
+      // For free users, store_id can be null
+      const availabilityWhere = {
+        service_id: service_id,
+        day_of_week: dayOfWeek,
+        is_available: true
+      };
+      
+      // Add tenant_id filter for free users
+      if (isFreePlan) {
+        availabilityWhere.tenant_id = parsedTenantId;
+      }
+      
+      // Add store_id filter only if we have one (for enterprise users or free users with stores)
+      if (finalStoreId) {
+        availabilityWhere.store_id = finalStoreId;
+      } else {
+        // For free users without stores, availability should not have store_id
+        availabilityWhere.store_id = null;
+      }
+      
       const availability = await models.BookingAvailability.findAll({
-        where: {
-          store_id: finalStoreId,
-          service_id: service_id,
-          day_of_week: dayOfWeek,
-          is_available: true
-        }
+        where: availabilityWhere
       });
 
       // Validate that the day of week has availability configured
@@ -221,17 +254,31 @@ async function initializePayment(req, res) {
       const endOfDay = moment(bookingDate).endOf('day');
       const bookingEnd = moment(requestedTime).add(duration, 'minutes');
 
-      const conflictingBookings = await models.Booking.findAll({
-        where: {
-          store_id: finalStoreId,
-          service_id: service_id,
-          scheduled_at: {
-            [Sequelize.Op.between]: [startOfDay.toDate(), endOfDay.toDate()]
-          },
-          status: {
-            [Sequelize.Op.in]: ['pending', 'confirmed']
-          }
+      const bookingConflictWhere = {
+        service_id: service_id,
+        scheduled_at: {
+          [Sequelize.Op.between]: [startOfDay.toDate(), endOfDay.toDate()]
+        },
+        status: {
+          [Sequelize.Op.in]: ['pending', 'confirmed']
         }
+      };
+      
+      // Add tenant_id filter for free users
+      if (isFreePlan) {
+        bookingConflictWhere.tenant_id = parsedTenantId;
+      }
+      
+      // Add store_id filter only if we have one
+      if (finalStoreId) {
+        bookingConflictWhere.store_id = finalStoreId;
+      } else {
+        // For free users without stores, bookings should not have store_id
+        bookingConflictWhere.store_id = null;
+      }
+
+      const conflictingBookings = await models.Booking.findAll({
+        where: bookingConflictWhere
       });
 
       // Check if requested time conflicts with any existing booking
@@ -709,7 +756,14 @@ async function verifyPayment(req, res) {
         
         const isBookingPayment = metadata.is_booking === true || metadata.booking_type === 'service';
         
-        if (isBookingPayment && metadata.service_id && metadata.store_id && metadata.scheduled_at) {
+        // For free users, store_id is optional (services can exist without physical stores)
+        // For enterprise users, store_id is typically required
+        const hasRequiredBookingData = isBookingPayment && 
+          metadata.service_id && 
+          metadata.scheduled_at &&
+          (isFreePlan || metadata.store_id); // store_id required for enterprise, optional for free
+        
+        if (hasRequiredBookingData) {
           try {
             // Check if booking already exists for this transaction
             const existingBookingWhere = {
@@ -726,9 +780,10 @@ async function verifyPayment(req, res) {
 
             if (!existingBooking) {
               // Create booking automatically after successful payment
+              // For free users, store_id can be null
               const bookingData = {
                 tenant_id: isFreePlan ? currentTransaction.tenant_id : null,
-                store_id: metadata.store_id,
+                store_id: metadata.store_id || null, // Allow null for free users
                 service_id: metadata.service_id,
                 customer_name: currentTransaction.customer_name || metadata.customer_name,
                 customer_email: currentTransaction.customer_email || metadata.customer_email,
@@ -1288,7 +1343,13 @@ async function handlePaymentWebhook(req, res) {
       // This handles cases where verifyPayment failed due to network issues
       if (metadata.is_booking === true || metadata.booking_type === 'service') {
         try {
-          if (metadata.service_id && metadata.store_id && metadata.scheduled_at) {
+          // For free users, store_id is optional (services can exist without physical stores)
+          // For enterprise users, store_id is typically required
+          const hasRequiredBookingData = metadata.service_id && 
+            metadata.scheduled_at &&
+            (isFreePlan || metadata.store_id); // store_id required for enterprise, optional for free
+          
+          if (hasRequiredBookingData) {
             // Check if booking already exists for this transaction
             const existingBookingWhere = {
               payment_transaction_id: transaction.id
@@ -1303,9 +1364,10 @@ async function handlePaymentWebhook(req, res) {
 
             if (!existingBooking) {
               // Create booking automatically after successful payment
+              // For free users, store_id can be null
               const bookingData = {
                 tenant_id: isFreePlan ? transaction.tenant_id : null,
-                store_id: metadata.store_id,
+                store_id: metadata.store_id || null, // Allow null for free users
                 service_id: metadata.service_id,
                 customer_name: transaction.customer_name || metadata.customer_name,
                 customer_email: transaction.customer_email || metadata.customer_email,
