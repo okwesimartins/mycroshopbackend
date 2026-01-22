@@ -133,22 +133,23 @@ async function initializePayment(req, res) {
         });
       }
       
-      // If the time is in UTC (has Z suffix), we need to convert to local timezone
-      // Availability time slots are in local time, so we need to compare in the same timezone
-      const timezone = metadata.timezone || 'Africa/Lagos';
+      // If the time is in UTC (has Z suffix), treat it as local time for comparison
+      // When users send "2026-01-23T11:05:00Z", they mean 11:05 in their local timezone,
+      // not 11:05 UTC converted to local time. So we extract the time component as-is.
       if (scheduled_at.endsWith('Z') || scheduled_at.endsWith('+00:00')) {
-        // Time is in UTC, convert to local timezone for comparison
-        // For Africa/Lagos (UTC+1), we add 1 hour
-        // UTC 11:05 = Local 12:05
-        const utcTime = moment.utc(scheduled_at);
-        // Get timezone offset (Africa/Lagos is UTC+1, but can vary with DST)
-        // For simplicity, we'll use a fixed offset - for production, use moment-timezone
-        const timezoneOffsets = {
-          'Africa/Lagos': 1,
-          'UTC': 0
-        };
-        const offset = timezoneOffsets[timezone] || 1; // Default to +1 for Africa/Lagos
-        requestedTime = utcTime.add(offset, 'hours');
+        // Parse as UTC to get the date/time values, then create a new moment in local timezone
+        // This treats "2026-01-23T11:05:00Z" as "2026-01-23 11:05:00" in local time
+        const utcMoment = moment.utc(scheduled_at);
+        // Create a new moment with the same date/time values but in local timezone
+        // This way "11:05:00Z" becomes "11:05" local time for comparison
+        requestedTime = moment({
+          year: utcMoment.year(),
+          month: utcMoment.month(),
+          date: utcMoment.date(),
+          hour: utcMoment.hour(),
+          minute: utcMoment.minute(),
+          second: utcMoment.second()
+        });
       }
 
       // Validate that the booking date is not in the past
