@@ -103,11 +103,31 @@ async function initializePayment(req, res) {
         });
       }
 
+      // Validate that the booking date is not in the past
+      const now = moment();
+      if (requestedTime.isBefore(now, 'minute')) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot book appointments in the past. Please select a future date and time.'
+        });
+      }
+
+      // Validate that the booking is not in a previous year
+      const currentYear = moment().year();
+      const requestedYear = requestedTime.year();
+      if (requestedYear < currentYear) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot book appointments in previous years. Current year is ${currentYear}. Please select a date in ${currentYear} or later.`
+        });
+      }
+
       // Get the date for availability check
       const bookingDate = requestedTime.format('YYYY-MM-DD');
       const dayOfWeek = requestedTime.day(); // 0 = Sunday, 1 = Monday, etc.
 
-      // Get availability settings for this store/service
+      // Get availability settings for this store/service for the specific day of week
+      // This ensures the customer cannot book a day that doesn't have availability configured
       const availability = await models.BookingAvailability.findAll({
         where: {
           store_id: finalStoreId,
@@ -117,10 +137,12 @@ async function initializePayment(req, res) {
         }
       });
 
+      // Validate that the day of week has availability configured
       if (!availability || availability.length === 0) {
+        const dayName = requestedTime.format('dddd');
         return res.status(400).json({
           success: false,
-          message: `No availability configured for this service on ${requestedTime.format('dddd')}`
+          message: `No availability configured for this service on ${dayName}. Please select a different day.`
         });
       }
 
@@ -153,31 +175,44 @@ async function initializePayment(req, res) {
       const slotStart = moment(`${bookingDate} ${matchingAvailability.start_time}`, 'YYYY-MM-DD HH:mm:ss');
       const slotEnd = moment(`${bookingDate} ${matchingAvailability.end_time}`, 'YYYY-MM-DD HH:mm:ss');
       
-      // Check if requested time is at a valid slot start (every duration minutes)
+      // Validate that the requested time is at a valid slot start (every duration minutes)
       // Valid slots start at slotStart and increment by duration until slotEnd
+      // The requested time must exactly match one of these slot start times
       let isValidSlot = false;
       let currentSlot = moment(slotStart);
-      while (currentSlot.isBefore(slotEnd) || currentSlot.isSame(slotEnd)) {
-        if (requestedTime.isSame(currentSlot)) {
-          isValidSlot = true;
-          break;
+      
+      // Generate all valid slot start times and check if requested time matches one
+      while (currentSlot.isBefore(slotEnd)) {
+        // Check if requested time exactly matches this slot start (within the same minute)
+        if (requestedTime.isSame(currentSlot, 'minute')) {
+          // Verify that there's enough time for the full duration from this slot
+          const slotEndTime = moment(currentSlot).add(duration, 'minutes');
+          if (slotEndTime.isBefore(slotEnd) || slotEndTime.isSame(slotEnd)) {
+            isValidSlot = true;
+            break;
+          }
         }
-        // If we've passed the requested time, no need to continue
-        if (currentSlot.isAfter(requestedTime)) {
-          break;
-        }
+        
+        // Calculate next slot
         const nextSlot = moment(currentSlot).add(duration, 'minutes');
-        // If next slot would exceed slotEnd, stop
+        
+        // If next slot would exceed slotEnd, stop (no more valid slots)
         if (nextSlot.isAfter(slotEnd)) {
           break;
         }
+        
+        // If we've passed the requested time, no need to continue
+        if (nextSlot.isAfter(requestedTime)) {
+          break;
+        }
+        
         currentSlot = nextSlot;
       }
 
       if (!isValidSlot) {
         return res.status(400).json({
           success: false,
-          message: `The requested time ${requestedTime.format('HH:mm')} is not a valid time slot. Time slots are available every ${duration} minutes.`
+          message: `The requested time ${requestedTime.format('HH:mm')} is not a valid time slot. Time slots are available every ${duration} minutes starting from ${matchingAvailability.start_time} until ${matchingAvailability.end_time}.`
         });
       }
 
