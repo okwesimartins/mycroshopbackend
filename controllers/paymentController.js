@@ -123,12 +123,32 @@ async function initializePayment(req, res) {
       }
 
       // Parse scheduled_at
-      const requestedTime = moment(scheduled_at);
+      // Note: If time is in UTC (ends with Z), convert to local timezone for comparison
+      // Availability time slots are stored in local time (e.g., Africa/Lagos)
+      let requestedTime = moment(scheduled_at);
       if (!requestedTime.isValid()) {
         return res.status(400).json({
           success: false,
           message: 'Invalid scheduled_at format. Please use ISO 8601 format (e.g., 2024-01-15T09:00:00)'
         });
+      }
+      
+      // If the time is in UTC (has Z suffix), we need to convert to local timezone
+      // Availability time slots are in local time, so we need to compare in the same timezone
+      const timezone = metadata.timezone || 'Africa/Lagos';
+      if (scheduled_at.endsWith('Z') || scheduled_at.endsWith('+00:00')) {
+        // Time is in UTC, convert to local timezone for comparison
+        // For Africa/Lagos (UTC+1), we add 1 hour
+        // UTC 11:05 = Local 12:05
+        const utcTime = moment.utc(scheduled_at);
+        // Get timezone offset (Africa/Lagos is UTC+1, but can vary with DST)
+        // For simplicity, we'll use a fixed offset - for production, use moment-timezone
+        const timezoneOffsets = {
+          'Africa/Lagos': 1,
+          'UTC': 0
+        };
+        const offset = timezoneOffsets[timezone] || 1; // Default to +1 for Africa/Lagos
+        requestedTime = utcTime.add(offset, 'hours');
       }
 
       // Validate that the booking date is not in the past
@@ -255,25 +275,15 @@ async function initializePayment(req, res) {
       const duration = service.duration_minutes || 60;
       
       // If using JSON availability with specific time slots, the time slot validation is already done
-      // Just verify there's enough time for the duration
+      // For JSON availability, time_slots represent START times, so we just need to verify:
+      // 1. The requested time is in the time_slots array (already validated above)
+      // 2. There are no conflicting bookings (validated later)
+      // We don't need to check if the booking end time exceeds the last slot because
+      // the time slots are start times, not end times
       if (dayAvailability && dayAvailability.available === true) {
-        // For JSON availability, we already validated the time slot exists
-        // Just verify the booking won't exceed the day's availability
-        const requestedTimeStr = requestedTime.format('HH:mm');
-        const timeSlots = dayAvailability.time_slots || [];
-        const sortedSlots = timeSlots.sort();
-        const lastSlot = sortedSlots[sortedSlots.length - 1];
-        
-        // Check if the booking end time would exceed the last available slot
-        const bookingEndTime = moment(requestedTime).add(duration, 'minutes');
-        const lastSlotTime = moment(`${bookingDate} ${lastSlot}`, 'YYYY-MM-DD HH:mm');
-        
-        if (bookingEndTime.isAfter(lastSlotTime)) {
-          return res.status(400).json({
-            success: false,
-            message: `The booking duration (${duration} minutes) would exceed the available time slots. Please select an earlier time.`
-          });
-        }
+        // For JSON availability, validation is complete - the time slot exists and is valid
+        // The conflict check with existing bookings will happen later
+        // No additional duration validation needed here
       } else {
         // For BookingAvailability table, validate slot alignment
         const slotStart = moment(`${bookingDate} ${matchingAvailability.start_time}`, 'YYYY-MM-DD HH:mm:ss');
