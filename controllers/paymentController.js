@@ -78,22 +78,21 @@ async function initializePayment(req, res) {
       }
 
       // Verify service exists and is active
-      // For free users, store_id can be null
-      // For enterprise users, store_id is typically required
+      // First, find the service by service_id (without tenant_id filter initially)
+      // Then verify it belongs to the correct tenant
       const serviceWhere = { 
         id: service_id, 
         is_active: true 
       };
       
-      // Add tenant_id filter for free users
-      if (isFreePlan) {
-        serviceWhere.tenant_id = parsedTenantId;
-      }
-      
-      // Add store_id filter only if provided (for enterprise users or free users with stores)
+      // Add store_id filter
       if (finalStoreId) {
+        // If store_id is provided, filter by it
         serviceWhere.store_id = finalStoreId;
-      } else if (!isFreePlan) {
+      } else if (isFreePlan) {
+        // For free users without store_id, explicitly filter for store_id IS NULL
+        serviceWhere.store_id = null;
+      } else {
         // Enterprise users should have store_id
         return res.status(400).json({
           success: false,
@@ -101,6 +100,7 @@ async function initializePayment(req, res) {
         });
       }
 
+      // Find service first (without tenant_id filter to get better error message)
       const service = await models.StoreService.findOne({
         where: serviceWhere
       });
@@ -110,6 +110,16 @@ async function initializePayment(req, res) {
           success: false,
           message: 'Service not found or not available'
         });
+      }
+
+      // Verify that the service belongs to the correct tenant (for free users)
+      if (isFreePlan) {
+        if (service.tenant_id !== parsedTenantId) {
+          return res.status(403).json({
+            success: false,
+            message: `Service does not belong to tenant ${parsedTenantId}. This service belongs to tenant ${service.tenant_id}.`
+          });
+        }
       }
 
       // Parse scheduled_at
