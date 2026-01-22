@@ -4,6 +4,8 @@ const { decryptSecretKey } = require('./paymentGatewayController');
 const { getTenantById } = require('../config/tenant');
 const { getTenantConnection } = require('../config/database');
 const initModels = require('../models');
+const { Sequelize } = require('sequelize');
+const moment = require('moment');
 
 /**
  * Initialize payment (create payment link/transaction)
@@ -57,6 +59,162 @@ async function initializePayment(req, res) {
     const sequelize = await getTenantConnection(parsedTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
     const isFreePlan = tenant.subscription_plan === 'free';
+
+    // Validate booking availability if this is a booking payment
+    if (metadata && metadata.service_id && metadata.scheduled_at) {
+      const { service_id, scheduled_at, store_id } = metadata;
+
+      // Determine final store_id (for free users, may need to infer from OnlineStoreService)
+      let finalStoreId = store_id;
+      if (!finalStoreId) {
+        const onlineStoreService = await models.OnlineStoreService.findOne({
+          where: { service_id: service_id }
+        });
+        if (onlineStoreService && onlineStoreService.store_id) {
+          finalStoreId = onlineStoreService.store_id;
+        }
+      }
+
+      if (!finalStoreId) {
+        return res.status(400).json({
+          success: false,
+          message: 'store_id is required for booking payments or could not be inferred for this service'
+        });
+      }
+
+      // Verify service exists and is active
+      const service = await models.StoreService.findOne({
+        where: { id: service_id, store_id: finalStoreId, is_active: true }
+      });
+
+      if (!service) {
+        return res.status(404).json({
+          success: false,
+          message: 'Service not found or not available'
+        });
+      }
+
+      // Parse scheduled_at
+      const requestedTime = moment(scheduled_at);
+      if (!requestedTime.isValid()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid scheduled_at format. Please use ISO 8601 format (e.g., 2024-01-15T09:00:00)'
+        });
+      }
+
+      // Get the date for availability check
+      const bookingDate = requestedTime.format('YYYY-MM-DD');
+      const dayOfWeek = requestedTime.day(); // 0 = Sunday, 1 = Monday, etc.
+
+      // Get availability settings for this store/service
+      const availability = await models.BookingAvailability.findAll({
+        where: {
+          store_id: finalStoreId,
+          service_id: service_id,
+          day_of_week: dayOfWeek,
+          is_available: true
+        }
+      });
+
+      if (!availability || availability.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: `No availability configured for this service on ${requestedTime.format('dddd')}`
+        });
+      }
+
+      // Check if requested time falls within any available time slot
+      const requestedTimeStr = requestedTime.format('HH:mm:ss');
+      let isWithinAvailableHours = false;
+      let matchingAvailability = null;
+
+      for (const avail of availability) {
+        const availStart = moment(avail.start_time, 'HH:mm:ss');
+        const availEnd = moment(avail.end_time, 'HH:mm:ss');
+        const requestedTimeOnly = moment(requestedTimeStr, 'HH:mm:ss');
+
+        if (requestedTimeOnly.isSameOrAfter(availStart) && requestedTimeOnly.isBefore(availEnd)) {
+          isWithinAvailableHours = true;
+          matchingAvailability = avail;
+          break;
+        }
+      }
+
+      if (!isWithinAvailableHours) {
+        return res.status(400).json({
+          success: false,
+          message: `The requested time ${requestedTime.format('HH:mm')} is not within available hours for this service on ${requestedTime.format('dddd')}`
+        });
+      }
+
+      // Check if the time slot aligns with service duration (must start at a valid slot)
+      const duration = service.duration_minutes || 60;
+      const slotStart = moment(`${bookingDate} ${matchingAvailability.start_time}`, 'YYYY-MM-DD HH:mm:ss');
+      const slotEnd = moment(`${bookingDate} ${matchingAvailability.end_time}`, 'YYYY-MM-DD HH:mm:ss');
+      
+      // Check if requested time is at a valid slot start (every duration minutes)
+      // Valid slots start at slotStart and increment by duration until slotEnd
+      let isValidSlot = false;
+      let currentSlot = moment(slotStart);
+      while (currentSlot.isBefore(slotEnd) || currentSlot.isSame(slotEnd)) {
+        if (requestedTime.isSame(currentSlot)) {
+          isValidSlot = true;
+          break;
+        }
+        // If we've passed the requested time, no need to continue
+        if (currentSlot.isAfter(requestedTime)) {
+          break;
+        }
+        const nextSlot = moment(currentSlot).add(duration, 'minutes');
+        // If next slot would exceed slotEnd, stop
+        if (nextSlot.isAfter(slotEnd)) {
+          break;
+        }
+        currentSlot = nextSlot;
+      }
+
+      if (!isValidSlot) {
+        return res.status(400).json({
+          success: false,
+          message: `The requested time ${requestedTime.format('HH:mm')} is not a valid time slot. Time slots are available every ${duration} minutes.`
+        });
+      }
+
+      // Check for conflicts with existing bookings
+      const startOfDay = moment(bookingDate).startOf('day');
+      const endOfDay = moment(bookingDate).endOf('day');
+      const bookingEnd = moment(requestedTime).add(duration, 'minutes');
+
+      const conflictingBookings = await models.Booking.findAll({
+        where: {
+          store_id: finalStoreId,
+          service_id: service_id,
+          scheduled_at: {
+            [Sequelize.Op.between]: [startOfDay.toDate(), endOfDay.toDate()]
+          },
+          status: {
+            [Sequelize.Op.in]: ['pending', 'confirmed']
+          }
+        }
+      });
+
+      // Check if requested time conflicts with any existing booking
+      const hasConflict = conflictingBookings.some(booking => {
+        const existingBookingStart = moment(booking.scheduled_at);
+        const existingBookingEnd = moment(booking.scheduled_at).add(booking.duration_minutes || duration, 'minutes');
+        
+        // Check for overlap: requested time overlaps if it starts before existing ends and ends after existing starts
+        return (requestedTime.isBefore(existingBookingEnd) && bookingEnd.isAfter(existingBookingStart));
+      });
+
+      if (hasConflict) {
+        return res.status(409).json({
+          success: false,
+          message: 'The requested time slot is already booked. Please select another time.'
+        });
+      }
+    }
 
     // Get default payment gateway
     const gatewayWhere = {
