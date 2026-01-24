@@ -101,17 +101,21 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
 
-    // Validate state is a string
-    if (typeof state !== 'string') {
+    // Normalize state - Express query params can be arrays or strings
+    // If it's an array, take the first element; if it's already a string, use it
+    const stateString = Array.isArray(state) ? state[0] : String(state);
+    
+    // Validate state is not empty
+    if (!stateString || !stateString.trim()) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid state parameter: state must be a string',
+        message: 'Invalid state parameter: state is empty',
         error: 'invalid_state_format'
       });
     }
 
     // Extract tenant_id from state
-    const stateParts = state.split(':');
+    const stateParts = stateString.split(':');
     
     if (stateParts.length < 2 || !stateParts[1]) {
       return res.status(400).json({
@@ -377,17 +381,21 @@ async function handleInstagramCallback(req, res) {
       });
     }
 
-    // Validate state is a string
-    if (typeof state !== 'string') {
+    // Normalize state - Express query params can be arrays or strings
+    // If it's an array, take the first element; if it's already a string, use it
+    const stateString = Array.isArray(state) ? state[0] : String(state);
+    
+    // Validate state is not empty
+    if (!stateString || !stateString.trim()) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid state parameter: state must be a string',
+        message: 'Invalid state parameter: state is empty',
         error: 'invalid_state_format'
       });
     }
 
     // Extract tenant_id from state
-    const stateParts = state.split(':');
+    const stateParts = stateString.split(':');
     
     if (stateParts.length < 2 || !stateParts[1]) {
       return res.status(400).json({
