@@ -231,19 +231,63 @@ async function handleWhatsAppCallback(req, res) {
         });
       }
     } else {
-      return res.status(400).json({
-        success: false,
-        message: 'Could not find WhatsApp Business Account. Please ensure you have a WhatsApp Business Account set up and have granted WhatsApp Business Management permissions.',
-        error: 'no_waba_found',
-        details: 'WhatsApp Business Account ID is required to fetch phone numbers'
-      });
+      // If WABA ID not found, try to get phone numbers directly (for test mode)
+      console.warn('WABA ID not found, trying direct phone number access (test mode fallback)');
+      try {
+        // Try direct access to phone numbers (works in some test scenarios)
+        const directPhoneResponse = await axios.get('https://graph.facebook.com/v18.0/me/phone_numbers', {
+          params: {
+            access_token: accessToken
+          }
+        });
+        
+        if (directPhoneResponse.data.data && directPhoneResponse.data.data.length > 0) {
+          phoneNumber = directPhoneResponse.data.data[0];
+          phoneNumberId = phoneNumber.id;
+          console.log('Found phone number ID (direct method, test mode):', phoneNumberId);
+          
+          // Try to extract WABA ID from phone number response if available
+          if (phoneNumber.waba_id) {
+            wabaId = phoneNumber.waba_id;
+            console.log('Found WABA ID from phone number response:', wabaId);
+          }
+        }
+      } catch (directError) {
+        console.error('Direct phone number access also failed:', directError.response?.data || directError.message);
+        return res.status(400).json({
+          success: false,
+          message: 'WhatsApp Business Account not found. Please set up a WhatsApp Business Account in Meta Business Manager before connecting.',
+          error: 'no_waba_found',
+          details: {
+            user_message: 'To connect WhatsApp, you need to:',
+            steps: [
+              '1. Go to Meta Business Manager (business.facebook.com)',
+              '2. Create or connect a WhatsApp Business Account',
+              '3. Add a phone number to your WhatsApp Business Account',
+              '4. Grant WhatsApp Business Management permission when authorizing',
+              '5. Try connecting again'
+            ],
+            help_link: 'https://business.facebook.com/help',
+            debug_info: directError.response?.data || directError.message
+          }
+        });
+      }
     }
 
     if (!phoneNumberId) {
       return res.status(400).json({
         success: false,
-        message: 'No WhatsApp phone number found for this account. Please ensure you have a WhatsApp Business Account with a verified phone number.',
-        error: 'no_phone_number'
+        message: 'No WhatsApp phone number found. Please add a phone number to your WhatsApp Business Account.',
+        error: 'no_phone_number',
+        details: {
+          user_message: 'Your WhatsApp Business Account needs a phone number to connect.',
+          steps: [
+            '1. Go to Meta Business Manager',
+            '2. Open your WhatsApp Business Account',
+            '3. Add or verify a phone number',
+            '4. Try connecting again'
+          ]
+        }
       });
     }
 
