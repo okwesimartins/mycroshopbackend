@@ -168,24 +168,6 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
 
-    // Get WhatsApp Business Account ID
-    let accountsResponse;
-    try {
-      accountsResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
-        params: {
-          access_token: accessToken
-        }
-      });
-    } catch (error) {
-      console.error('Error fetching businesses:', error.response?.data || error.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Failed to fetch WhatsApp Business Account',
-        error: 'business_fetch_failed',
-        details: error.response?.data || error.message
-      });
-    }
-
     // Get phone numbers for WhatsApp
     let phoneNumbersResponse;
     try {
@@ -214,6 +196,38 @@ async function handleWhatsAppCallback(req, res) {
 
     const phoneNumber = phoneNumbersResponse.data.data[0];
     const phoneNumberId = phoneNumber.id;
+
+    // Try to get WhatsApp Business Account ID (optional - may not be available without additional permissions)
+    let wabaId = null;
+    try {
+      // First, try to get it from the phone number data if available
+      if (phoneNumber.waba_id) {
+        wabaId = phoneNumber.waba_id;
+      }
+      
+      // If not found in phone number, try the businesses endpoint (may fail without permissions)
+      if (!wabaId) {
+        try {
+          const accountsResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
+            params: {
+              access_token: accessToken,
+              fields: 'id,name'
+            }
+          });
+          
+          if (accountsResponse.data.data && accountsResponse.data.data.length > 0) {
+            wabaId = accountsResponse.data.data[0].id;
+          }
+        } catch (businessError) {
+          // This is optional - we can continue without WABA ID
+          console.warn('Could not fetch businesses (optional, may require additional permissions):', businessError.response?.data?.error?.message || businessError.message);
+          // Continue without WABA ID - it's not critical for basic functionality
+        }
+      }
+    } catch (error) {
+      // WABA ID is optional, continue without it
+      console.warn('Could not fetch WABA ID (optional):', error.message);
+    }
 
     // Get tenant info to determine subscription plan
     const { getTenantById } = require('../config/tenant');
@@ -258,8 +272,7 @@ async function handleWhatsAppCallback(req, res) {
     }
 
     // Also store in tenant database whatsapp_connections table
-    // Get WABA ID from accounts response
-    const wabaId = accountsResponse.data.data?.[0]?.id || null;
+    // WABA ID is already fetched above (or null if not available)
     
     // Encrypt access token before storing (if encryption utility exists)
     let encryptedToken = accessToken;
