@@ -94,14 +94,14 @@ async function handleWhatsAppCallback(req, res) {
     const { code, state } = req.query;
     
     if (!code || !state) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=oauth_failed`);
+      return res.redirect('https://mycroshop.com');
     }
 
     // Extract tenant_id from state
     const [stateToken, tenantId] = state.split(':');
     
     // Exchange code for access token
-    const redirectUri = `${process.env.BMT_API_URL || 'http://localhost:3000'}/api/v1/meta-connection/whatsapp/callback`;
+    const redirectUri = process.env.BMT_API_URL;
     const tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
       params: {
         client_id: process.env.META_APP_ID,
@@ -128,7 +128,7 @@ async function handleWhatsAppCallback(req, res) {
     });
 
     if (!phoneNumbersResponse.data.data || phoneNumbersResponse.data.data.length === 0) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=no_phone_number`);
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://mycroshop.com'}?error=no_phone_number`);
     }
 
     const phoneNumber = phoneNumbersResponse.data.data[0];
@@ -139,7 +139,7 @@ async function handleWhatsAppCallback(req, res) {
     const tenant = await getTenantById(tenantId);
     
     if (!tenant) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=tenant_not_found`);
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://mycroshop.com'}?error=tenant_not_found`);
     }
 
     const subscriptionPlan = tenant.subscription_plan || 'enterprise';
@@ -239,10 +239,10 @@ async function handleWhatsAppCallback(req, res) {
       // The connection is still stored in tenant database above
     }
 
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?success=whatsapp_connected`);
+    res.redirect(`${process.env.FRONTEND_URL || 'http://mycroshop.com'}?success=whatsapp_connected`);
   } catch (error) {
     console.error('Error handling WhatsApp callback:', error);
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=connection_failed`);
+    res.redirect(`${process.env.FRONTEND_URL || 'http://mycroshop.com'}?error=connection_failed`);
   }
 }
 
