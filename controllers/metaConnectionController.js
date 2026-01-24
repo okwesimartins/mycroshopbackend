@@ -57,7 +57,7 @@ async function initiateWhatsAppConnection(req, res) {
     const stateWithTenant = `${state}:${req.user.tenantId}`;
     
     // Meta OAuth URL
-    const redirectUri = `${process.env.BMT_API_URL || 'http://localhost:3000'}/api/v1/meta-connection/whatsapp/callback`;
+    const redirectUri = process.env.BMT_API_URL;
     const appId = process.env.META_APP_ID;
     
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
