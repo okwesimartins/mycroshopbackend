@@ -134,13 +134,23 @@ async function handleWhatsAppCallback(req, res) {
     const phoneNumber = phoneNumbersResponse.data.data[0];
     const phoneNumberId = phoneNumber.id;
 
-    // Get tenant database connection
+    // Get tenant info to determine subscription plan
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    
+    if (!tenant) {
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=tenant_not_found`);
+    }
+
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+
+    // Get tenant database connection (handles both free and enterprise)
     const { getTenantConnection } = require('../config/database');
-    const sequelize = await getTenantConnection(tenantId);
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
     const initializeModels = require('../models');
     const models = initializeModels(sequelize);
 
-    // Update or create AI agent config
+    // Update or create AI agent config in tenant database
     let config = await models.AIAgentConfig.findOne({
       where: {},
       order: [['created_at', 'DESC']]
@@ -162,9 +172,72 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
 
-    // Also update Google Cloud Function with new credentials
-    // This would be done via API call to update the Cloud Function environment variables
-    // For now, we'll store it and the AI agent will fetch it from BMT API
+    // Also store in tenant database whatsapp_connections table
+    // Get WABA ID from accounts response
+    const wabaId = accountsResponse.data.data?.[0]?.id || null;
+    
+    // Encrypt access token before storing (if encryption utility exists)
+    let encryptedToken = accessToken;
+    try {
+      const { encrypt } = require('../utils/encryption');
+      if (encrypt) {
+        encryptedToken = encrypt(accessToken);
+      }
+    } catch (e) {
+      // Encryption utility not available, store as-is (should be encrypted in production)
+      console.warn('Encryption utility not available, storing token unencrypted');
+    }
+
+    // Store or update in tenant database
+    await models.WhatsAppConnection.upsert({
+      ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
+      phone_number_id: phoneNumberId,
+      waba_id: wabaId,
+      access_token: encryptedToken
+    });
+    
+    console.log('WhatsApp connection stored in tenant database');
+
+    // Also store in main database for AI agent lookup (phone_number_id → tenant_id)
+    // This allows the AI agent webhook to quickly identify which tenant a message belongs to
+    try {
+      const { mainSequelize } = require('../config/database');
+      
+      // Get WABA ID from accounts response
+      const wabaId = accountsResponse.data.data?.[0]?.id || null;
+      
+      // Encrypt access token before storing (if encryption utility exists)
+      let encryptedToken = accessToken;
+      try {
+        const { encrypt } = require('../utils/encryption');
+        if (encrypt) {
+          encryptedToken = encrypt(accessToken);
+        }
+      } catch (e) {
+        // Encryption utility not available, store as-is (should be encrypted in production)
+        console.warn('Encryption utility not available, storing token unencrypted');
+      }
+      
+      // Store in main database (whatsapp_connections table)
+      // This table should exist in mycroshop_main database
+      await mainSequelize.query(`
+        INSERT INTO whatsapp_connections 
+        (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
+        VALUES (?, ?, ?, ?, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+        waba_id = VALUES(waba_id),
+        access_token = VALUES(access_token),
+        updated_at = NOW()
+      `, {
+        replacements: [tenantId, phoneNumberId, wabaId, encryptedToken]
+      });
+      
+      console.log('WhatsApp connection stored in main database for AI agent lookup');
+    } catch (error) {
+      console.error('Error storing WhatsApp connection in main database:', error);
+      // Don't fail the connection if this fails - it's for AI agent lookup only
+      // The connection is still stored in tenant database above
+    }
 
     res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?success=whatsapp_connected`);
   } catch (error) {
@@ -259,9 +332,19 @@ async function handleInstagramCallback(req, res) {
       return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=no_instagram_account`);
     }
 
-    // Get tenant database connection
+    // Get tenant info to determine subscription plan
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    
+    if (!tenant) {
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=tenant_not_found`);
+    }
+
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+
+    // Get tenant database connection (handles both free and enterprise)
     const { getTenantConnection } = require('../config/database');
-    const sequelize = await getTenantConnection(tenantId);
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
     const initializeModels = require('../models');
     const models = initializeModels(sequelize);
 

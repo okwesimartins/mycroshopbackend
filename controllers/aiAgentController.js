@@ -214,8 +214,7 @@ async function getConfig(req, res) {
       // Create default config
       config = await req.db.models.AIAgentConfig.create({
         whatsapp_enabled: false,
-        instagram_enabled: false,
-        auto_reply_enabled: true
+        instagram_enabled: false
       });
     }
 
@@ -250,7 +249,6 @@ async function updateConfig(req, res) {
       greeting_message,
       unavailable_message,
       business_hours,
-      auto_reply_enabled,
       settings
     } = req.body;
 
@@ -263,7 +261,6 @@ async function updateConfig(req, res) {
         greeting_message: greeting_message || null,
         unavailable_message: unavailable_message || null,
         business_hours: business_hours || null,
-        auto_reply_enabled: auto_reply_enabled !== undefined ? auto_reply_enabled : true,
         settings: settings || null
       });
     } else {
@@ -275,7 +272,6 @@ async function updateConfig(req, res) {
         ...(greeting_message !== undefined && { greeting_message }),
         ...(unavailable_message !== undefined && { unavailable_message }),
         ...(business_hours !== undefined && { business_hours }),
-        ...(auto_reply_enabled !== undefined && { auto_reply_enabled }),
         ...(settings !== undefined && { settings })
       });
     }

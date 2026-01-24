@@ -1146,10 +1146,6 @@ function initializeModels(sequelize) {
       type: DataTypes.JSON,
       allowNull: true
     },
-    auto_reply_enabled: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true
-    },
     settings: {
       type: DataTypes.JSON,
       allowNull: true
@@ -1158,6 +1154,37 @@ function initializeModels(sequelize) {
     tableName: 'ai_agent_configs',
     timestamps: true,
     createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  });
+
+  // WhatsApp Connection Model (for tenant databases)
+  const WhatsAppConnection = sequelize.define('WhatsAppConnection', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
+      comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+    },
+    phone_number_id: {
+      type: DataTypes.STRING(255),
+      allowNull: false
+    },
+    waba_id: {
+      type: DataTypes.STRING(255),
+      allowNull: true
+    },
+    access_token: {
+      type: DataTypes.TEXT,
+      allowNull: false
+    }
+  }, {
+    tableName: 'whatsapp_connections',
+    timestamps: true,
+    createdAt: 'connected_at',
     updatedAt: 'updated_at'
   });
 
@@ -3078,6 +3105,7 @@ function initializeModels(sequelize) {
     StoreProduct,
     CustomerInteraction,
     AIAgentConfig,
+    WhatsAppConnection,
     OnlineStore,
     OnlineStoreLocation,
     OnlineStoreService,

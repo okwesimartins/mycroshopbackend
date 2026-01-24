@@ -1194,6 +1194,54 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     // Continue - column might already be nullable
   }
 
+  // AI Agent Config table
+  const aiAgentTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const aiAgentTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+  
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS ai_agent_configs (
+      ${aiAgentTenantId}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      whatsapp_enabled BOOLEAN DEFAULT FALSE,
+      instagram_enabled BOOLEAN DEFAULT FALSE,
+      whatsapp_phone_number VARCHAR(50),
+      whatsapp_phone_number_id VARCHAR(100),
+      whatsapp_access_token TEXT,
+      instagram_account_id VARCHAR(100),
+      instagram_access_token TEXT,
+      greeting_message TEXT,
+      unavailable_message TEXT,
+      business_hours JSON,
+      settings JSON,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      ${aiAgentTenantIndex}
+      INDEX idx_whatsapp_enabled (whatsapp_enabled),
+      INDEX idx_instagram_enabled (instagram_enabled)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('✅ AI Agent Configs table created/verified');
+
+  // WhatsApp Connections table (for tenant databases)
+  const whatsappConnTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const whatsappConnTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+  
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_connections (
+      ${whatsappConnTenantId}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      phone_number_id VARCHAR(255) NOT NULL,
+      waba_id VARCHAR(255),
+      access_token TEXT NOT NULL,
+      connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      ${whatsappConnTenantIndex}
+      INDEX idx_phone_number_id (phone_number_id),
+      UNIQUE KEY unique_phone_number_id (phone_number_id${isSharedDb ? ', tenant_id' : ''})
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('✅ WhatsApp Connections table created/verified in tenant database');
+
   // All online store tables are now complete!
   // Note: Additional enterprise-only tables (roles, suppliers, purchase_orders, pos_transactions, etc.)
   // are not included here as free users only need online store functionality
@@ -1254,7 +1302,9 @@ async function migrateFreeUserToEnterprise(tenantId) {
       'store_collection_products',
       'store_collection_services',
       'online_store_orders',
-      'online_store_order_items'
+      'online_store_order_items',
+      'ai_agent_configs',
+      'whatsapp_connections'
     ];
 
     // Migrate each table
@@ -1315,6 +1365,50 @@ async function migrateFreeUserToEnterprise(tenantId) {
   }
 }
 
+/**
+ * Initialize main database tables (whatsapp_connections, etc.)
+ * Should be called once during application startup
+ */
+async function initializeMainDatabaseTables() {
+  try {
+    const connection = await mysql.createConnection({
+      host: process.env.MAIN_DB_HOST || 'localhost',
+      port: process.env.MAIN_DB_PORT || 3306,
+      user: process.env.MAIN_DB_USER || 'root',
+      password: process.env.MAIN_DB_PASSWORD
+    });
+
+    const dbName = process.env.MAIN_DB_NAME || 'mycroshop_main';
+
+    await connection.query(`USE \`${dbName}\``);
+
+    // Create whatsapp_connections table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS whatsapp_connections (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        tenant_id INT NOT NULL,
+        phone_number_id VARCHAR(255) NOT NULL,
+        waba_id VARCHAR(255),
+        access_token TEXT NOT NULL,
+        connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_tenant_id (tenant_id),
+        INDEX idx_phone_number_id (phone_number_id),
+        UNIQUE KEY unique_tenant_phone (tenant_id, phone_number_id),
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ whatsapp_connections table created/verified in main database');
+
+    await connection.end();
+    return true;
+  } catch (error) {
+    console.error('Error initializing main database tables:', error);
+    // Don't throw - table might already exist
+    return false;
+  }
+}
+
 module.exports = {
   mainSequelize,
   getTenantConnection,
@@ -1322,5 +1416,6 @@ module.exports = {
   createTenantDatabase,
   initializeSharedFreeDatabase,
   closeTenantConnection,
-  migrateFreeUserToEnterprise
+  migrateFreeUserToEnterprise,
+  initializeMainDatabaseTables
 };
