@@ -57,7 +57,7 @@ async function initiateWhatsAppConnection(req, res) {
     const stateWithTenant = `${state}:${req.user.tenantId}`;
     
     // Meta OAuth URL
-    const redirectUri = process.env.BMT_API_URL;
+    const redirectUri = `${process.env.BMT_API_URL || 'http://localhost:3000'}/api/v1/meta-connection/whatsapp/callback`;
     const appId = process.env.META_APP_ID;
     
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
@@ -94,41 +94,99 @@ async function handleWhatsAppCallback(req, res) {
     const { code, state } = req.query;
     
     if (!code || !state) {
-      return res.redirect('https://mycroshop.com');
+      return res.status(400).json({
+        success: false,
+        message: 'OAuth failed: Missing code or state parameter',
+        error: 'oauth_failed'
+      });
     }
 
     // Extract tenant_id from state
     const [stateToken, tenantId] = state.split(':');
     
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: tenant_id not found',
+        error: 'invalid_state'
+      });
+    }
+    
     // Exchange code for access token
-    const redirectUri = process.env.BMT_API_URL;
-    const tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-      params: {
-        client_id: process.env.META_APP_ID,
-        client_secret: process.env.META_APP_SECRET,
-        redirect_uri: redirectUri,
-        code: code
-      }
-    });
+    const redirectUri = `${process.env.BMT_API_URL || 'http://localhost:3000'}/api/v1/meta-connection/whatsapp/callback`;
+    
+    let tokenResponse;
+    try {
+      tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+        params: {
+          client_id: process.env.META_APP_ID,
+          client_secret: process.env.META_APP_SECRET,
+          redirect_uri: redirectUri,
+          code: code
+        }
+      });
+    } catch (error) {
+      console.error('Error exchanging OAuth code for token:', error.response?.data || error.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to exchange OAuth code for access token',
+        error: 'token_exchange_failed',
+        details: error.response?.data || error.message
+      });
+    }
 
     const accessToken = tokenResponse.data.access_token;
 
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No access token received from Meta',
+        error: 'no_access_token'
+      });
+    }
+
     // Get WhatsApp Business Account ID
-    const accountsResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
-      params: {
-        access_token: accessToken
-      }
-    });
+    let accountsResponse;
+    try {
+      accountsResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
+        params: {
+          access_token: accessToken
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching businesses:', error.response?.data || error.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to fetch WhatsApp Business Account',
+        error: 'business_fetch_failed',
+        details: error.response?.data || error.message
+      });
+    }
 
     // Get phone numbers for WhatsApp
-    const phoneNumbersResponse = await axios.get('https://graph.facebook.com/v18.0/me/phone_numbers', {
-      params: {
-        access_token: accessToken
-      }
-    });
+    let phoneNumbersResponse;
+    try {
+      phoneNumbersResponse = await axios.get('https://graph.facebook.com/v18.0/me/phone_numbers', {
+        params: {
+          access_token: accessToken
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching phone numbers:', error.response?.data || error.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to fetch WhatsApp phone numbers',
+        error: 'phone_numbers_fetch_failed',
+        details: error.response?.data || error.message
+      });
+    }
 
     if (!phoneNumbersResponse.data.data || phoneNumbersResponse.data.data.length === 0) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://mycroshop.com'}?error=no_phone_number`);
+      return res.status(400).json({
+        success: false,
+        message: 'No WhatsApp phone number found for this account',
+        error: 'no_phone_number'
+      });
     }
 
     const phoneNumber = phoneNumbersResponse.data.data[0];
@@ -139,7 +197,11 @@ async function handleWhatsAppCallback(req, res) {
     const tenant = await getTenantById(tenantId);
     
     if (!tenant) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://mycroshop.com'}?error=tenant_not_found`);
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant not found',
+        error: 'tenant_not_found'
+      });
     }
 
     const subscriptionPlan = tenant.subscription_plan || 'enterprise';
@@ -203,21 +265,6 @@ async function handleWhatsAppCallback(req, res) {
     try {
       const { mainSequelize } = require('../config/database');
       
-      // Get WABA ID from accounts response
-      const wabaId = accountsResponse.data.data?.[0]?.id || null;
-      
-      // Encrypt access token before storing (if encryption utility exists)
-      let encryptedToken = accessToken;
-      try {
-        const { encrypt } = require('../utils/encryption');
-        if (encrypt) {
-          encryptedToken = encrypt(accessToken);
-        }
-      } catch (e) {
-        // Encryption utility not available, store as-is (should be encrypted in production)
-        console.warn('Encryption utility not available, storing token unencrypted');
-      }
-      
       // Store in main database (whatsapp_connections table)
       // This table should exist in mycroshop_main database
       await mainSequelize.query(`
@@ -239,10 +286,26 @@ async function handleWhatsAppCallback(req, res) {
       // The connection is still stored in tenant database above
     }
 
-    res.redirect(`${process.env.FRONTEND_URL || 'http://mycroshop.com'}?success=whatsapp_connected`);
+    // Return success JSON response
+    return res.json({
+      success: true,
+      message: 'WhatsApp connected successfully',
+      data: {
+        tenant_id: tenantId,
+        phone_number_id: phoneNumberId,
+        phone_number: phoneNumber.phone_number,
+        waba_id: wabaId,
+        connected: true
+      }
+    });
   } catch (error) {
     console.error('Error handling WhatsApp callback:', error);
-    res.redirect(`${process.env.FRONTEND_URL || 'http://mycroshop.com'}?error=connection_failed`);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to connect WhatsApp',
+      error: 'connection_failed',
+      details: error.message
+    });
   }
 }
 
@@ -288,48 +351,105 @@ async function handleInstagramCallback(req, res) {
     const { code, state } = req.query;
     
     if (!code || !state) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=oauth_failed`);
+      return res.status(400).json({
+        success: false,
+        message: 'OAuth failed: Missing code or state parameter',
+        error: 'oauth_failed'
+      });
     }
 
     const [stateToken, tenantId] = state.split(':');
     
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: tenant_id not found',
+        error: 'invalid_state'
+      });
+    }
+    
     const redirectUri = `${process.env.BMT_API_URL || 'http://localhost:3000'}/api/v1/meta-connection/instagram/callback`;
-    const tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-      params: {
-        client_id: process.env.META_APP_ID,
-        client_secret: process.env.META_APP_SECRET,
-        redirect_uri: redirectUri,
-        code: code
-      }
-    });
+    
+    let tokenResponse;
+    try {
+      tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+        params: {
+          client_id: process.env.META_APP_ID,
+          client_secret: process.env.META_APP_SECRET,
+          redirect_uri: redirectUri,
+          code: code
+        }
+      });
+    } catch (error) {
+      console.error('Error exchanging OAuth code for token:', error.response?.data || error.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to exchange OAuth code for access token',
+        error: 'token_exchange_failed',
+        details: error.response?.data || error.message
+      });
+    }
 
     const accessToken = tokenResponse.data.access_token;
 
-    // Get Instagram Business Account
-    const pagesResponse = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
-      params: {
-        access_token: accessToken
-      }
-    });
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No access token received from Meta',
+        error: 'no_access_token'
+      });
+    }
 
-    // Find Instagram account connected to page
-    let instagramAccountId = null;
-    for (const page of pagesResponse.data.data || []) {
-      const instagramResponse = await axios.get(`https://graph.facebook.com/v18.0/${page.id}`, {
+    // Get Instagram Business Account
+    let pagesResponse;
+    try {
+      pagesResponse = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
         params: {
-          fields: 'instagram_business_account',
           access_token: accessToken
         }
       });
-      
-      if (instagramResponse.data.instagram_business_account) {
-        instagramAccountId = instagramResponse.data.instagram_business_account.id;
-        break;
+    } catch (error) {
+      console.error('Error fetching pages:', error.response?.data || error.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to fetch Facebook pages',
+        error: 'pages_fetch_failed',
+        details: error.response?.data || error.message
+      });
+    }
+
+    // Find Instagram account connected to page
+    let instagramAccountId = null;
+    try {
+      for (const page of pagesResponse.data.data || []) {
+        const instagramResponse = await axios.get(`https://graph.facebook.com/v18.0/${page.id}`, {
+          params: {
+            fields: 'instagram_business_account',
+            access_token: accessToken
+          }
+        });
+        
+        if (instagramResponse.data.instagram_business_account) {
+          instagramAccountId = instagramResponse.data.instagram_business_account.id;
+          break;
+        }
       }
+    } catch (error) {
+      console.error('Error fetching Instagram account:', error.response?.data || error.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to fetch Instagram Business Account',
+        error: 'instagram_account_fetch_failed',
+        details: error.response?.data || error.message
+      });
     }
 
     if (!instagramAccountId) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=no_instagram_account`);
+      return res.status(400).json({
+        success: false,
+        message: 'No Instagram Business Account found. Please ensure your Instagram account is connected to a Facebook Page.',
+        error: 'no_instagram_account'
+      });
     }
 
     // Get tenant info to determine subscription plan
@@ -337,7 +457,11 @@ async function handleInstagramCallback(req, res) {
     const tenant = await getTenantById(tenantId);
     
     if (!tenant) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=tenant_not_found`);
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant not found',
+        error: 'tenant_not_found'
+      });
     }
 
     const subscriptionPlan = tenant.subscription_plan || 'enterprise';
@@ -368,10 +492,24 @@ async function handleInstagramCallback(req, res) {
       });
     }
 
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?success=instagram_connected`);
+    // Return success JSON response
+    return res.json({
+      success: true,
+      message: 'Instagram connected successfully',
+      data: {
+        tenant_id: tenantId,
+        instagram_account_id: instagramAccountId,
+        connected: true
+      }
+    });
   } catch (error) {
     console.error('Error handling Instagram callback:', error);
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3001'}/settings?error=connection_failed`);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to connect Instagram',
+      error: 'connection_failed',
+      details: error.message
+    });
   }
 }
 
