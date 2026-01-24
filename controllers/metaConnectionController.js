@@ -136,7 +136,7 @@ async function handleWhatsAppCallback(req, res) {
     }
     
     // Exchange code for access token
-    const redirectUri = `${process.env.BMT_API_URL || 'http://localhost:3000'}/api/v1/meta-connection/whatsapp/callback`;
+    const redirectUri = process.env.BMT_API_URL;
     
     let tokenResponse;
     try {
