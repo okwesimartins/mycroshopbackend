@@ -101,13 +101,32 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
 
-    // Extract tenant_id from state
-    const [stateToken, tenantId] = state.split(':');
-    
-    if (!tenantId) {
+    // Validate state is a string
+    if (typeof state !== 'string') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid state parameter: tenant_id not found',
+        message: 'Invalid state parameter: state must be a string',
+        error: 'invalid_state_format'
+      });
+    }
+
+    // Extract tenant_id from state
+    const stateParts = state.split(':');
+    
+    if (stateParts.length < 2 || !stateParts[1]) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: tenant_id not found in state',
+        error: 'invalid_state'
+      });
+    }
+
+    const [stateToken, tenantId] = stateParts;
+    
+    if (!tenantId || !tenantId.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: tenant_id is empty',
         error: 'invalid_state'
       });
     }
@@ -358,12 +377,32 @@ async function handleInstagramCallback(req, res) {
       });
     }
 
-    const [stateToken, tenantId] = state.split(':');
-    
-    if (!tenantId) {
+    // Validate state is a string
+    if (typeof state !== 'string') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid state parameter: tenant_id not found',
+        message: 'Invalid state parameter: state must be a string',
+        error: 'invalid_state_format'
+      });
+    }
+
+    // Extract tenant_id from state
+    const stateParts = state.split(':');
+    
+    if (stateParts.length < 2 || !stateParts[1]) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: tenant_id not found in state',
+        error: 'invalid_state'
+      });
+    }
+
+    const [stateToken, tenantId] = stateParts;
+    
+    if (!tenantId || !tenantId.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: tenant_id is empty',
         error: 'invalid_state'
       });
     }
