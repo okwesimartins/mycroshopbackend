@@ -57,7 +57,7 @@ async function initiateWhatsAppConnection(req, res) {
     const stateWithTenant = `${state}:${req.user.tenantId}`;
     
     // Meta OAuth URL
-    const redirectUri = process.env.BMT_API_URL;
+    const redirectUri = 'https://mycroshop.com/';
     const appId = process.env.META_APP_ID;
     
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
@@ -168,65 +168,83 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
 
-    // Get phone numbers for WhatsApp
-    let phoneNumbersResponse;
+    // Get WhatsApp Business Account ID first (required to get phone numbers)
+    let wabaId = null;
+    let phoneNumberId = null;
+    let phoneNumber = null;
+    
     try {
-      phoneNumbersResponse = await axios.get('https://graph.facebook.com/v18.0/me/phone_numbers', {
+      // Try to get WABA ID from businesses endpoint
+      const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
         params: {
-          access_token: accessToken
+          access_token: accessToken,
+          fields: 'id,name'
         }
       });
-    } catch (error) {
-      console.error('Error fetching phone numbers:', error.response?.data || error.message);
+      
+      if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
+        wabaId = businessesResponse.data.data[0].id;
+        console.log('Found WABA ID:', wabaId);
+      }
+    } catch (businessError) {
+      console.warn('Could not fetch businesses, trying alternative method:', businessError.response?.data?.error?.message || businessError.message);
+      
+      // Alternative: Try to get WABA ID from WhatsApp Business Account endpoint
+      try {
+        const wabaResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
+          params: {
+            access_token: accessToken,
+            fields: 'whatsapp_business_accounts'
+          }
+        });
+        
+        if (wabaResponse.data.whatsapp_business_accounts && wabaResponse.data.whatsapp_business_accounts.data) {
+          wabaId = wabaResponse.data.whatsapp_business_accounts.data[0].id;
+          console.log('Found WABA ID from alternative method:', wabaId);
+        }
+      } catch (altError) {
+        console.warn('Alternative WABA fetch also failed:', altError.response?.data?.error?.message || altError.message);
+      }
+    }
+
+    // If we have WABA ID, get phone numbers from it
+    if (wabaId) {
+      try {
+        const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+          params: {
+            access_token: accessToken
+          }
+        });
+        
+        if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+          phoneNumber = phoneNumbersResponse.data.data[0];
+          phoneNumberId = phoneNumber.id;
+          console.log('Found phone number ID:', phoneNumberId);
+        }
+      } catch (phoneError) {
+        console.error('Error fetching phone numbers from WABA:', phoneError.response?.data || phoneError.message);
+        return res.status(400).json({
+          success: false,
+          message: 'Failed to fetch WhatsApp phone numbers from Business Account',
+          error: 'phone_numbers_fetch_failed',
+          details: phoneError.response?.data || phoneError.message
+        });
+      }
+    } else {
       return res.status(400).json({
         success: false,
-        message: 'Failed to fetch WhatsApp phone numbers',
-        error: 'phone_numbers_fetch_failed',
-        details: error.response?.data || error.message
+        message: 'Could not find WhatsApp Business Account. Please ensure you have a WhatsApp Business Account set up and have granted WhatsApp Business Management permissions.',
+        error: 'no_waba_found',
+        details: 'WhatsApp Business Account ID is required to fetch phone numbers'
       });
     }
 
-    if (!phoneNumbersResponse.data.data || phoneNumbersResponse.data.data.length === 0) {
+    if (!phoneNumberId) {
       return res.status(400).json({
         success: false,
-        message: 'No WhatsApp phone number found for this account',
+        message: 'No WhatsApp phone number found for this account. Please ensure you have a WhatsApp Business Account with a verified phone number.',
         error: 'no_phone_number'
       });
-    }
-
-    const phoneNumber = phoneNumbersResponse.data.data[0];
-    const phoneNumberId = phoneNumber.id;
-
-    // Try to get WhatsApp Business Account ID (optional - may not be available without additional permissions)
-    let wabaId = null;
-    try {
-      // First, try to get it from the phone number data if available
-      if (phoneNumber.waba_id) {
-        wabaId = phoneNumber.waba_id;
-      }
-      
-      // If not found in phone number, try the businesses endpoint (may fail without permissions)
-      if (!wabaId) {
-        try {
-          const accountsResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
-            params: {
-              access_token: accessToken,
-              fields: 'id,name'
-            }
-          });
-          
-          if (accountsResponse.data.data && accountsResponse.data.data.length > 0) {
-            wabaId = accountsResponse.data.data[0].id;
-          }
-        } catch (businessError) {
-          // This is optional - we can continue without WABA ID
-          console.warn('Could not fetch businesses (optional, may require additional permissions):', businessError.response?.data?.error?.message || businessError.message);
-          // Continue without WABA ID - it's not critical for basic functionality
-        }
-      }
-    } catch (error) {
-      // WABA ID is optional, continue without it
-      console.warn('Could not fetch WABA ID (optional):', error.message);
     }
 
     // Get tenant info to determine subscription plan
@@ -259,14 +277,14 @@ async function handleWhatsAppCallback(req, res) {
       config = await models.AIAgentConfig.create({
         whatsapp_enabled: true,
         whatsapp_phone_number_id: phoneNumberId,
-        whatsapp_phone_number: phoneNumber.phone_number,
+        whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.phone_number || phoneNumber?.verified_name || null,
         whatsapp_access_token: accessToken // Store securely - in production, encrypt this
       });
     } else {
       await config.update({
         whatsapp_enabled: true,
         whatsapp_phone_number_id: phoneNumberId,
-        whatsapp_phone_number: phoneNumber.phone_number,
+        whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.phone_number || phoneNumber?.verified_name || null,
         whatsapp_access_token: accessToken
       });
     }
@@ -329,7 +347,7 @@ async function handleWhatsAppCallback(req, res) {
       data: {
         tenant_id: tenantId,
         phone_number_id: phoneNumberId,
-        phone_number: phoneNumber.phone_number,
+        phone_number: phoneNumber?.display_phone_number || phoneNumber?.phone_number || phoneNumber?.verified_name || null,
         waba_id: wabaId,
         connected: true
       }
@@ -353,7 +371,7 @@ async function initiateInstagramConnection(req, res) {
     const state = crypto.randomBytes(32).toString('hex');
     const stateWithTenant = `${state}:${req.user.tenantId}`;
     
-    const redirectUri = `${process.env.BMT_API_URL || 'http://localhost:3000'}/api/v1/meta-connection/instagram/callback`;
+    const redirectUri = 'https://mycroshop.com/';
     const appId = process.env.META_APP_ID;
     
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
@@ -428,7 +446,7 @@ async function handleInstagramCallback(req, res) {
       });
     }
     
-    const redirectUri = `${process.env.BMT_API_URL || 'http://localhost:3000'}/api/v1/meta-connection/instagram/callback`;
+    const redirectUri = 'https://mycroshop.com/';
     
     let tokenResponse;
     try {
