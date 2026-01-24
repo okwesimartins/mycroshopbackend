@@ -136,7 +136,7 @@ async function handleWhatsAppCallback(req, res) {
     }
     
     // Exchange code for access token
-    const redirectUri = process.env.BMT_API_URL;
+    const redirectUri = 'https://mycroshop.com/';
     
     let tokenResponse;
     try {
