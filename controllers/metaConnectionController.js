@@ -408,6 +408,7 @@ async function handleWhatsAppCallback(req, res) {
       success: false,
       message: 'Failed to connect WhatsApp',
       error: 'connection_failed',
+      waba_id: wabaId,
       details: error.message
     });
   }
