@@ -36,7 +36,6 @@ async function getConnectionStatus(req, res) {
       }
     });
   } catch (error) {
-    console.error('Error getting connection status:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to get connection status'
@@ -78,7 +77,6 @@ async function initiateWhatsAppConnection(req, res) {
       }
     });
   } catch (error) {
-    console.error('Error initiating WhatsApp connection:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to initiate WhatsApp connection'
@@ -89,185 +87,331 @@ async function initiateWhatsAppConnection(req, res) {
 /**
  * Handle WhatsApp OAuth callback
  */
-
-
-
-async function metaGet(path, accessToken, params = {}) {
-  const url = `https://graph.facebook.com/v18.0/${path}`;
-  const res = await axios.get(url, { params: { access_token: accessToken, ...params } });
-  return res.data;
-}
-
-async function discoverWabaAndPhone(accessToken) {
-  // 1) businesses
-  const bizRes = await metaGet("me/businesses", accessToken, { fields: "id,name" });
-  const businesses = bizRes?.data || [];
-
-  for (const biz of businesses) {
-    // 2) owned WABAs under that business
-    let wabas = [];
-    try {
-      const wabaRes = await metaGet(`${biz.id}/owned_whatsapp_business_accounts`, accessToken, { fields: "id,name" });
-      wabas = wabaRes?.data || [];
-    } catch (_) {
-      continue;
-    }
-
-    for (const waba of wabas) {
-      // 3) phone numbers under WABA
-      try {
-        const phoneRes = await metaGet(`${waba.id}/phone_numbers`, accessToken, {
-          fields: "id,display_phone_number,verified_name,code_verification_status,quality_rating",
-        });
-        const phones = phoneRes?.data || [];
-        if (phones.length) return { wabaId: waba.id, phone: phones[0] };
-      } catch (_) {
-        continue;
-      }
-    }
-  }
-
-  return { wabaId: null, phone: null };
-}
-
 async function handleWhatsAppCallback(req, res) {
   try {
     const { code, state } = req.query;
+    
     if (!code || !state) {
-      return res.status(400).json({ success: false, message: "OAuth failed: Missing code or state", error: "oauth_failed" });
-    }
-
-    const stateString = Array.isArray(state) ? state[0] : String(state);
-    const parts = stateString.split(":");
-
-    // token:tenantId:phone_number_id:waba_id
-    const tenantId = parts[1] || null;
-    const hintedPhoneNumberId = parts[2] || null;
-    const hintedWabaId = parts[3] || null;
-
-    if (!tenantId) {
-      return res.status(400).json({ success: false, message: "Invalid state: tenant_id missing", error: "invalid_state" });
-    }
-
-    // IMPORTANT: this must EXACTLY match the redirect URI you configured in Meta app settings
-    const redirectUri = process.env.META_REDIRECT_URI || "https://mycroshop.com/";
-
-    // Exchange code for user access token
-    const tokenResponse = await axios.get("https://graph.facebook.com/v18.0/oauth/access_token", {
-      params: {
-        client_id: process.env.META_APP_ID,
-        client_secret: process.env.META_APP_SECRET,
-        redirect_uri: redirectUri,
-        code,
-      },
-    });
-
-    const accessToken = tokenResponse?.data?.access_token;
-    if (!accessToken) {
-      return res.status(400).json({ success: false, message: "No access token received", error: "no_access_token" });
-    }
-
-    // If embedded signup gave you phone_number_id/waba_id, prefer them
-    let wabaId = hintedWabaId;
-    let phoneNumberId = hintedPhoneNumberId;
-    let phone = null;
-
-    // If we have phone_number_id, try to fetch details directly
-    if (phoneNumberId) {
-      try {
-        phone = await metaGet(`${phoneNumberId}`, accessToken, {
-          fields: "id,display_phone_number,verified_name,code_verification_status,quality_rating",
-        });
-      } catch (_) {
-        phone = null;
-      }
-    }
-
-    // If still missing, discover properly
-    if (!phoneNumberId || !phone?.id || !wabaId) {
-      const discovered = await discoverWabaAndPhone(accessToken);
-      if (!wabaId) wabaId = discovered.wabaId;
-      if (!phoneNumberId && discovered.phone?.id) phoneNumberId = discovered.phone.id;
-      if (!phone && discovered.phone) phone = discovered.phone;
-    }
-
-    if (!phoneNumberId) {
       return res.status(400).json({
         success: false,
-        message: "Could not find WhatsApp phone number. Verify the number in WhatsApp Manager and ensure this Meta account owns a WABA with a phone number.",
-        error: "no_phone_number_found",
-        debug: { hintedPhoneNumberId, hintedWabaId, note: "Your screenshot shows the number is Unverified." },
+        message: 'OAuth failed: Missing code or state parameter',
+        error: 'oauth_failed'
       });
     }
 
-    // === SAVE TO DB (your existing logic) ===
-    const { getTenantById } = require("../config/tenant");
-    const tenant = await getTenantById(tenantId);
-    if (!tenant) return res.status(404).json({ success: false, message: "Tenant not found", error: "tenant_not_found" });
-
-    const subscriptionPlan = tenant.subscription_plan || "enterprise";
-    const { getTenantConnection, mainSequelize } = require("../config/database");
-    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
-    const initializeModels = require("../models");
-    const models = initializeModels(sequelize);
-
-    // Encrypt token if util exists
-    let encryptedToken = accessToken;
-    try {
-      const { encrypt } = require("../utils/encryption");
-      if (typeof encrypt === "function") encryptedToken = encrypt(accessToken);
-    } catch (_) {}
-
-    // Upsert tenant DB connection record
-    await models.WhatsAppConnection.upsert({
-      ...(subscriptionPlan === "free" && { tenant_id: tenantId }),
-      phone_number_id: phoneNumberId,
-      waba_id: wabaId || null,
-      access_token: encryptedToken,
-    });
-
-    // Optional: main DB lookup table (phone_number_id -> tenant)
-    try {
-      await mainSequelize.query(
-        `
-        INSERT INTO whatsapp_connections (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
-        VALUES (?, ?, ?, ?, NOW(), NOW())
-        ON DUPLICATE KEY UPDATE
-          waba_id = VALUES(waba_id),
-          access_token = VALUES(access_token),
-          updated_at = NOW()
-        `,
-        { replacements: [tenantId, phoneNumberId, wabaId || null, encryptedToken] }
-      );
-    } catch (e) {
-      // don't fail the whole flow
-      console.error("Main DB store failed:", e.message);
+    // Normalize state - Express query params can be arrays or strings
+    // If it's an array, take the first element; if it's already a string, use it
+    const stateString = Array.isArray(state) ? state[0] : String(state);
+    
+    // Validate state is not empty
+    if (!stateString || !stateString.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: state is empty',
+        error: 'invalid_state_format'
+      });
     }
 
+    // Extract tenant_id from state
+    const stateParts = stateString.split(':');
+    
+    if (stateParts.length < 2 || !stateParts[1]) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: tenant_id not found in state',
+        error: 'invalid_state'
+      });
+    }
+
+    const [stateToken, tenantId] = stateParts;
+    
+    if (!tenantId || !tenantId.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid state parameter: tenant_id is empty',
+        error: 'invalid_state'
+      });
+    }
+    
+    // Exchange code for access token
+    const redirectUri = 'https://mycroshop.com/';
+    
+    let tokenResponse;
+    try {
+      tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+        params: {
+          client_id: process.env.META_APP_ID,
+          client_secret: process.env.META_APP_SECRET,
+          redirect_uri: redirectUri,
+          code: code
+        }
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to exchange OAuth code for access token',
+        error: 'token_exchange_failed',
+        details: error.response?.data || error.message
+      });
+    }
+
+    const accessToken = tokenResponse.data.access_token;
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'No access token received from Meta',
+        error: 'no_access_token'
+      });
+    }
+
+    // Get WhatsApp Business Account ID and phone numbers
+    // For test accounts, we need to access through the app's WhatsApp configuration
+    let wabaId = null;
+    let phoneNumberId = null;
+    let phoneNumber = null;
+    let lastError = null;
+    
+    // Method 1: Try to get WABA and phone numbers from app's WhatsApp configuration (BEST for test mode)
+    try {
+      const appWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
+        params: {
+          access_token: accessToken,
+          fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
+        }
+      });
+      
+      if (appWabaResponse.data.whatsapp_business_accounts && appWabaResponse.data.whatsapp_business_accounts.data) {
+        const waba = appWabaResponse.data.whatsapp_business_accounts.data[0];
+        wabaId = waba.id;
+        
+        if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+          phoneNumber = waba.phone_numbers.data[0];
+          phoneNumberId = phoneNumber.id;
+        }
+      }
+    } catch (appError) {
+      lastError = appError.response?.data || { message: appError.message };
+    }
+    
+    // Method 2: Try to get WABA ID from user's whatsapp_business_accounts field
+    if (!phoneNumberId) {
+      try {
+        const wabaResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
+          params: {
+            access_token: accessToken,
+            fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
+          }
+        });
+        
+        if (wabaResponse.data.whatsapp_business_accounts && wabaResponse.data.whatsapp_business_accounts.data && wabaResponse.data.whatsapp_business_accounts.data.length > 0) {
+          const waba = wabaResponse.data.whatsapp_business_accounts.data[0];
+          wabaId = waba.id;
+          
+          if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+            phoneNumber = waba.phone_numbers.data[0];
+            phoneNumberId = phoneNumber.id;
+          }
+        }
+      } catch (altError) {
+        lastError = altError.response?.data || { message: altError.message };
+      }
+    }
+    
+    // Method 3: Try direct whatsapp_business_accounts endpoint
+    if (!phoneNumberId) {
+      try {
+        const wabaDirectResponse = await axios.get('https://graph.facebook.com/v18.0/me/whatsapp_business_accounts', {
+          params: {
+            access_token: accessToken,
+            fields: 'id,name,phone_numbers{id,display_phone_number,verified_name}'
+          }
+        });
+        
+        if (wabaDirectResponse.data.data && wabaDirectResponse.data.data.length > 0) {
+          const waba = wabaDirectResponse.data.data[0];
+          wabaId = waba.id;
+          
+          if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+            phoneNumber = waba.phone_numbers.data[0];
+            phoneNumberId = phoneNumber.id;
+          }
+        }
+      } catch (directError) {
+        lastError = directError.response?.data || { message: directError.message };
+      }
+    }
+    
+    // Method 4: If we have WABA ID but no phone number, try getting phone numbers separately
+    if (wabaId && !phoneNumberId) {
+      try {
+        const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+          params: {
+            access_token: accessToken
+          }
+        });
+        
+        if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+          phoneNumber = phoneNumbersResponse.data.data[0];
+          phoneNumberId = phoneNumber.id;
+        }
+      } catch (phoneError) {
+        lastError = phoneError.response?.data || { message: phoneError.message };
+      }
+    }
+    
+    // Method 5: Try businesses endpoint
+    if (!wabaId) {
+      try {
+        const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
+          params: {
+            access_token: accessToken,
+            fields: 'id,name'
+          }
+        });
+        
+        if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
+          wabaId = businessesResponse.data.data[0].id;
+          
+          const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+            params: {
+              access_token: accessToken
+            }
+          });
+          
+          if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+            phoneNumber = phoneNumbersResponse.data.data[0];
+            phoneNumberId = phoneNumber.id;
+          }
+        }
+      } catch (businessError) {
+        lastError = businessError.response?.data || { message: businessError.message };
+      }
+    }
+    
+    // If still no phone number found, return exact error from Meta API
+    if (!phoneNumberId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Could not find WhatsApp phone number',
+        error: 'no_phone_number_found',
+        details: lastError || {
+          message: 'All API methods failed to retrieve WhatsApp Business Account or phone number',
+          waba_id_found: !!wabaId
+        }
+      });
+    }
+
+    // Get tenant info to determine subscription plan
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant not found',
+        error: 'tenant_not_found'
+      });
+    }
+
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+
+    // Get tenant database connection (handles both free and enterprise)
+    const { getTenantConnection } = require('../config/database');
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const initializeModels = require('../models');
+    const models = initializeModels(sequelize);
+
+    // Update or create AI agent config in tenant database
+    let config = await models.AIAgentConfig.findOne({
+      where: {},
+      order: [['created_at', 'DESC']]
+    });
+
+    if (!config) {
+      config = await models.AIAgentConfig.create({
+        whatsapp_enabled: true,
+        whatsapp_phone_number_id: phoneNumberId,
+        whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.phone_number || phoneNumber?.verified_name || null,
+        whatsapp_access_token: accessToken // Store securely - in production, encrypt this
+      });
+    } else {
+      await config.update({
+        whatsapp_enabled: true,
+        whatsapp_phone_number_id: phoneNumberId,
+        whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.phone_number || phoneNumber?.verified_name || null,
+        whatsapp_access_token: accessToken
+      });
+    }
+
+    // Also store in tenant database whatsapp_connections table
+    // WABA ID is already fetched above (or null if not available)
+    
+    // Encrypt access token before storing (if encryption utility exists)
+    let encryptedToken = accessToken;
+    try {
+      const { encrypt } = require('../utils/encryption');
+      if (encrypt) {
+        encryptedToken = encrypt(accessToken);
+      }
+    } catch (e) {
+      // Encryption utility not available, store as-is (should be encrypted in production)
+    }
+
+    // Store or update in tenant database
+    await models.WhatsAppConnection.upsert({
+      ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
+      phone_number_id: phoneNumberId,
+      waba_id: wabaId,
+      access_token: encryptedToken
+    });
+    
+
+    // Also store in main database for AI agent lookup (phone_number_id → tenant_id)
+    // This allows the AI agent webhook to quickly identify which tenant a message belongs to
+    try {
+      const { mainSequelize } = require('../config/database');
+      
+      // Store in main database (whatsapp_connections table)
+      // This table should exist in mycroshop_main database
+      await mainSequelize.query(`
+        INSERT INTO whatsapp_connections 
+        (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
+        VALUES (?, ?, ?, ?, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+        waba_id = VALUES(waba_id),
+        access_token = VALUES(access_token),
+        updated_at = NOW()
+      `, {
+        replacements: [tenantId, phoneNumberId, wabaId, encryptedToken]
+      });
+      
+    } catch (error) {
+      // Don't fail the connection if this fails - it's for AI agent lookup only
+      // The connection is still stored in tenant database above
+    }
+
+    // Return success JSON response
     return res.json({
       success: true,
-      message: "WhatsApp connected successfully",
+      message: 'WhatsApp connected successfully',
       data: {
         tenant_id: tenantId,
         phone_number_id: phoneNumberId,
-        phone_number: phone?.display_phone_number || phone?.verified_name || null,
-        waba_id: wabaId || null,
-      },
+        phone_number: phoneNumber?.display_phone_number || phoneNumber?.phone_number || phoneNumber?.verified_name || null,
+        waba_id: wabaId,
+        connected: true
+      }
     });
   } catch (error) {
-    console.error("WhatsApp callback error:", error.response?.data || error.message);
     return res.status(500).json({
       success: false,
-      message: "Failed to connect WhatsApp",
-      error: "connection_failed",
-      details: error.response?.data || error.message,
+      message: 'Failed to connect WhatsApp',
+      error: 'connection_failed',
+      details: error.message
     });
   }
 }
-
-
-
-
 
 /**
  * Initiate Instagram connection
@@ -295,7 +439,6 @@ async function initiateInstagramConnection(req, res) {
       }
     });
   } catch (error) {
-    console.error('Error initiating Instagram connection:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to initiate Instagram connection'
@@ -365,7 +508,6 @@ async function handleInstagramCallback(req, res) {
         }
       });
     } catch (error) {
-      console.error('Error exchanging OAuth code for token:', error.response?.data || error.message);
       return res.status(400).json({
         success: false,
         message: 'Failed to exchange OAuth code for access token',
@@ -393,7 +535,6 @@ async function handleInstagramCallback(req, res) {
         }
       });
     } catch (error) {
-      console.error('Error fetching pages:', error.response?.data || error.message);
       return res.status(400).json({
         success: false,
         message: 'Failed to fetch Facebook pages',
@@ -419,7 +560,6 @@ async function handleInstagramCallback(req, res) {
         }
       }
     } catch (error) {
-      console.error('Error fetching Instagram account:', error.response?.data || error.message);
       return res.status(400).json({
         success: false,
         message: 'Failed to fetch Instagram Business Account',
@@ -487,7 +627,6 @@ async function handleInstagramCallback(req, res) {
       }
     });
   } catch (error) {
-    console.error('Error handling Instagram callback:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to connect Instagram',
@@ -521,7 +660,6 @@ async function disconnectWhatsApp(req, res) {
       message: 'WhatsApp disconnected successfully'
     });
   } catch (error) {
-    console.error('Error disconnecting WhatsApp:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to disconnect WhatsApp'
@@ -552,7 +690,6 @@ async function disconnectInstagram(req, res) {
       message: 'Instagram disconnected successfully'
     });
   } catch (error) {
-    console.error('Error disconnecting Instagram:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to disconnect Instagram'
