@@ -262,6 +262,7 @@ async function handleWhatsAppCallback(req, res) {
     
     // Method 3: Try to get WABA ID from user's whatsapp_business_accounts field
     // Note: /me endpoints require user token, not App Access Token
+    // This is the KEY method - OAuth user token should have access to WABAs they selected
     if (!phoneNumberId) {
       try {
         const wabaResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
@@ -272,6 +273,26 @@ async function handleWhatsAppCallback(req, res) {
         });
         
         if (wabaResponse.data.whatsapp_business_accounts && wabaResponse.data.whatsapp_business_accounts.data && wabaResponse.data.whatsapp_business_accounts.data.length > 0) {
+          // Log all WABAs found via user token (these are the ones they selected in OAuth)
+          for (const waba of wabaResponse.data.whatsapp_business_accounts.data) {
+            if (!foundWabaIds.includes(waba.id)) {
+              foundWabaIds.push(waba.id);
+              wabaDiagnostics.push({
+                waba_id: waba.id,
+                waba_name: waba.name,
+                phone_numbers_count: waba.phone_numbers?.data?.length || 0,
+                phone_numbers: waba.phone_numbers?.data?.map(p => ({
+                  id: p.id,
+                  display_phone_number: p.display_phone_number,
+                  verified_name: p.verified_name
+                })) || [],
+                found_via: 'user_oauth_token_me_endpoint',
+                note: 'This WABA was selected during OAuth flow and is accessible via user token'
+              });
+            }
+          }
+          
+          // Use first WABA (or the one they selected)
           const waba = wabaResponse.data.whatsapp_business_accounts.data[0];
           wabaId = waba.id;
           
@@ -281,12 +302,14 @@ async function handleWhatsAppCallback(req, res) {
           }
         }
       } catch (altError) {
-        lastError = altError.response?.data || { message: altError.message };
+        const altErrorDetails = altError.response?.data || { message: altError.message };
+        lastError = altErrorDetails;
       }
     }
     
     // Method 4: Try direct whatsapp_business_accounts endpoint
     // Note: /me endpoints require user token, not App Access Token
+    // Another way to access WABAs via user OAuth token
     if (!phoneNumberId) {
       try {
         const wabaDirectResponse = await axios.get('https://graph.facebook.com/v18.0/me/whatsapp_business_accounts', {
@@ -297,6 +320,25 @@ async function handleWhatsAppCallback(req, res) {
         });
         
         if (wabaDirectResponse.data.data && wabaDirectResponse.data.data.length > 0) {
+          // Log all WABAs found via direct endpoint
+          for (const waba of wabaDirectResponse.data.data) {
+            if (!foundWabaIds.includes(waba.id)) {
+              foundWabaIds.push(waba.id);
+              wabaDiagnostics.push({
+                waba_id: waba.id,
+                waba_name: waba.name,
+                phone_numbers_count: waba.phone_numbers?.data?.length || 0,
+                phone_numbers: waba.phone_numbers?.data?.map(p => ({
+                  id: p.id,
+                  display_phone_number: p.display_phone_number,
+                  verified_name: p.verified_name
+                })) || [],
+                found_via: 'user_oauth_token_direct_endpoint',
+                note: 'This WABA was selected during OAuth flow and is accessible via user token'
+              });
+            }
+          }
+          
           const waba = wabaDirectResponse.data.data[0];
           wabaId = waba.id;
           
@@ -306,7 +348,10 @@ async function handleWhatsAppCallback(req, res) {
           }
         }
       } catch (directError) {
-        lastError = directError.response?.data || { message: directError.message };
+        const directErrorDetails = directError.response?.data || { message: directError.message };
+        if (!lastError || (lastError.error && lastError.error.code !== 100)) {
+          lastError = directErrorDetails;
+        }
       }
     }
     
@@ -492,7 +537,13 @@ async function handleWhatsAppCallback(req, res) {
           waba_id_attempted: wabaId || 'none',
           note: wabaId 
             ? `Found WABA ID ${wabaId} but could not access phone numbers. Check if this WABA has phone numbers assigned in WhatsApp Manager.` 
-            : 'No WABA IDs found. This suggests WhatsApp Business Account is not linked to the app.'
+            : 'No WABA IDs found. This means the WhatsApp Business Account is NOT linked to your Meta App. This is the root cause - you need to link the WABA to your app first.',
+          root_cause: foundWabaIds.length === 0 
+            ? 'WhatsApp Business Account is not linked to your Meta App. Even though you can see a test phone number in WhatsApp Manager, the Graph API cannot access it because the WABA is not associated with your app.' 
+            : null,
+          solution: foundWabaIds.length === 0 
+            ? 'You have two options: 1) Link the WABA to your app in Meta App Dashboard (recommended), or 2) Use manual connection endpoint with Phone Number ID from WhatsApp Manager (workaround).'
+            : null
         },
         last_error_context: lastError?.waba_id_attempted ? {
           waba_id: lastError.waba_id_attempted,
@@ -502,27 +553,35 @@ async function handleWhatsAppCallback(req, res) {
         } : null,
         note: 'All methods attempted: App Access Token, User OAuth Token, and various endpoint combinations. The "Missing Permission" error suggests that even the App Access Token cannot access WhatsApp Business Accounts. This may indicate:',
         possible_causes: [
-          '1. WhatsApp product not properly configured in Meta App Dashboard',
-          '2. No test phone number assigned to the app',
-          '3. WhatsApp Business Account not linked to the app',
-          wabaId ? `4. WABA ID ${wabaId} found but phone numbers are not accessible (check WhatsApp Manager)` : '4. No WABA IDs found - WhatsApp Business Account not linked',
+          '1. **ROOT CAUSE: WhatsApp Business Account is NOT linked to your Meta App** - This is why no WABA IDs are found',
+          '2. WhatsApp product not properly configured in Meta App Dashboard',
+          '3. No test phone number assigned to the app',
+          wabaId ? `4. WABA ID ${wabaId} found but phone numbers are not accessible (check WhatsApp Manager)` : '4. No WABA IDs found - WhatsApp Business Account not linked to app',
           '5. App Access Token requires additional permissions (unlikely in test mode)',
-          '6. The test phone number exists but is not accessible via Graph API until certain conditions are met'
+          '6. The test phone number exists in WhatsApp Manager UI but is not accessible via Graph API because WABA is not linked'
         ],
         troubleshooting_steps: [
-          '1. Go to Meta App Dashboard → WhatsApp → Getting Started',
-          '2. Ensure WhatsApp is added as a product',
-          '3. Check if a test phone number is assigned (should show in WhatsApp Manager)',
-          wabaId ? `4. Verify WABA ID ${wabaId} has phone numbers assigned in WhatsApp Manager` : '4. Verify WhatsApp Business Account is linked to your app',
-          '5. Verify META_APP_ID and META_APP_SECRET are correct in environment variables',
-          '6. Try accessing the phone number manually via Graph API Explorer:',
-          `   GET https://graph.facebook.com/v18.0/${process.env.META_APP_ID}?access_token=${process.env.META_APP_ID}|${process.env.META_APP_SECRET}&fields=whatsapp_business_accounts`,
-          wabaId ? `   Or try: GET https://graph.facebook.com/v18.0/${wabaId}/phone_numbers?access_token=${process.env.META_APP_ID}|${process.env.META_APP_SECRET}` : '',
-          '7. If test phone number shows in WhatsApp Manager but not via API, you may need to:',
-          '   - Complete WhatsApp Business Account setup in Business Manager',
-          '   - Link the WhatsApp Business Account to your app',
-          '   - Wait for Meta to sync the phone number to the API (can take a few minutes)'
-        ].filter(step => step !== ''),
+          '**STEP 1: Link WhatsApp Business Account to Your App (CRITICAL)**',
+          '   1. Go to Meta App Dashboard → WhatsApp → Getting Started',
+          '   2. Look for "Add Phone Number" or "Connect WhatsApp Business Account"',
+          '   3. If you see a test phone number in WhatsApp Manager, you need to link it to your app',
+          '   4. In WhatsApp Manager, go to Settings → WhatsApp Business Account → Apps',
+          '   5. Add your app to the WABA, or create a new WABA and link it to your app',
+          '',
+          '**STEP 2: Verify Configuration**',
+          '   1. Ensure WhatsApp is added as a product in your Meta App',
+          '   2. Check if a test phone number is assigned (should show in WhatsApp Manager)',
+          '   3. Verify META_APP_ID and META_APP_SECRET are correct in environment variables',
+          '',
+          '**STEP 3: Test API Access**',
+          `   Try in Graph API Explorer: GET https://graph.facebook.com/v18.0/${process.env.META_APP_ID}?access_token=${process.env.META_APP_ID}|${process.env.META_APP_SECRET}&fields=whatsapp_business_accounts`,
+          '   If this returns empty data or error, the WABA is not linked.',
+          '',
+          '**STEP 4: Alternative - Manual Connection (Workaround)**',
+          '   If linking WABA to app is not possible, use manual connection endpoint:',
+          '   POST /api/v1/meta-connection/whatsapp/manual-connect',
+          '   Get Phone Number ID from WhatsApp Manager URL when viewing phone number details'
+        ],
         alternative_approach: 'If the phone number is visible in WhatsApp Manager but not accessible via API, use the manual connection endpoint: POST /api/v1/meta-connection/whatsapp/manual-connect. Get the Phone Number ID from WhatsApp Manager URL when viewing phone number details.',
         manual_connection_endpoint: '/api/v1/meta-connection/whatsapp/manual-connect',
         manual_connection_guide: 'See WHATSAPP_MANUAL_CONNECTION_GUIDE.md for step-by-step instructions'
@@ -932,6 +991,127 @@ async function disconnectInstagram(req, res) {
 }
 
 /**
+ * Verify OAuth token and check WABA access
+ * This helps diagnose if OAuth worked and WABA is accessible
+ */
+async function verifyOAuthToken(req, res) {
+  try {
+    const { access_token } = req.body;
+    
+    if (!access_token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Access token is required',
+        error: 'missing_access_token'
+      });
+    }
+
+    // Check token permissions
+    let tokenPermissions = null;
+    let tokenInfo = null;
+    try {
+      const debugTokenResponse = await axios.get('https://graph.facebook.com/v18.0/debug_token', {
+        params: {
+          input_token: access_token,
+          access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`
+        }
+      });
+      tokenInfo = debugTokenResponse.data.data;
+      tokenPermissions = tokenInfo?.scopes || [];
+    } catch (debugError) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid access token',
+        error: 'invalid_token',
+        details: debugError.response?.data || { message: debugError.message }
+      });
+    }
+
+    // Try to get WABAs via user token
+    let wabas = [];
+    let wabaError = null;
+    try {
+      const wabaResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
+        params: {
+          access_token: access_token,
+          fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
+        }
+      });
+      
+      if (wabaResponse.data.whatsapp_business_accounts && wabaResponse.data.whatsapp_business_accounts.data) {
+        wabas = wabaResponse.data.whatsapp_business_accounts.data.map(waba => ({
+          id: waba.id,
+          name: waba.name,
+          phone_numbers_count: waba.phone_numbers?.data?.length || 0,
+          phone_numbers: waba.phone_numbers?.data?.map(p => ({
+            id: p.id,
+            display_phone_number: p.display_phone_number,
+            verified_name: p.verified_name
+          })) || []
+        }));
+      }
+    } catch (error) {
+      wabaError = error.response?.data || { message: error.message };
+    }
+
+    // Try direct endpoint
+    if (wabas.length === 0) {
+      try {
+        const wabaDirectResponse = await axios.get('https://graph.facebook.com/v18.0/me/whatsapp_business_accounts', {
+          params: {
+            access_token: access_token,
+            fields: 'id,name,phone_numbers{id,display_phone_number,verified_name}'
+          }
+        });
+        
+        if (wabaDirectResponse.data.data && wabaDirectResponse.data.data.length > 0) {
+          wabas = wabaDirectResponse.data.data.map(waba => ({
+            id: waba.id,
+            name: waba.name,
+            phone_numbers_count: waba.phone_numbers?.data?.length || 0,
+            phone_numbers: waba.phone_numbers?.data?.map(p => ({
+              id: p.id,
+              display_phone_number: p.display_phone_number,
+              verified_name: p.verified_name
+            })) || []
+          }));
+        }
+      } catch (error) {
+        if (!wabaError) {
+          wabaError = error.response?.data || { message: error.message };
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: 'OAuth token verification complete',
+      data: {
+        token_valid: true,
+        token_permissions: tokenPermissions,
+        has_whatsapp_permissions: tokenPermissions.includes('whatsapp_business_management') && tokenPermissions.includes('whatsapp_business_messaging'),
+        wabas_found: wabas.length,
+        wabas: wabas,
+        waba_error: wabaError,
+        verification_status: wabas.length > 0 
+          ? '✅ SUCCESS: WABA(s) accessible via OAuth token. OAuth flow worked correctly!'
+          : '❌ FAILED: No WABAs found. OAuth may not have completed properly or WABA was not selected.',
+        next_steps: wabas.length > 0
+          ? 'WABA is accessible. If phone numbers are missing, use manual connection endpoint with Phone Number ID from WhatsApp Manager.'
+          : '1. Complete OAuth flow again and ensure you select the WABA and click "Continue". 2. Check if the WABA is linked to your app in Meta App Dashboard.'
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to verify OAuth token',
+      error: 'verification_failed',
+      details: error.message
+    });
+  }
+}
+
+/**
  * Test WhatsApp connection
  */
 async function testWhatsAppConnection(req, res) {
@@ -1185,6 +1365,7 @@ module.exports = {
   disconnectInstagram,
   testWhatsAppConnection,
   testInstagramConnection,
-  manuallyConnectWhatsApp
+  manuallyConnectWhatsApp,
+  verifyOAuthToken
 };
 
