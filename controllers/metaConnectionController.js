@@ -63,7 +63,7 @@ async function initiateWhatsAppConnection(req, res) {
       `client_id=${appId}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&state=${stateWithTenant}` +
-      `&scope=whatsapp_business_management,whatsapp_business_messaging` +
+      `&scope=business_management,whatsapp_business_management,whatsapp_business_messaging` +
       `&response_type=code`;
 
     // Store state temporarily (in production, use Redis with expiration)
@@ -165,8 +165,10 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
 
-    // Check token permissions first
+    // Check token permissions and get user info
     let tokenPermissions = null;
+    let tokenInfo = null;
+    let userId = null;
     try {
       const debugTokenResponse = await axios.get('https://graph.facebook.com/v18.0/debug_token', {
         params: {
@@ -174,9 +176,27 @@ async function handleWhatsAppCallback(req, res) {
           access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`
         }
       });
-      tokenPermissions = debugTokenResponse.data.data?.scopes || [];
+      tokenInfo = debugTokenResponse.data.data;
+      tokenPermissions = tokenInfo?.scopes || [];
+      userId = tokenInfo?.user_id || null;
     } catch (debugError) {
       // Continue even if debug fails
+    }
+
+    // Try to get user's businesses - this might work even if /me/businesses doesn't
+    // First, try to get user ID if we don't have it
+    if (!userId) {
+      try {
+        const meResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
+          params: {
+            access_token: accessToken,
+            fields: 'id'
+          }
+        });
+        userId = meResponse.data.id;
+      } catch (meError) {
+        // Continue without user ID
+      }
     }
 
     // Get WhatsApp Business Account ID and phone numbers
@@ -190,9 +210,11 @@ async function handleWhatsAppCallback(req, res) {
     
     // Method 1: Try with App Access Token FIRST (works best for test mode, no App Review needed)
     // App Access Token format: APP_ID|APP_SECRET - works in test mode without App Review
+    // Since WABA is linked to app (visible in Meta App Dashboard), this should work
     const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
     
     try {
+      // First, try to get WABAs with nested phone numbers
       const appTokenResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
         params: {
           access_token: appAccessToken,
@@ -212,7 +234,8 @@ async function handleWhatsAppCallback(req, res) {
               id: p.id,
               display_phone_number: p.display_phone_number,
               verified_name: p.verified_name
-            })) || []
+            })) || [],
+            found_via: 'app_access_token_nested_fields'
           });
         }
         
@@ -223,6 +246,52 @@ async function handleWhatsAppCallback(req, res) {
         if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
           phoneNumber = waba.phone_numbers.data[0];
           phoneNumberId = phoneNumber.id;
+        } else {
+          // If nested phone_numbers not returned, fetch separately
+          try {
+            const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+              params: {
+                access_token: appAccessToken
+              }
+            });
+            
+            if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+              phoneNumber = phoneNumbersResponse.data.data[0];
+              phoneNumberId = phoneNumber.id;
+            }
+          } catch (phoneError) {
+            // Continue to next method
+          }
+        }
+      } else {
+        // If nested query doesn't work, try getting WABAs first, then phone numbers separately
+        try {
+          const wabaListResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
+            params: {
+              access_token: appAccessToken,
+              fields: 'whatsapp_business_accounts{id,name}'
+            }
+          });
+          
+          if (wabaListResponse.data.whatsapp_business_accounts && wabaListResponse.data.whatsapp_business_accounts.data) {
+            const firstWaba = wabaListResponse.data.whatsapp_business_accounts.data[0];
+            wabaId = firstWaba.id;
+            foundWabaIds.push(wabaId);
+            
+            // Now get phone numbers for this WABA
+            const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+              params: {
+                access_token: appAccessToken
+              }
+            });
+            
+            if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+              phoneNumber = phoneNumbersResponse.data.data[0];
+              phoneNumberId = phoneNumber.id;
+            }
+          }
+        } catch (fallbackError) {
+          // Continue to next method
         }
       }
     } catch (appTokenError) {
@@ -230,56 +299,113 @@ async function handleWhatsAppCallback(req, res) {
       const appTokenErrorDetails = appTokenError.response?.data || { message: appTokenError.message };
       lastError = appTokenErrorDetails;
       
-      // If App Access Token fails, it might mean:
-      // 1. WhatsApp product not properly configured
-      // 2. No test phone number assigned
-      // 3. App Access Token doesn't have WhatsApp permissions (shouldn't happen in test mode)
+      // If App Access Token fails, try alternative query methods
+      // Sometimes the nested query fails but direct queries work
+      if (appTokenErrorDetails.error?.code === 100 || appTokenErrorDetails.error?.code === 190) {
+        // Try getting WABAs without nested fields
+        try {
+          const wabaListResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
+            params: {
+              access_token: appAccessToken,
+              fields: 'whatsapp_business_accounts'
+            }
+          });
+          
+          if (wabaListResponse.data.whatsapp_business_accounts && wabaListResponse.data.whatsapp_business_accounts.data && wabaListResponse.data.whatsapp_business_accounts.data.length > 0) {
+            const firstWaba = wabaListResponse.data.whatsapp_business_accounts.data[0];
+            wabaId = firstWaba.id;
+            foundWabaIds.push(wabaId);
+            
+            // Now get phone numbers for this WABA
+            try {
+              const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+                params: {
+                  access_token: appAccessToken
+                }
+              });
+              
+              if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+                phoneNumber = phoneNumbersResponse.data.data[0];
+                phoneNumberId = phoneNumber.id;
+              }
+            } catch (phoneError) {
+              // Continue to next method
+            }
+          }
+        } catch (fallbackError) {
+          // Continue to next method
+        }
+      }
     }
     
-    // Method 2: Try through businesses endpoint FIRST (PRIMARY METHOD for OAuth-selected WABAs)
-    // When user selects WABA during OAuth, it's accessible through /me/businesses
-    // This is the CORRECT way to access WABAs - they're business-level assets, not user-level
+    // Method 2: CORRECT FLOW - Get businesses, then owned WABAs, then phone numbers
+    // This is the official way: /me/businesses → /{business-id}/owned_whatsapp_business_accounts → /{waba-id}/phone_numbers
+    // REQUIRES: business_management permission in OAuth scope
     if (!phoneNumberId) {
       try {
+        // Step 1: Get businesses the user manages
         const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
           params: {
             access_token: accessToken,
-            fields: 'id,name,whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
+            fields: 'id,name'
           }
         });
         
         if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
+          // Step 2: For each business, get owned WABAs
           for (const business of businessesResponse.data.data) {
-            if (business.whatsapp_business_accounts && business.whatsapp_business_accounts.data) {
-              for (const waba of business.whatsapp_business_accounts.data) {
-                if (!foundWabaIds.includes(waba.id)) {
-                  foundWabaIds.push(waba.id);
-                  wabaDiagnostics.push({
-                    waba_id: waba.id,
-                    waba_name: waba.name,
-                    phone_numbers_count: waba.phone_numbers?.data?.length || 0,
-                    phone_numbers: waba.phone_numbers?.data?.map(p => ({
-                      id: p.id,
-                      display_phone_number: p.display_phone_number,
-                      verified_name: p.verified_name
-                    })) || [],
-                    found_via: 'user_oauth_token_businesses_endpoint',
-                    note: 'WABA accessed through businesses endpoint - this is the correct method for OAuth-selected WABAs'
-                  });
+            try {
+              const ownedWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${business.id}/owned_whatsapp_business_accounts`, {
+                params: {
+                  access_token: accessToken,
+                  fields: 'id,name'
+                }
+              });
+              
+              if (ownedWabaResponse.data.data && ownedWabaResponse.data.data.length > 0) {
+                for (const waba of ownedWabaResponse.data.data) {
+                  if (!foundWabaIds.includes(waba.id)) {
+                    foundWabaIds.push(waba.id);
+                    
+                    // Step 3: Get phone numbers for this WABA
+                    try {
+                      const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${waba.id}/phone_numbers`, {
+                        params: {
+                          access_token: accessToken,
+                          fields: 'id,display_phone_number,verified_name'
+                        }
+                      });
+                      
+                      if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+                        const phone = phoneNumbersResponse.data.data[0];
+                        wabaDiagnostics.push({
+                          waba_id: waba.id,
+                          waba_name: waba.name,
+                          phone_numbers_count: phoneNumbersResponse.data.data.length,
+                          phone_numbers: [{
+                            id: phone.id,
+                            display_phone_number: phone.display_phone_number,
+                            verified_name: phone.verified_name
+                          }],
+                          found_via: 'user_oauth_token_owned_waba_endpoint',
+                          note: 'WABA accessed through official owned_whatsapp_business_accounts endpoint'
+                        });
+                        
+                        // Use first WABA with phone number found
+                        if (!wabaId) {
+                          wabaId = waba.id;
+                          phoneNumber = phone;
+                          phoneNumberId = phone.id;
+                        }
+                      }
+                    } catch (phoneError) {
+                      // Continue to next WABA
+                    }
+                  }
                 }
               }
-            }
-          }
-          
-          // Use first WABA found
-          if (foundWabaIds.length > 0) {
-            const firstWaba = wabaDiagnostics.find(w => w.waba_id === foundWabaIds[0]);
-            if (firstWaba) {
-              wabaId = firstWaba.waba_id;
-              if (firstWaba.phone_numbers && firstWaba.phone_numbers.length > 0) {
-                phoneNumber = firstWaba.phone_numbers[0];
-                phoneNumberId = phoneNumber.id;
-              }
+            } catch (wabaError) {
+              // Continue to next business
             }
           }
         }
@@ -288,24 +414,6 @@ async function handleWhatsAppCallback(req, res) {
         if (!lastError) {
           lastError = businessesErrorDetails;
         }
-      }
-    }
-    
-    // Method 2b: If businesses worked but no phone numbers in nested response, fetch separately
-    if (wabaId && !phoneNumberId) {
-      try {
-        const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
-          params: {
-            access_token: accessToken
-          }
-        });
-        
-        if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
-          phoneNumber = phoneNumbersResponse.data.data[0];
-          phoneNumberId = phoneNumber.id;
-        }
-      } catch (phoneError) {
-        lastError = phoneError.response?.data || { message: phoneError.message };
       }
     }
     
@@ -434,62 +542,8 @@ async function handleWhatsAppCallback(req, res) {
       }
     }
     
-    // Method 6: Try businesses endpoint (with App Access Token fallback)
-    if (!wabaId) {
-      const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
-      
-      // Try with App Access Token first
-      try {
-        const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
-          params: {
-            access_token: appAccessToken,
-            fields: 'id,name'
-          }
-        });
-        
-        if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
-          wabaId = businessesResponse.data.data[0].id;
-          
-          const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
-            params: {
-              access_token: appAccessToken
-            }
-          });
-          
-          if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
-            phoneNumber = phoneNumbersResponse.data.data[0];
-            phoneNumberId = phoneNumber.id;
-          }
-        }
-      } catch (businessError) {
-        // Fallback to user token
-        try {
-          const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
-            params: {
-              access_token: accessToken,
-              fields: 'id,name'
-            }
-          });
-          
-          if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
-            wabaId = businessesResponse.data.data[0].id;
-            
-            const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
-              params: {
-                access_token: accessToken
-              }
-            });
-            
-            if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
-              phoneNumber = phoneNumbersResponse.data.data[0];
-              phoneNumberId = phoneNumber.id;
-            }
-          }
-        } catch (userTokenError) {
-          lastError = userTokenError.response?.data || { message: userTokenError.message };
-        }
-      }
-    }
+    // Method 6: REMOVED - App Access Token cannot be used on /me/businesses (user endpoint)
+    // App tokens represent the app, not a user, so they can't access user endpoints
     
     // Method 7: Direct test phone number lookup - Try to get phone number from app's WhatsApp configuration
     // In test mode, Meta assigns test phone numbers that are app-level, not user-level
@@ -571,7 +625,7 @@ async function handleWhatsAppCallback(req, res) {
       const errorDetails = {
         error: lastError?.error || lastError,
         token_permissions: tokenPermissions,
-        required_permissions: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+        required_permissions: ['business_management', 'whatsapp_business_management', 'whatsapp_business_messaging'],
         app_access_token_used: true,
         app_id: process.env.META_APP_ID ? `${process.env.META_APP_ID.substring(0, 4)}...` : 'not_set',
         waba_diagnostics: {
