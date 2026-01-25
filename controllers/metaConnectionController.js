@@ -187,7 +187,9 @@ async function handleWhatsAppCallback(req, res) {
     let lastError = null;
     
     // Method 1: Try to get WABA and phone numbers from app's WhatsApp configuration (BEST for test mode)
+    // Note: This might require App Access Token instead of User Access Token
     try {
+      // First try with user access token
       const appWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
         params: {
           access_token: accessToken,
@@ -206,6 +208,32 @@ async function handleWhatsAppCallback(req, res) {
       }
     } catch (appError) {
       lastError = appError.response?.data || { message: appError.message };
+      
+      // If user token fails with permission error, try with App Access Token (for test mode)
+      // App Access Token format: APP_ID|APP_SECRET
+      if (appError.response?.data?.error?.code === 100) {
+        try {
+          const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
+          const appTokenResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
+            params: {
+              access_token: appAccessToken,
+              fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
+            }
+          });
+          
+          if (appTokenResponse.data.whatsapp_business_accounts && appTokenResponse.data.whatsapp_business_accounts.data) {
+            const waba = appTokenResponse.data.whatsapp_business_accounts.data[0];
+            wabaId = waba.id;
+            
+            if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+              phoneNumber = waba.phone_numbers.data[0];
+              phoneNumberId = phoneNumber.id;
+            }
+          }
+        } catch (appTokenError) {
+          // Continue to next method
+        }
+      }
     }
     
     // Method 2: Try to get WABA ID from user's whatsapp_business_accounts field
