@@ -186,19 +186,20 @@ async function handleWhatsAppCallback(req, res) {
     let phoneNumber = null;
     let lastError = null;
     
-    // Method 1: Try to get WABA and phone numbers from app's WhatsApp configuration (BEST for test mode)
-    // Note: This might require App Access Token instead of User Access Token
+    // Method 1: Try with App Access Token FIRST (works best for test mode, no App Review needed)
+    // App Access Token format: APP_ID|APP_SECRET - works in test mode without App Review
+    const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
+    
     try {
-      // First try with user access token
-      const appWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
+      const appTokenResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
         params: {
-          access_token: accessToken,
+          access_token: appAccessToken,
           fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
         }
       });
       
-      if (appWabaResponse.data.whatsapp_business_accounts && appWabaResponse.data.whatsapp_business_accounts.data) {
-        const waba = appWabaResponse.data.whatsapp_business_accounts.data[0];
+      if (appTokenResponse.data.whatsapp_business_accounts && appTokenResponse.data.whatsapp_business_accounts.data) {
+        const waba = appTokenResponse.data.whatsapp_business_accounts.data[0];
         wabaId = waba.id;
         
         if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
@@ -206,37 +207,43 @@ async function handleWhatsAppCallback(req, res) {
           phoneNumberId = phoneNumber.id;
         }
       }
-    } catch (appError) {
-      lastError = appError.response?.data || { message: appError.message };
+    } catch (appTokenError) {
+      // Store the App Access Token error separately for better diagnostics
+      const appTokenErrorDetails = appTokenError.response?.data || { message: appTokenError.message };
+      lastError = appTokenErrorDetails;
       
-      // If user token fails with permission error, try with App Access Token (for test mode)
-      // App Access Token format: APP_ID|APP_SECRET
-      if (appError.response?.data?.error?.code === 100) {
-        try {
-          const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
-          const appTokenResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
-            params: {
-              access_token: appAccessToken,
-              fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
-            }
-          });
-          
-          if (appTokenResponse.data.whatsapp_business_accounts && appTokenResponse.data.whatsapp_business_accounts.data) {
-            const waba = appTokenResponse.data.whatsapp_business_accounts.data[0];
-            wabaId = waba.id;
-            
-            if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
-              phoneNumber = waba.phone_numbers.data[0];
-              phoneNumberId = phoneNumber.id;
-            }
+      // If App Access Token fails, it might mean:
+      // 1. WhatsApp product not properly configured
+      // 2. No test phone number assigned
+      // 3. App Access Token doesn't have WhatsApp permissions (shouldn't happen in test mode)
+    }
+    
+    // Method 2: If App Access Token fails, try with user OAuth token
+    if (!phoneNumberId) {
+      try {
+        const appWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
+          params: {
+            access_token: accessToken,
+            fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
           }
-        } catch (appTokenError) {
-          // Continue to next method
+        });
+        
+        if (appWabaResponse.data.whatsapp_business_accounts && appWabaResponse.data.whatsapp_business_accounts.data) {
+          const waba = appWabaResponse.data.whatsapp_business_accounts.data[0];
+          wabaId = waba.id;
+          
+          if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+            phoneNumber = waba.phone_numbers.data[0];
+            phoneNumberId = phoneNumber.id;
+          }
         }
+      } catch (appError) {
+        lastError = appError.response?.data || { message: appError.message };
       }
     }
     
-    // Method 2: Try to get WABA ID from user's whatsapp_business_accounts field
+    // Method 3: Try to get WABA ID from user's whatsapp_business_accounts field
+    // Note: /me endpoints require user token, not App Access Token
     if (!phoneNumberId) {
       try {
         const wabaResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
@@ -260,7 +267,8 @@ async function handleWhatsAppCallback(req, res) {
       }
     }
     
-    // Method 3: Try direct whatsapp_business_accounts endpoint
+    // Method 4: Try direct whatsapp_business_accounts endpoint
+    // Note: /me endpoints require user token, not App Access Token
     if (!phoneNumberId) {
       try {
         const wabaDirectResponse = await axios.get('https://graph.facebook.com/v18.0/me/whatsapp_business_accounts', {
@@ -284,12 +292,15 @@ async function handleWhatsAppCallback(req, res) {
       }
     }
     
-    // Method 4: If we have WABA ID but no phone number, try getting phone numbers separately
+    // Method 5: If we have WABA ID but no phone number, try getting phone numbers separately (with App Access Token fallback)
     if (wabaId && !phoneNumberId) {
+      const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
+      
+      // Try with App Access Token first
       try {
         const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
           params: {
-            access_token: accessToken
+            access_token: appAccessToken
           }
         });
         
@@ -298,23 +309,8 @@ async function handleWhatsAppCallback(req, res) {
           phoneNumberId = phoneNumber.id;
         }
       } catch (phoneError) {
-        lastError = phoneError.response?.data || { message: phoneError.message };
-      }
-    }
-    
-    // Method 5: Try businesses endpoint
-    if (!wabaId) {
-      try {
-        const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
-          params: {
-            access_token: accessToken,
-            fields: 'id,name'
-          }
-        });
-        
-        if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
-          wabaId = businessesResponse.data.data[0].id;
-          
+        // Fallback to user token
+        try {
           const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
             params: {
               access_token: accessToken
@@ -325,9 +321,109 @@ async function handleWhatsAppCallback(req, res) {
             phoneNumber = phoneNumbersResponse.data.data[0];
             phoneNumberId = phoneNumber.id;
           }
+        } catch (userTokenError) {
+          lastError = userTokenError.response?.data || { message: userTokenError.message };
+        }
+      }
+    }
+    
+    // Method 6: Try businesses endpoint (with App Access Token fallback)
+    if (!wabaId) {
+      const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
+      
+      // Try with App Access Token first
+      try {
+        const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
+          params: {
+            access_token: appAccessToken,
+            fields: 'id,name'
+          }
+        });
+        
+        if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
+          wabaId = businessesResponse.data.data[0].id;
+          
+          const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+            params: {
+              access_token: appAccessToken
+            }
+          });
+          
+          if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+            phoneNumber = phoneNumbersResponse.data.data[0];
+            phoneNumberId = phoneNumber.id;
+          }
         }
       } catch (businessError) {
-        lastError = businessError.response?.data || { message: businessError.message };
+        // Fallback to user token
+        try {
+          const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
+            params: {
+              access_token: accessToken,
+              fields: 'id,name'
+            }
+          });
+          
+          if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
+            wabaId = businessesResponse.data.data[0].id;
+            
+            const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+              params: {
+                access_token: accessToken
+              }
+            });
+            
+            if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+              phoneNumber = phoneNumbersResponse.data.data[0];
+              phoneNumberId = phoneNumber.id;
+            }
+          }
+        } catch (userTokenError) {
+          lastError = userTokenError.response?.data || { message: userTokenError.message };
+        }
+      }
+    }
+    
+    // If still no phone number found, try one more method: Direct test phone number lookup
+    // In test mode, Meta assigns test phone numbers that can be accessed via app-level endpoints
+    if (!phoneNumberId) {
+      const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
+      
+      try {
+        // Try to get all WhatsApp Business Accounts associated with the app
+        const allWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
+          params: {
+            access_token: appAccessToken,
+            fields: 'whatsapp_business_accounts'
+          }
+        });
+        
+        if (allWabaResponse.data.whatsapp_business_accounts && allWabaResponse.data.whatsapp_business_accounts.data) {
+          // Try each WABA to find phone numbers
+          for (const waba of allWabaResponse.data.whatsapp_business_accounts.data) {
+            try {
+              const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${waba.id}/phone_numbers`, {
+                params: {
+                  access_token: appAccessToken
+                }
+              });
+              
+              if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+                wabaId = waba.id;
+                phoneNumber = phoneNumbersResponse.data.data[0];
+                phoneNumberId = phoneNumber.id;
+                break;
+              }
+            } catch (wabaError) {
+              // Continue to next WABA
+            }
+          }
+        }
+      } catch (finalError) {
+        // This is the last attempt, so we'll use this error if nothing else worked
+        if (!lastError) {
+          lastError = finalError.response?.data || { message: finalError.message };
+        }
       }
     }
     
@@ -338,10 +434,17 @@ async function handleWhatsAppCallback(req, res) {
         message: 'Could not find WhatsApp phone number',
         error: 'no_phone_number_found',
         details: {
-          ...lastError,
+          error: lastError?.error || lastError,
           token_permissions: tokenPermissions,
           required_permissions: ['whatsapp_business_management', 'whatsapp_business_messaging'],
-          note: 'Ensure you granted WhatsApp Business Management and WhatsApp Business Messaging permissions during OAuth'
+          note: 'In test mode, ensure your Meta App has WhatsApp product configured and a test phone number assigned. The App Access Token method was attempted but may require App Review for production use.',
+          troubleshooting: [
+            '1. Go to Meta App Dashboard → WhatsApp product section',
+            '2. Ensure WhatsApp is added as a product',
+            '3. Check if a test phone number is assigned',
+            '4. Verify META_APP_ID and META_APP_SECRET are correct in environment variables',
+            '5. For test mode, the App Access Token (APP_ID|APP_SECRET) should work without App Review'
+          ]
         }
       });
     }
