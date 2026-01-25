@@ -993,17 +993,55 @@ async function disconnectInstagram(req, res) {
 /**
  * Verify OAuth token and check WABA access
  * This helps diagnose if OAuth worked and WABA is accessible
+ * Accepts either 'code' (OAuth authorization code) or 'access_token'
  */
 async function verifyOAuthToken(req, res) {
   try {
-    const { access_token } = req.body;
+    const { access_token, code, state } = req.body;
     
-    if (!access_token) {
+    if (!access_token && !code) {
       return res.status(400).json({
         success: false,
-        message: 'Access token is required',
-        error: 'missing_access_token'
+        message: 'Either access_token or code is required',
+        error: 'missing_token_or_code',
+        help: 'If you have the OAuth callback URL, use the "code" parameter. If you already have an access token, use "access_token" parameter.'
       });
+    }
+
+    let finalAccessToken = access_token;
+
+    // If code is provided, exchange it for access token
+    if (code && !access_token) {
+      try {
+        const redirectUri = 'https://mycroshop.com/';
+        const tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+          params: {
+            client_id: process.env.META_APP_ID,
+            client_secret: process.env.META_APP_SECRET,
+            redirect_uri: redirectUri,
+            code: code
+          }
+        });
+
+        if (!tokenResponse.data.access_token) {
+          return res.status(400).json({
+            success: false,
+            message: 'Failed to exchange code for access token',
+            error: 'token_exchange_failed',
+            details: tokenResponse.data
+          });
+        }
+
+        finalAccessToken = tokenResponse.data.access_token;
+      } catch (exchangeError) {
+        return res.status(400).json({
+          success: false,
+          message: 'Failed to exchange OAuth code for access token',
+          error: 'code_exchange_failed',
+          details: exchangeError.response?.data || { message: exchangeError.message },
+          help: 'The OAuth code may have expired (codes are single-use and expire quickly). Complete the OAuth flow again to get a new code.'
+        });
+      }
     }
 
     // Check token permissions
@@ -1012,7 +1050,7 @@ async function verifyOAuthToken(req, res) {
     try {
       const debugTokenResponse = await axios.get('https://graph.facebook.com/v18.0/debug_token', {
         params: {
-          input_token: access_token,
+          input_token: finalAccessToken,
           access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`
         }
       });
@@ -1023,7 +1061,8 @@ async function verifyOAuthToken(req, res) {
         success: false,
         message: 'Invalid access token',
         error: 'invalid_token',
-        details: debugError.response?.data || { message: debugError.message }
+        details: debugError.response?.data || { message: debugError.message },
+        help: 'If you used a code, it may have expired. OAuth codes are single-use and expire quickly. Complete the OAuth flow again to get a new code.'
       });
     }
 
@@ -1033,7 +1072,7 @@ async function verifyOAuthToken(req, res) {
     try {
       const wabaResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
         params: {
-          access_token: access_token,
+          access_token: finalAccessToken,
           fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
         }
       });
@@ -1059,7 +1098,7 @@ async function verifyOAuthToken(req, res) {
       try {
         const wabaDirectResponse = await axios.get('https://graph.facebook.com/v18.0/me/whatsapp_business_accounts', {
           params: {
-            access_token: access_token,
+            access_token: finalAccessToken,
             fields: 'id,name,phone_numbers{id,display_phone_number,verified_name}'
           }
         });
@@ -1098,7 +1137,9 @@ async function verifyOAuthToken(req, res) {
           : '❌ FAILED: No WABAs found. OAuth may not have completed properly or WABA was not selected.',
         next_steps: wabas.length > 0
           ? 'WABA is accessible. If phone numbers are missing, use manual connection endpoint with Phone Number ID from WhatsApp Manager.'
-          : '1. Complete OAuth flow again and ensure you select the WABA and click "Continue". 2. Check if the WABA is linked to your app in Meta App Dashboard.'
+          : '1. Complete OAuth flow again and ensure you select the WABA and click "Continue". 2. Check if the WABA is linked to your app in Meta App Dashboard.',
+        token_source: code ? 'exchanged_from_code' : 'provided_directly',
+        note: code ? 'Code was successfully exchanged for access token. Note: OAuth codes are single-use and expire quickly.' : 'Access token was provided directly.'
       }
     });
   } catch (error) {
