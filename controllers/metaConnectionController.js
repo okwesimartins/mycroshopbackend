@@ -185,6 +185,8 @@ async function handleWhatsAppCallback(req, res) {
     let phoneNumberId = null;
     let phoneNumber = null;
     let lastError = null;
+    let foundWabaIds = []; // Track all WABA IDs found for diagnostics
+    let wabaDiagnostics = []; // Track diagnostic info for each WABA
     
     // Method 1: Try with App Access Token FIRST (works best for test mode, no App Review needed)
     // App Access Token format: APP_ID|APP_SECRET - works in test mode without App Review
@@ -199,6 +201,22 @@ async function handleWhatsAppCallback(req, res) {
       });
       
       if (appTokenResponse.data.whatsapp_business_accounts && appTokenResponse.data.whatsapp_business_accounts.data) {
+        // Log all WABAs found
+        for (const waba of appTokenResponse.data.whatsapp_business_accounts.data) {
+          foundWabaIds.push(waba.id);
+          wabaDiagnostics.push({
+            waba_id: waba.id,
+            waba_name: waba.name,
+            phone_numbers_count: waba.phone_numbers?.data?.length || 0,
+            phone_numbers: waba.phone_numbers?.data?.map(p => ({
+              id: p.id,
+              display_phone_number: p.display_phone_number,
+              verified_name: p.verified_name
+            })) || []
+          });
+        }
+        
+        // Use first WABA
         const waba = appTokenResponse.data.whatsapp_business_accounts.data[0];
         wabaId = waba.id;
         
@@ -384,8 +402,8 @@ async function handleWhatsAppCallback(req, res) {
       }
     }
     
-    // If still no phone number found, try one more method: Direct test phone number lookup
-    // In test mode, Meta assigns test phone numbers that can be accessed via app-level endpoints
+    // Method 7: Direct test phone number lookup - Try to get phone number from app's WhatsApp configuration
+    // In test mode, Meta assigns test phone numbers that are app-level, not user-level
     if (!phoneNumberId) {
       const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
       
@@ -394,58 +412,127 @@ async function handleWhatsAppCallback(req, res) {
         const allWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
           params: {
             access_token: appAccessToken,
-            fields: 'whatsapp_business_accounts'
+            fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
           }
         });
         
         if (allWabaResponse.data.whatsapp_business_accounts && allWabaResponse.data.whatsapp_business_accounts.data) {
           // Try each WABA to find phone numbers
           for (const waba of allWabaResponse.data.whatsapp_business_accounts.data) {
-            try {
-              const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${waba.id}/phone_numbers`, {
-                params: {
-                  access_token: appAccessToken
+            if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+              wabaId = waba.id;
+              phoneNumber = waba.phone_numbers.data[0];
+              phoneNumberId = phoneNumber.id;
+              break;
+            }
+            
+            // If phone_numbers not in nested response, try direct endpoint
+            if (!phoneNumberId) {
+              try {
+                const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${waba.id}/phone_numbers`, {
+                  params: {
+                    access_token: appAccessToken
+                  }
+                });
+                
+                if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+                  wabaId = waba.id;
+                  phoneNumber = phoneNumbersResponse.data.data[0];
+                  phoneNumberId = phoneNumber.id;
+                  break;
                 }
-              });
-              
-              if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
-                wabaId = waba.id;
-                phoneNumber = phoneNumbersResponse.data.data[0];
-                phoneNumberId = phoneNumber.id;
-                break;
+              } catch (wabaError) {
+                // Continue to next WABA
               }
-            } catch (wabaError) {
-              // Continue to next WABA
             }
           }
         }
       } catch (finalError) {
-        // This is the last attempt, so we'll use this error if nothing else worked
-        if (!lastError) {
+        // Store error but don't overwrite if we have a better one
+        if (!lastError || (lastError.error && lastError.error.code !== 100)) {
           lastError = finalError.response?.data || { message: finalError.message };
         }
       }
     }
     
-    // If still no phone number found, return exact error from Meta API
+    // Method 8: Last resort - Try to get phone number using user token with different endpoint structure
+    // Sometimes the phone number is accessible via a different path
+    if (!phoneNumberId && wabaId) {
+      try {
+        // Try with user token one more time, but with explicit fields
+        const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
+          params: {
+            access_token: accessToken,
+            fields: 'id,display_phone_number,verified_name'
+          }
+        });
+        
+        if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+          phoneNumber = phoneNumbersResponse.data.data[0];
+          phoneNumberId = phoneNumber.id;
+        }
+      } catch (finalUserTokenError) {
+        // This is expected to fail if user token doesn't have permission
+      }
+    }
+    
+    // If still no phone number found, return exact error from Meta API with detailed diagnostics
     if (!phoneNumberId) {
+      // Collect all error details for better diagnostics
+      const errorDetails = {
+        error: lastError?.error || lastError,
+        token_permissions: tokenPermissions,
+        required_permissions: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+        app_access_token_used: true,
+        app_id: process.env.META_APP_ID ? `${process.env.META_APP_ID.substring(0, 4)}...` : 'not_set',
+        waba_diagnostics: {
+          found_waba_ids: foundWabaIds,
+          waba_count: foundWabaIds.length,
+          waba_details: wabaDiagnostics,
+          waba_id_attempted: wabaId || 'none',
+          note: wabaId 
+            ? `Found WABA ID ${wabaId} but could not access phone numbers. Check if this WABA has phone numbers assigned in WhatsApp Manager.` 
+            : 'No WABA IDs found. This suggests WhatsApp Business Account is not linked to the app.'
+        },
+        last_error_context: lastError?.waba_id_attempted ? {
+          waba_id: lastError.waba_id_attempted,
+          method: lastError.method,
+          endpoint: lastError.endpoint,
+          error: lastError.error || lastError
+        } : null,
+        note: 'All methods attempted: App Access Token, User OAuth Token, and various endpoint combinations. The "Missing Permission" error suggests that even the App Access Token cannot access WhatsApp Business Accounts. This may indicate:',
+        possible_causes: [
+          '1. WhatsApp product not properly configured in Meta App Dashboard',
+          '2. No test phone number assigned to the app',
+          '3. WhatsApp Business Account not linked to the app',
+          wabaId ? `4. WABA ID ${wabaId} found but phone numbers are not accessible (check WhatsApp Manager)` : '4. No WABA IDs found - WhatsApp Business Account not linked',
+          '5. App Access Token requires additional permissions (unlikely in test mode)',
+          '6. The test phone number exists but is not accessible via Graph API until certain conditions are met'
+        ],
+        troubleshooting_steps: [
+          '1. Go to Meta App Dashboard → WhatsApp → Getting Started',
+          '2. Ensure WhatsApp is added as a product',
+          '3. Check if a test phone number is assigned (should show in WhatsApp Manager)',
+          wabaId ? `4. Verify WABA ID ${wabaId} has phone numbers assigned in WhatsApp Manager` : '4. Verify WhatsApp Business Account is linked to your app',
+          '5. Verify META_APP_ID and META_APP_SECRET are correct in environment variables',
+          '6. Try accessing the phone number manually via Graph API Explorer:',
+          `   GET https://graph.facebook.com/v18.0/${process.env.META_APP_ID}?access_token=${process.env.META_APP_ID}|${process.env.META_APP_SECRET}&fields=whatsapp_business_accounts`,
+          wabaId ? `   Or try: GET https://graph.facebook.com/v18.0/${wabaId}/phone_numbers?access_token=${process.env.META_APP_ID}|${process.env.META_APP_SECRET}` : '',
+          '7. If test phone number shows in WhatsApp Manager but not via API, you may need to:',
+          '   - Complete WhatsApp Business Account setup in Business Manager',
+          '   - Link the WhatsApp Business Account to your app',
+          '   - Wait for Meta to sync the phone number to the API (can take a few minutes)'
+        ].filter(step => step !== ''),
+        alternative_approach: 'If the phone number is visible in WhatsApp Manager but not accessible via API, use the manual connection endpoint: POST /api/v1/meta-connection/whatsapp/manual-connect. Get the Phone Number ID from WhatsApp Manager URL when viewing phone number details.',
+        manual_connection_endpoint: '/api/v1/meta-connection/whatsapp/manual-connect',
+        manual_connection_guide: 'See WHATSAPP_MANUAL_CONNECTION_GUIDE.md for step-by-step instructions'
+      };
+      
       return res.status(400).json({
         success: false,
         message: 'Could not find WhatsApp phone number',
         error: 'no_phone_number_found',
-        details: {
-          error: lastError?.error || lastError,
-          token_permissions: tokenPermissions,
-          required_permissions: ['whatsapp_business_management', 'whatsapp_business_messaging'],
-          note: 'In test mode, ensure your Meta App has WhatsApp product configured and a test phone number assigned. The App Access Token method was attempted but may require App Review for production use.',
-          troubleshooting: [
-            '1. Go to Meta App Dashboard → WhatsApp product section',
-            '2. Ensure WhatsApp is added as a product',
-            '3. Check if a test phone number is assigned',
-            '4. Verify META_APP_ID and META_APP_SECRET are correct in environment variables',
-            '5. For test mode, the App Access Token (APP_ID|APP_SECRET) should work without App Review'
-          ]
-        }
+        details: errorDetails
       });
     }
 
@@ -927,6 +1014,167 @@ async function testInstagramConnection(req, res) {
   }
 }
 
+/**
+ * Manually connect WhatsApp using Phone Number ID and WABA ID
+ * This is a workaround when automatic detection fails due to Meta API limitations
+ */
+async function manuallyConnectWhatsApp(req, res) {
+  try {
+    const { phone_number_id, waba_id, access_token } = req.body;
+    
+    if (!phone_number_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone Number ID is required',
+        error: 'missing_phone_number_id'
+      });
+    }
+
+    // Get tenant info
+    const tenantId = req.user.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant not found',
+        error: 'tenant_not_found'
+      });
+    }
+
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+
+    // Get tenant database connection
+    const { getTenantConnection } = require('../config/database');
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const initializeModels = require('../models');
+    const models = initializeModels(sequelize);
+
+    // If access_token is provided, use it; otherwise, try to get from OAuth flow
+    // For manual connection, we'll use the provided access_token or require OAuth first
+    let finalAccessToken = access_token;
+    
+    if (!finalAccessToken) {
+      // Try to get from existing config
+      const existingConfig = await models.AIAgentConfig.findOne({
+        where: {},
+        order: [['created_at', 'DESC']]
+      });
+      
+      if (existingConfig && existingConfig.whatsapp_access_token) {
+        finalAccessToken = existingConfig.whatsapp_access_token;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Access token is required. Please provide access_token or complete OAuth flow first.',
+          error: 'missing_access_token'
+        });
+      }
+    }
+
+    // Verify the phone number ID is valid by making a test API call
+    let phoneNumberInfo = null;
+    try {
+      const phoneNumberResponse = await axios.get(`https://graph.facebook.com/v18.0/${phone_number_id}`, {
+        params: {
+          access_token: finalAccessToken,
+          fields: 'display_phone_number,verified_name'
+        }
+      });
+      phoneNumberInfo = phoneNumberResponse.data;
+    } catch (verifyError) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid Phone Number ID or Access Token. Please verify the Phone Number ID from WhatsApp Manager.',
+        error: 'invalid_phone_number_id',
+        details: verifyError.response?.data || { message: verifyError.message },
+        help: 'To get Phone Number ID: Go to Meta App Dashboard → WhatsApp → Phone Numbers → Click on your phone number → Check the URL for the ID'
+      });
+    }
+
+    // Encrypt access token before storing
+    let encryptedToken = finalAccessToken;
+    try {
+      const { encrypt } = require('../utils/encryption');
+      if (encrypt) {
+        encryptedToken = encrypt(finalAccessToken);
+      }
+    } catch (e) {
+      // Encryption utility not available, store as-is
+    }
+
+    // Update or create AI agent config
+    let config = await models.AIAgentConfig.findOne({
+      where: {},
+      order: [['created_at', 'DESC']]
+    });
+
+    if (!config) {
+      config = await models.AIAgentConfig.create({
+        whatsapp_enabled: true,
+        whatsapp_phone_number_id: phone_number_id,
+        whatsapp_phone_number: phoneNumberInfo?.display_phone_number || phoneNumberInfo?.verified_name || null,
+        whatsapp_access_token: finalAccessToken
+      });
+    } else {
+      await config.update({
+        whatsapp_enabled: true,
+        whatsapp_phone_number_id: phone_number_id,
+        whatsapp_phone_number: phoneNumberInfo?.display_phone_number || phoneNumberInfo?.verified_name || null,
+        whatsapp_access_token: finalAccessToken
+      });
+    }
+
+    // Store in tenant database whatsapp_connections table
+    await models.WhatsAppConnection.upsert({
+      ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
+      phone_number_id: phone_number_id,
+      waba_id: waba_id || null,
+      access_token: encryptedToken
+    });
+
+    // Also store in main database for AI agent lookup
+    try {
+      const { mainSequelize } = require('../config/database');
+      
+      await mainSequelize.query(`
+        INSERT INTO whatsapp_connections 
+        (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
+        VALUES (?, ?, ?, ?, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+        waba_id = VALUES(waba_id),
+        access_token = VALUES(access_token),
+        updated_at = NOW()
+      `, {
+        replacements: [tenantId, phone_number_id, waba_id || null, encryptedToken]
+      });
+      
+    } catch (error) {
+      // Don't fail if this fails - it's for AI agent lookup only
+    }
+
+    return res.json({
+      success: true,
+      message: 'WhatsApp connected successfully (manual entry)',
+      data: {
+        tenant_id: tenantId,
+        phone_number_id: phone_number_id,
+        phone_number: phoneNumberInfo?.display_phone_number || phoneNumberInfo?.verified_name || null,
+        waba_id: waba_id || null,
+        connected: true
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to manually connect WhatsApp',
+      error: 'manual_connection_failed',
+      details: error.message
+    });
+  }
+}
+
 module.exports = {
   getConnectionStatus,
   initiateWhatsAppConnection,
@@ -936,6 +1184,7 @@ module.exports = {
   disconnectWhatsApp,
   disconnectInstagram,
   testWhatsAppConnection,
-  testInstagramConnection
+  testInstagramConnection,
+  manuallyConnectWhatsApp
 };
 
