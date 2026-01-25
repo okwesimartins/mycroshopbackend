@@ -168,13 +168,14 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
 
-    // Get WhatsApp Business Account ID first (required to get phone numbers)
+    // Get WhatsApp Business Account ID and phone numbers
+    // Try multiple methods as different permission levels may allow different endpoints
     let wabaId = null;
     let phoneNumberId = null;
     let phoneNumber = null;
     
+    // Method 1: Try to get WABA ID from businesses endpoint
     try {
-      // Try to get WABA ID from businesses endpoint
       const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
         params: {
           access_token: accessToken,
@@ -184,12 +185,14 @@ async function handleWhatsAppCallback(req, res) {
       
       if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
         wabaId = businessesResponse.data.data[0].id;
-        console.log('Found WABA ID:', wabaId);
+        console.log('Found WABA ID from businesses:', wabaId);
       }
     } catch (businessError) {
-      console.warn('Could not fetch businesses, trying alternative method:', businessError.response?.data?.error?.message || businessError.message);
-      
-      // Alternative: Try to get WABA ID from WhatsApp Business Account endpoint
+      console.warn('Method 1 failed (businesses endpoint):', businessError.response?.data?.error?.message || businessError.message);
+    }
+    
+    // Method 2: Try to get WABA ID from user's whatsapp_business_accounts field
+    if (!wabaId) {
       try {
         const wabaResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
           params: {
@@ -198,12 +201,30 @@ async function handleWhatsAppCallback(req, res) {
           }
         });
         
-        if (wabaResponse.data.whatsapp_business_accounts && wabaResponse.data.whatsapp_business_accounts.data) {
+        if (wabaResponse.data.whatsapp_business_accounts && wabaResponse.data.whatsapp_business_accounts.data && wabaResponse.data.whatsapp_business_accounts.data.length > 0) {
           wabaId = wabaResponse.data.whatsapp_business_accounts.data[0].id;
-          console.log('Found WABA ID from alternative method:', wabaId);
+          console.log('Found WABA ID from whatsapp_business_accounts:', wabaId);
         }
       } catch (altError) {
-        console.warn('Alternative WABA fetch also failed:', altError.response?.data?.error?.message || altError.message);
+        console.warn('Method 2 failed (whatsapp_business_accounts):', altError.response?.data?.error?.message || altError.message);
+      }
+    }
+    
+    // Method 3: Try direct whatsapp_business_accounts endpoint
+    if (!wabaId) {
+      try {
+        const wabaDirectResponse = await axios.get('https://graph.facebook.com/v18.0/me/whatsapp_business_accounts', {
+          params: {
+            access_token: accessToken
+          }
+        });
+        
+        if (wabaDirectResponse.data.data && wabaDirectResponse.data.data.length > 0) {
+          wabaId = wabaDirectResponse.data.data[0].id;
+          console.log('Found WABA ID from direct endpoint:', wabaId);
+        }
+      } catch (directError) {
+        console.warn('Method 3 failed (direct whatsapp_business_accounts endpoint):', directError.response?.data?.error?.message || directError.message);
       }
     }
 
@@ -219,111 +240,108 @@ async function handleWhatsAppCallback(req, res) {
         if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
           phoneNumber = phoneNumbersResponse.data.data[0];
           phoneNumberId = phoneNumber.id;
-          console.log('Found phone number ID:', phoneNumberId);
+          console.log('Found phone number ID from WABA:', phoneNumberId);
         }
       } catch (phoneError) {
         console.error('Error fetching phone numbers from WABA:', phoneError.response?.data || phoneError.message);
-        return res.status(400).json({
-          success: false,
-          message: 'Failed to fetch WhatsApp phone numbers from Business Account',
-          error: 'phone_numbers_fetch_failed',
-          details: phoneError.response?.data || phoneError.message
-        });
+        // Don't return error yet - try alternative methods
       }
-    } else {
-      // If WABA ID not found, try alternative methods for test mode
-      console.warn('WABA ID not found, trying alternative methods (test mode fallback)');
-      
-      // Method 1: Try to get from WhatsApp Business Account endpoint directly
+    }
+    
+    // Method 4: If no WABA ID found, try to get phone numbers directly from app's WhatsApp configuration
+    // In test mode, phone numbers might be accessible through the app itself
+    if (!phoneNumberId) {
       try {
-        const wabaDirectResponse = await axios.get('https://graph.facebook.com/v18.0/me/whatsapp_business_accounts', {
+        console.log('Trying to get phone numbers from app configuration...');
+        // Try to get WhatsApp Business Account from the app
+        const appWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
           params: {
-            access_token: accessToken
+            access_token: accessToken,
+            fields: 'whatsapp_business_accounts{id,phone_numbers{id,display_phone_number,verified_name}}'
           }
         });
         
-        if (wabaDirectResponse.data.data && wabaDirectResponse.data.data.length > 0) {
-          wabaId = wabaDirectResponse.data.data[0].id;
-          console.log('Found WABA ID from direct endpoint:', wabaId);
+        if (appWabaResponse.data.whatsapp_business_accounts && appWabaResponse.data.whatsapp_business_accounts.data) {
+          const waba = appWabaResponse.data.whatsapp_business_accounts.data[0];
+          wabaId = waba.id;
+          console.log('Found WABA ID from app:', wabaId);
           
-          // Now get phone numbers from this WABA
-          const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
-            params: {
-              access_token: accessToken
-            }
-          });
-          
-          if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
-            phoneNumber = phoneNumbersResponse.data.data[0];
+          if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+            phoneNumber = waba.phone_numbers.data[0];
             phoneNumberId = phoneNumber.id;
-            console.log('Found phone number ID from WABA:', phoneNumberId);
+            console.log('Found phone number ID from app WABA:', phoneNumberId);
           }
         }
-      } catch (wabaDirectError) {
-        console.warn('Direct WABA endpoint failed:', wabaDirectError.response?.data?.error?.message || wabaDirectError.message);
-        
-        // Method 2: Try to get phone number ID from app's WhatsApp configuration
-        // In test mode, the phone number ID might be available in the app settings
-        // This requires the app to have WhatsApp product configured
-        try {
-          // Try to get phone numbers from the app's WhatsApp Business Account
-          // This works if the app has a default phone number configured
-          const appResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
-            params: {
-              access_token: accessToken,
-              fields: 'whatsapp_business_accounts'
-            }
-          });
-          
-          if (appResponse.data.whatsapp_business_accounts && appResponse.data.whatsapp_business_accounts.data) {
-            wabaId = appResponse.data.whatsapp_business_accounts.data[0].id;
-            console.log('Found WABA ID from app:', wabaId);
-            
-            // Get phone numbers
-            const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${wabaId}/phone_numbers`, {
-              params: {
-                access_token: accessToken
-              }
-            });
-            
-            if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
-              phoneNumber = phoneNumbersResponse.data.data[0];
-              phoneNumberId = phoneNumber.id;
-              console.log('Found phone number ID from app WABA:', phoneNumberId);
-            }
-          }
-        } catch (appError) {
-          console.warn('App WABA method also failed:', appError.response?.data?.error?.message || appError.message);
-        }
+      } catch (appError) {
+        console.warn('Method 4 failed (app configuration):', appError.response?.data?.error?.message || appError.message);
       }
-      
-      // If still no phone number found, return error
-      if (!phoneNumberId) {
-        return res.status(400).json({
-          success: false,
-          message: 'WhatsApp Business Account not found. For test mode, please ensure your Meta App has WhatsApp product configured and a test phone number assigned.',
-          error: 'no_waba_found',
-          details: {
-            user_message: 'To connect WhatsApp in test mode, you need to:',
-            steps: [
-              '1. Go to Meta App Dashboard (developers.facebook.com)',
-              '2. Select your app',
-              '3. Go to WhatsApp product section',
-              '4. Ensure WhatsApp is added and configured',
-              '5. Check if a test phone number is assigned',
-              '6. Try connecting again',
-              '',
-              'For production mode:',
-              '1. Go to Meta Business Manager (business.facebook.com)',
-              '2. Create or connect a WhatsApp Business Account',
-              '3. Add a phone number to your WhatsApp Business Account',
-              '4. Grant WhatsApp Business Management permission when authorizing'
-            ],
-            help_link: 'https://business.facebook.com/help',
-            note: 'In test/development mode, WhatsApp phone numbers are managed through the Meta App Dashboard, not Business Manager.'
+    }
+    
+    // Method 5: Try to get phone numbers using the phone number ID directly (if we know it from OAuth popup)
+    // This is a last resort - in some test scenarios, we might need to use the phone number ID shown in popup
+    if (!phoneNumberId) {
+      try {
+        console.log('Trying to get phone numbers from test account...');
+        // Try to access phone numbers through the test WhatsApp Business Account
+        const testAccountResponse = await axios.get('https://graph.facebook.com/v18.0/me', {
+          params: {
+            access_token: accessToken,
+            fields: 'whatsapp_business_accounts{phone_numbers{id,display_phone_number,verified_name}}'
           }
         });
+        
+        if (testAccountResponse.data.whatsapp_business_accounts && 
+            testAccountResponse.data.whatsapp_business_accounts.data && 
+            testAccountResponse.data.whatsapp_business_accounts.data.length > 0) {
+          const waba = testAccountResponse.data.whatsapp_business_accounts.data[0];
+          wabaId = waba.id;
+          console.log('Found WABA ID from test account:', wabaId);
+          
+          if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+            phoneNumber = waba.phone_numbers.data[0];
+            phoneNumberId = phoneNumber.id;
+            console.log('Found phone number ID from test account:', phoneNumberId);
+          }
+        }
+      } catch (testError) {
+        console.warn('Method 5 failed (test account):', testError.response?.data?.error?.message || testError.message);
       }
+    }
+    
+    // If still no phone number found, return detailed error
+    if (!phoneNumberId) {
+      console.error('All methods failed to find phone number. Available data:', {
+        wabaId,
+        accessTokenPresent: !!accessToken,
+        appId: process.env.META_APP_ID
+      });
+      
+      return res.status(400).json({
+        success: false,
+        message: 'Could not find WhatsApp phone number. Please ensure your WhatsApp Business Account has a phone number configured.',
+        error: 'no_phone_number_found',
+        details: {
+          user_message: 'WhatsApp phone number not found. This might be because:',
+          possible_reasons: [
+            'The phone number in your WhatsApp Manager is not yet verified',
+            'The OAuth token does not have permission to access phone numbers',
+            'The WhatsApp Business Account needs to be properly linked',
+            'In test mode, you may need to verify the phone number first'
+          ],
+          steps: [
+            '1. Go to WhatsApp Manager → Phone Numbers',
+            '2. Verify your phone number (currently shows as "Unverified")',
+            '3. Ensure the phone number is active',
+            '4. Try connecting again after verification',
+            '5. If still failing, check OAuth permissions include whatsapp_business_management'
+          ],
+          debug_info: {
+            waba_id_found: !!wabaId,
+            waba_id: wabaId || null,
+            note: 'The phone number ID shown in OAuth popup (1437461017725528) should be accessible via API'
+          }
+        }
+      });
     }
 
     if (!phoneNumberId) {
