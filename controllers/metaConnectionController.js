@@ -91,286 +91,181 @@ async function initiateWhatsAppConnection(req, res) {
  */
 
 
+
 async function metaGet(path, accessToken, params = {}) {
   const url = `https://graph.facebook.com/v18.0/${path}`;
-  const res = await axios.get(url, {
-    params: { access_token: accessToken, ...params }
-  });
+  const res = await axios.get(url, { params: { access_token: accessToken, ...params } });
   return res.data;
 }
 
-// Find WABA + phone_number_id correctly:
-// me/businesses -> {business_id}/owned_whatsapp_business_accounts -> {waba_id}/phone_numbers
-async function findWabaAndPhone(accessToken, hintedPhoneNumberId = null) {
-  const debug = {
-    businesses: [],
-    wabas: [],
-    phones_checked: 0,
-    hintedPhoneNumberId: hintedPhoneNumberId || null
-  };
-
-  let businesses = [];
-  try {
-    const biz = await metaGet('me/businesses', accessToken, { fields: 'id,name' });
-    businesses = biz?.data || [];
-    debug.businesses = businesses.map(b => ({ id: b.id, name: b.name }));
-  } catch (e) {
-    return {
-      wabaId: null,
-      phone: null,
-      debug,
-      reason: 'failed_me_businesses',
-      error: e.response?.data || e.message
-    };
-  }
-
-  if (!businesses.length) {
-    return { wabaId: null, phone: null, debug, reason: 'no_businesses_found' };
-  }
+async function discoverWabaAndPhone(accessToken) {
+  // 1) businesses
+  const bizRes = await metaGet("me/businesses", accessToken, { fields: "id,name" });
+  const businesses = bizRes?.data || [];
 
   for (const biz of businesses) {
-    // 1) Get owned WABAs under this business
+    // 2) owned WABAs under that business
     let wabas = [];
     try {
-      const wabaRes = await metaGet(`${biz.id}/owned_whatsapp_business_accounts`, accessToken, { fields: 'id,name' });
+      const wabaRes = await metaGet(`${biz.id}/owned_whatsapp_business_accounts`, accessToken, { fields: "id,name" });
       wabas = wabaRes?.data || [];
-      debug.wabas.push(...wabas.map(w => ({ business_id: biz.id, waba_id: w.id, name: w.name })));
-    } catch (e) {
-      // try next business
+    } catch (_) {
       continue;
     }
 
     for (const waba of wabas) {
-      // 2) Get phone numbers for WABA
+      // 3) phone numbers under WABA
       try {
         const phoneRes = await metaGet(`${waba.id}/phone_numbers`, accessToken, {
-          fields: 'id,display_phone_number,verified_name,code_verification_status,quality_rating'
+          fields: "id,display_phone_number,verified_name,code_verification_status,quality_rating",
         });
-
         const phones = phoneRes?.data || [];
-        debug.phones_checked += phones.length;
-
-        if (!phones.length) continue;
-
-        // If caller provided a hint, prefer that specific phone_number_id
-        if (hintedPhoneNumberId) {
-          const match = phones.find(p => String(p.id) === String(hintedPhoneNumberId));
-          if (match) return { wabaId: waba.id, phone: match, debug, reason: null };
-        }
-
-        // Otherwise pick first phone
-        return { wabaId: waba.id, phone: phones[0], debug, reason: null };
-      } catch (e) {
-        // try next waba
+        if (phones.length) return { wabaId: waba.id, phone: phones[0] };
+      } catch (_) {
         continue;
       }
     }
   }
 
-  return { wabaId: null, phone: null, debug, reason: 'no_phone_numbers_found' };
+  return { wabaId: null, phone: null };
 }
 
 async function handleWhatsAppCallback(req, res) {
   try {
     const { code, state } = req.query;
-
     if (!code || !state) {
-      return res.status(400).json({
-        success: false,
-        message: 'OAuth failed: Missing code or state parameter',
-        error: 'oauth_failed'
-      });
+      return res.status(400).json({ success: false, message: "OAuth failed: Missing code or state", error: "oauth_failed" });
     }
 
-    // Normalize state
     const stateString = Array.isArray(state) ? state[0] : String(state);
-    if (!stateString || !stateString.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid state parameter: state is empty',
-        error: 'invalid_state_format'
-      });
-    }
+    const parts = stateString.split(":");
 
-    /**
-     * Recommended state format:
-     *   token:tenantId[:hintPhoneNumberId]
-     * Example:
-     *   abc123:tenant_99:1437461017725528
-     */
-    const parts = stateString.split(':');
-    if (parts.length < 2) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid state parameter: tenant_id not found in state',
-        error: 'invalid_state'
-      });
-    }
-
-    const tenantId = parts[1];
+    // token:tenantId:phone_number_id:waba_id
+    const tenantId = parts[1] || null;
     const hintedPhoneNumberId = parts[2] || null;
+    const hintedWabaId = parts[3] || null;
 
-    if (!tenantId || !String(tenantId).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid state parameter: tenant_id is empty',
-        error: 'invalid_state'
-      });
+    if (!tenantId) {
+      return res.status(400).json({ success: false, message: "Invalid state: tenant_id missing", error: "invalid_state" });
     }
 
-    // Exchange code for access token
-    const redirectUri = process.env.META_REDIRECT_URI || 'https://mycroshop.com/'; // MUST match Meta app config
-    let tokenResponse;
+    // IMPORTANT: this must EXACTLY match the redirect URI you configured in Meta app settings
+    const redirectUri = process.env.META_REDIRECT_URI || "https://mycroshop.com/";
 
-    try {
-      tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-        params: {
-          client_id: process.env.META_APP_ID,
-          client_secret: process.env.META_APP_SECRET,
-          redirect_uri: redirectUri,
-          code
-        }
-      });
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: 'Failed to exchange OAuth code for access token',
-        error: 'token_exchange_failed',
-        details: error.response?.data || error.message
-      });
-    }
+    // Exchange code for user access token
+    const tokenResponse = await axios.get("https://graph.facebook.com/v18.0/oauth/access_token", {
+      params: {
+        client_id: process.env.META_APP_ID,
+        client_secret: process.env.META_APP_SECRET,
+        redirect_uri: redirectUri,
+        code,
+      },
+    });
 
     const accessToken = tokenResponse?.data?.access_token;
     if (!accessToken) {
+      return res.status(400).json({ success: false, message: "No access token received", error: "no_access_token" });
+    }
+
+    // If embedded signup gave you phone_number_id/waba_id, prefer them
+    let wabaId = hintedWabaId;
+    let phoneNumberId = hintedPhoneNumberId;
+    let phone = null;
+
+    // If we have phone_number_id, try to fetch details directly
+    if (phoneNumberId) {
+      try {
+        phone = await metaGet(`${phoneNumberId}`, accessToken, {
+          fields: "id,display_phone_number,verified_name,code_verification_status,quality_rating",
+        });
+      } catch (_) {
+        phone = null;
+      }
+    }
+
+    // If still missing, discover properly
+    if (!phoneNumberId || !phone?.id || !wabaId) {
+      const discovered = await discoverWabaAndPhone(accessToken);
+      if (!wabaId) wabaId = discovered.wabaId;
+      if (!phoneNumberId && discovered.phone?.id) phoneNumberId = discovered.phone.id;
+      if (!phone && discovered.phone) phone = discovered.phone;
+    }
+
+    if (!phoneNumberId) {
       return res.status(400).json({
         success: false,
-        message: 'No access token received from Meta',
-        error: 'no_access_token'
+        message: "Could not find WhatsApp phone number. Verify the number in WhatsApp Manager and ensure this Meta account owns a WABA with a phone number.",
+        error: "no_phone_number_found",
+        debug: { hintedPhoneNumberId, hintedWabaId, note: "Your screenshot shows the number is Unverified." },
       });
     }
 
-    // ✅ Correctly discover WABA + phone number
-    const found = await findWabaAndPhone(accessToken, hintedPhoneNumberId);
-
-    if (!found.phone?.id || !found.wabaId) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'Could not find WhatsApp phone number. Ensure the connected account has a WhatsApp Business Account with at least one phone number added.',
-        error: 'no_phone_number_found',
-        details: {
-          reason: found.reason,
-          debug: found.debug,
-          note:
-            'In dev/test mode, make sure your Meta account has access to a WABA that already has a phone number configured in WhatsApp Manager.'
-        }
-      });
-    }
-
-    const phoneNumberId = found.phone.id;
-    const wabaId = found.wabaId;
-    const phoneNumber =
-      found.phone.display_phone_number || found.phone.verified_name || null;
-
-    // ==== Your existing tenant + DB storage logic (kept) ====
-    const { getTenantById } = require('../config/tenant');
+    // === SAVE TO DB (your existing logic) ===
+    const { getTenantById } = require("../config/tenant");
     const tenant = await getTenantById(tenantId);
+    if (!tenant) return res.status(404).json({ success: false, message: "Tenant not found", error: "tenant_not_found" });
 
-    if (!tenant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Tenant not found',
-        error: 'tenant_not_found'
-      });
-    }
-
-    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
-
-    const { getTenantConnection } = require('../config/database');
+    const subscriptionPlan = tenant.subscription_plan || "enterprise";
+    const { getTenantConnection, mainSequelize } = require("../config/database");
     const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
-    const initializeModels = require('../models');
+    const initializeModels = require("../models");
     const models = initializeModels(sequelize);
 
-    // Save/update AI agent config
-    let config = await models.AIAgentConfig.findOne({
-      where: {},
-      order: [['created_at', 'DESC']]
-    });
-
-    if (!config) {
-      config = await models.AIAgentConfig.create({
-        whatsapp_enabled: true,
-        whatsapp_phone_number_id: phoneNumberId,
-        whatsapp_phone_number: phoneNumber,
-        whatsapp_access_token: accessToken // encrypt in production
-      });
-    } else {
-      await config.update({
-        whatsapp_enabled: true,
-        whatsapp_phone_number_id: phoneNumberId,
-        whatsapp_phone_number: phoneNumber,
-        whatsapp_access_token: accessToken
-      });
-    }
-
-    // Encrypt token (optional)
+    // Encrypt token if util exists
     let encryptedToken = accessToken;
     try {
-      const { encrypt } = require('../utils/encryption');
-      if (typeof encrypt === 'function') encryptedToken = encrypt(accessToken);
-    } catch (_) {
-      // keep as-is
-    }
+      const { encrypt } = require("../utils/encryption");
+      if (typeof encrypt === "function") encryptedToken = encrypt(accessToken);
+    } catch (_) {}
 
-    // Store in tenant DB
+    // Upsert tenant DB connection record
     await models.WhatsAppConnection.upsert({
-      ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
+      ...(subscriptionPlan === "free" && { tenant_id: tenantId }),
       phone_number_id: phoneNumberId,
-      waba_id: wabaId,
-      access_token: encryptedToken
+      waba_id: wabaId || null,
+      access_token: encryptedToken,
     });
 
-    // Store in main DB for quick routing (phone_number_id -> tenant_id)
+    // Optional: main DB lookup table (phone_number_id -> tenant)
     try {
-      const { mainSequelize } = require('../config/database');
       await mainSequelize.query(
         `
-        INSERT INTO whatsapp_connections
-          (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
+        INSERT INTO whatsapp_connections (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
         VALUES (?, ?, ?, ?, NOW(), NOW())
         ON DUPLICATE KEY UPDATE
           waba_id = VALUES(waba_id),
           access_token = VALUES(access_token),
           updated_at = NOW()
         `,
-        { replacements: [tenantId, phoneNumberId, wabaId, encryptedToken] }
+        { replacements: [tenantId, phoneNumberId, wabaId || null, encryptedToken] }
       );
     } catch (e) {
-      // don't fail the flow if this lookup table fails
-      console.error('Main DB whatsapp_connections insert failed:', e.message);
+      // don't fail the whole flow
+      console.error("Main DB store failed:", e.message);
     }
 
     return res.json({
       success: true,
-      message: 'WhatsApp connected successfully',
+      message: "WhatsApp connected successfully",
       data: {
         tenant_id: tenantId,
         phone_number_id: phoneNumberId,
-        phone_number: phoneNumber,
-        waba_id: wabaId,
-        connected: true
-      }
+        phone_number: phone?.display_phone_number || phone?.verified_name || null,
+        waba_id: wabaId || null,
+      },
     });
   } catch (error) {
-    console.error('Error handling WhatsApp callback:', error);
+    console.error("WhatsApp callback error:", error.response?.data || error.message);
     return res.status(500).json({
       success: false,
-      message: 'Failed to connect WhatsApp',
-      error: 'connection_failed',
-      details: error.response?.data || error.message
+      message: "Failed to connect WhatsApp",
+      error: "connection_failed",
+      details: error.response?.data || error.message,
     });
   }
 }
+
+
 
 
 
