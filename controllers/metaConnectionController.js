@@ -44,34 +44,35 @@ async function getConnectionStatus(req, res) {
 }
 
 /**
- * Initiate WhatsApp connection using Embedded Signup (RECOMMENDED)
- * Embedded Signup is better for SaaS platforms - returns waba_id and phone_number_id directly
+ * Initiate WhatsApp connection using OAuth flow
+ * Note: Embedded Signup requires Solution Partner/Tech Provider status which may not be available yet.
+ * OAuth flow works in test mode and uses the correct 3-step discovery: /me/businesses → /{business-id}/owned_whatsapp_business_accounts → /{waba-id}/phone_numbers
  */
 async function initiateWhatsAppConnection(req, res) {
   try {
-    // Generate state for security
+    // Generate state for OAuth security
     const state = crypto.randomBytes(32).toString('hex');
     const stateWithTenant = `${state}:${req.user.tenantId}`;
     
-    // Embedded Signup URL
-    // This is the official way for solution providers to onboard businesses
+    // Meta OAuth URL with required permissions
     const redirectUri = 'https://mycroshop.com';
     const appId = process.env.META_APP_ID;
     
-    // Embedded Signup URL format
-    // Docs: https://developers.facebook.com/docs/whatsapp/embedded-signup
-    const signupUrl = `https://www.facebook.com/dialog/whatsapp_signup?` +
-      `app_id=${appId}` +
+    // OAuth URL with business_management permission (required for WABA discovery)
+    const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
+      `client_id=${appId}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&state=${stateWithTenant}`;
+      `&state=${stateWithTenant}` +
+      `&scope=business_management,whatsapp_business_management,whatsapp_business_messaging` +
+      `&response_type=code`;
     
     res.json({
       success: true,
       data: {
-        signupUrl,
+        authUrl,
         state: stateWithTenant,
-        method: 'embedded_signup',
-        note: 'Embedded Signup returns waba_id and phone_number_id directly - no API discovery needed'
+        method: 'oauth',
+        note: 'OAuth flow works in test mode. After authorization, the callback will use the 3-step discovery flow to find WABA and phone numbers.'
       }
     });
   } catch (error) {
@@ -84,28 +85,31 @@ async function initiateWhatsAppConnection(req, res) {
 }
 
 /**
- * Handle WhatsApp Embedded Signup callback
- * Embedded Signup returns waba_id and phone_number_id directly - much simpler!
+ * Handle WhatsApp callback - supports both Embedded Signup and OAuth flow
+ * Embedded Signup: Returns waba_id and phone_number_id directly (requires Solution Partner/Tech Provider)
+ * OAuth: Uses 3-step discovery flow (works in test mode)
  */
 async function handleWhatsAppCallback(req, res) {
   try {
-    // Embedded Signup returns waba_id and phone_number_id directly
-    const { waba_id, phone_number_id, state, error, error_description } = req.query;
+    // Check for both Embedded Signup and OAuth parameters
+    const { waba_id, phone_number_id, code, state, error, error_description } = req.query;
     
     // Check for errors from Meta
     if (error) {
       return res.status(400).json({
         success: false,
-        message: 'WhatsApp signup failed',
-        error: 'signup_failed',
+        message: 'WhatsApp connection failed',
+        error: 'connection_failed',
         details: {
           error,
           error_description
-        }
+        },
+        note: 'If you see this error with Embedded Signup, you may need Solution Partner/Tech Provider status. Try using OAuth flow instead.'
       });
     }
     
     // EMBEDDED SIGNUP FLOW - Returns waba_id and phone_number_id directly!
+    // This only works if you're a Solution Partner or Tech Provider
     if (waba_id && phone_number_id) {
       // Extract tenant_id from state
       const stateString = Array.isArray(state) ? state[0] : String(state);
@@ -239,21 +243,326 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
     
-    // If we reach here, Embedded Signup didn't provide required parameters
-    if (!waba_id || !phone_number_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'WhatsApp Embedded Signup failed: Missing waba_id or phone_number_id',
-        error: 'signup_failed',
-        help: 'Embedded Signup should return both waba_id and phone_number_id in the callback URL. Check your Meta App configuration and ensure Embedded Signup is properly set up.'
+    // OAUTH FLOW - Fallback if Embedded Signup is not available
+    // This works in test mode and uses the correct 3-step discovery flow
+    if (code && state) {
+      // Normalize state
+      const stateString = Array.isArray(state) ? state[0] : String(state);
+      
+      if (!stateString || !stateString.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid state parameter: state is empty',
+          error: 'invalid_state_format'
+        });
+      }
+
+      // Extract tenant_id from state
+      const stateParts = stateString.split(':');
+      
+      if (stateParts.length < 2 || !stateParts[1]) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid state parameter: tenant_id not found in state',
+          error: 'invalid_state'
+        });
+      }
+
+      const [stateToken, tenantId] = stateParts;
+      
+      if (!tenantId || !tenantId.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid state parameter: tenant_id is empty',
+          error: 'invalid_state'
+        });
+      }
+      
+      // Exchange code for access token
+      const redirectUri = 'https://mycroshop.com';
+      
+      let tokenResponse;
+      try {
+        tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+          params: {
+            client_id: process.env.META_APP_ID,
+            client_secret: process.env.META_APP_SECRET,
+            redirect_uri: redirectUri,
+            code: code
+          }
+        });
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: 'Failed to exchange OAuth code for access token',
+          error: 'token_exchange_failed',
+          details: error.response?.data || error.message
+        });
+      }
+
+      const accessToken = tokenResponse.data.access_token;
+
+      if (!accessToken) {
+        return res.status(400).json({
+          success: false,
+          message: 'No access token received from Meta',
+          error: 'no_access_token'
+        });
+      }
+
+      // First, verify token permissions
+      let tokenPermissions = [];
+      let tokenInfo = null;
+      try {
+        const debugTokenResponse = await axios.get('https://graph.facebook.com/v18.0/debug_token', {
+          params: {
+            input_token: accessToken,
+            access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`
+          }
+        });
+        tokenInfo = debugTokenResponse.data.data;
+        tokenPermissions = tokenInfo?.scopes || [];
+      } catch (debugError) {
+        // Continue even if debug fails
+      }
+
+      // Use the correct 3-step discovery flow: /me/businesses → /{business-id}/owned_whatsapp_business_accounts → /{waba-id}/phone_numbers
+      let wabaId = null;
+      let phoneNumberId = null;
+      let phoneNumber = null;
+      let lastError = null;
+      let discoverySteps = [];
+      
+      try {
+        // Step 1: Get businesses the user manages
+        discoverySteps.push('Step 1: GET /me/businesses');
+        const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
+          params: {
+            access_token: accessToken,
+            fields: 'id,name'
+          }
+        });
+        
+        discoverySteps.push(`Step 1: Found ${businessesResponse.data.data?.length || 0} businesses`);
+        
+        if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
+          // Step 2: For each business, get owned WABAs
+          for (const business of businessesResponse.data.data) {
+            try {
+              discoverySteps.push(`Step 2: GET /${business.id}/owned_whatsapp_business_accounts`);
+              const ownedWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${business.id}/owned_whatsapp_business_accounts`, {
+                params: {
+                  access_token: accessToken,
+                  fields: 'id,name'
+                }
+              });
+              
+              discoverySteps.push(`Step 2: Found ${ownedWabaResponse.data.data?.length || 0} WABAs for business ${business.id}`);
+              
+              if (ownedWabaResponse.data.data && ownedWabaResponse.data.data.length > 0) {
+                // Step 3: Get phone numbers for the first WABA found
+                const waba = ownedWabaResponse.data.data[0];
+                wabaId = waba.id;
+                
+                try {
+                  discoverySteps.push(`Step 3: GET /${waba.id}/phone_numbers`);
+                  const phoneNumbersResponse = await axios.get(`https://graph.facebook.com/v18.0/${waba.id}/phone_numbers`, {
+                    params: {
+                      access_token: accessToken,
+                      fields: 'id,display_phone_number,verified_name'
+                    }
+                  });
+                  
+                  discoverySteps.push(`Step 3: Found ${phoneNumbersResponse.data.data?.length || 0} phone numbers for WABA ${waba.id}`);
+                  
+                  if (phoneNumbersResponse.data.data && phoneNumbersResponse.data.data.length > 0) {
+                    phoneNumber = phoneNumbersResponse.data.data[0];
+                    phoneNumberId = phoneNumber.id;
+                    break; // Found phone number, exit loop
+                  }
+                } catch (phoneError) {
+                  const phoneErrorDetails = phoneError.response?.data || { message: phoneError.message };
+                  lastError = phoneErrorDetails;
+                  discoverySteps.push(`Step 3 ERROR: ${JSON.stringify(phoneErrorDetails)}`);
+                  // Continue to next business
+                }
+              }
+            } catch (wabaError) {
+              const wabaErrorDetails = wabaError.response?.data || { message: wabaError.message };
+              if (!lastError) {
+                lastError = wabaErrorDetails;
+              }
+              discoverySteps.push(`Step 2 ERROR for business ${business.id}: ${JSON.stringify(wabaErrorDetails)}`);
+              // Continue to next business
+            }
+            if (phoneNumberId) break; // Found phone number, exit outer loop
+          }
+        } else {
+          discoverySteps.push('Step 1: No businesses found - user may not have a Meta Business Account');
+        }
+      } catch (businessesError) {
+        const businessesErrorDetails = businessesError.response?.data || { message: businessesError.message };
+        lastError = businessesErrorDetails;
+        discoverySteps.push(`Step 1 ERROR: ${JSON.stringify(businessesErrorDetails)}`);
+      }
+
+      // If 3-step flow failed, try alternative: direct app-level WABA access (for test mode)
+      if (!phoneNumberId) {
+        try {
+          discoverySteps.push('Fallback: Trying app-level WABA access');
+          const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
+          
+          const appWabaResponse = await axios.get(`https://graph.facebook.com/v18.0/${process.env.META_APP_ID}`, {
+            params: {
+              access_token: appAccessToken,
+              fields: 'whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}'
+            }
+          });
+          
+          if (appWabaResponse.data.whatsapp_business_accounts && appWabaResponse.data.whatsapp_business_accounts.data) {
+            const waba = appWabaResponse.data.whatsapp_business_accounts.data[0];
+            wabaId = waba.id;
+            
+            if (waba.phone_numbers && waba.phone_numbers.data && waba.phone_numbers.data.length > 0) {
+              phoneNumber = waba.phone_numbers.data[0];
+              phoneNumberId = phoneNumber.id;
+              discoverySteps.push(`Fallback SUCCESS: Found WABA ${wabaId} and phone number ${phoneNumberId} via app-level access`);
+            }
+          }
+        } catch (fallbackError) {
+          const fallbackErrorDetails = fallbackError.response?.data || { message: fallbackError.message };
+          if (!lastError) {
+            lastError = fallbackErrorDetails;
+          }
+          discoverySteps.push(`Fallback ERROR: ${JSON.stringify(fallbackErrorDetails)}`);
+        }
+      }
+
+      if (!phoneNumberId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Could not find WhatsApp phone number',
+          error: 'no_phone_number_found',
+          details: {
+            token_permissions: tokenPermissions,
+            required_permissions: ['business_management', 'whatsapp_business_management', 'whatsapp_business_messaging'],
+            has_required_permissions: tokenPermissions.includes('business_management') && 
+                                     tokenPermissions.includes('whatsapp_business_management') && 
+                                     tokenPermissions.includes('whatsapp_business_messaging'),
+            last_error: lastError,
+            discovery_steps: discoverySteps,
+            troubleshooting: [
+              '1. Ensure you granted ALL permissions during OAuth: business_management, whatsapp_business_management, whatsapp_business_messaging',
+              '2. Verify your Meta Business Account has a WhatsApp Business Account set up',
+              '3. Check that the WhatsApp Business Account has a phone number assigned',
+              '4. In test mode, ensure your app has a test phone number assigned in WhatsApp Manager',
+              '5. Try the manual connection endpoint if automatic discovery fails: POST /api/v1/meta-connection/whatsapp/manual-connect'
+            ]
+          },
+          help: 'No WhatsApp Business Account or phone number found. Ensure your Meta Business Account has a WhatsApp Business Account with a phone number assigned.'
+        });
+      }
+
+      // Get tenant info to determine subscription plan
+      const parsedTenantId = parseInt(tenantId);
+      const { getTenantById } = require('../config/tenant');
+      const tenant = await getTenantById(parsedTenantId);
+      
+      if (!tenant) {
+        return res.status(404).json({
+          success: false,
+          message: 'Tenant not found',
+          error: 'tenant_not_found'
+        });
+      }
+      
+      const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+      
+      // Get tenant database connection
+      const { getTenantConnection } = require('../config/database');
+      const sequelize = await getTenantConnection(parsedTenantId, subscriptionPlan);
+      const initializeModels = require('../models');
+      const models = initializeModels(sequelize);
+      
+      // Encrypt access token before storing
+      let encryptedToken = accessToken;
+      try {
+        const { encrypt } = require('../utils/encryption');
+        if (encrypt) {
+          encryptedToken = encrypt(accessToken);
+        }
+      } catch (e) {
+        // Encryption utility not available
+      }
+      
+      // Store connection in tenant database
+      await models.WhatsAppConnection.upsert({
+        ...(subscriptionPlan === 'free' && { tenant_id: parsedTenantId }),
+        phone_number_id: phoneNumberId,
+        waba_id: wabaId,
+        access_token: encryptedToken
+      });
+      
+      // Update AI agent config
+      let config = await models.AIAgentConfig.findOne({
+        where: {},
+        order: [['created_at', 'DESC']]
+      });
+      
+      if (!config) {
+        config = await models.AIAgentConfig.create({
+          whatsapp_enabled: true,
+          whatsapp_phone_number_id: phoneNumberId,
+          whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
+          whatsapp_access_token: encryptedToken
+        });
+      } else {
+        await config.update({
+          whatsapp_enabled: true,
+          whatsapp_phone_number_id: phoneNumberId,
+          whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
+          whatsapp_access_token: encryptedToken
+        });
+      }
+      
+      // Also store in main database for AI agent lookup
+      try {
+        const { mainSequelize } = require('../config/database');
+        await mainSequelize.query(`
+          INSERT INTO whatsapp_connections 
+          (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
+          VALUES (?, ?, ?, ?, NOW(), NOW())
+          ON DUPLICATE KEY UPDATE
+          waba_id = VALUES(waba_id),
+          access_token = VALUES(access_token),
+          updated_at = NOW()
+        `, {
+          replacements: [parsedTenantId, phoneNumberId, wabaId, encryptedToken]
+        });
+      } catch (error) {
+        // Don't fail if this fails - it's for AI agent lookup only
+      }
+      
+      return res.json({
+        success: true,
+        message: 'WhatsApp connected successfully via OAuth',
+        data: {
+          tenant_id: parsedTenantId,
+          waba_id: wabaId,
+          phone_number_id: phoneNumberId,
+          phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
+          connected: true,
+          method: 'oauth'
+        }
       });
     }
     
-    // This should never be reached, but just in case
+    // If we reach here, neither Embedded Signup nor OAuth provided required parameters
     return res.status(400).json({
       success: false,
-      message: 'WhatsApp signup failed: Unexpected error',
-      error: 'signup_failed'
+      message: 'WhatsApp connection failed: Missing required parameters',
+      error: 'missing_parameters',
+      help: 'Embedded Signup requires Solution Partner/Tech Provider status. If not available, use OAuth flow which works in test mode. Ensure you grant business_management, whatsapp_business_management, and whatsapp_business_messaging permissions during OAuth.'
     });
   } catch (error) {
     return res.status(500).json({
