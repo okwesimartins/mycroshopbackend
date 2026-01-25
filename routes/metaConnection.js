@@ -35,5 +35,11 @@ router.post('/instagram/disconnect', metaConnectionController.disconnectInstagra
 router.post('/test/whatsapp', metaConnectionController.testWhatsAppConnection);
 router.post('/test/instagram', metaConnectionController.testInstagramConnection);
 
+// Manual WhatsApp connection (workaround when automatic detection fails)
+router.post('/whatsapp/manual-connect', metaConnectionController.manuallyConnectWhatsApp);
+
+// Verify OAuth token and check WABA access
+router.post('/verify-oauth', metaConnectionController.verifyOAuthToken);
+
 module.exports = router;
 
