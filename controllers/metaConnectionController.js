@@ -165,6 +165,20 @@ async function handleWhatsAppCallback(req, res) {
       });
     }
 
+    // Check token permissions first
+    let tokenPermissions = null;
+    try {
+      const debugTokenResponse = await axios.get('https://graph.facebook.com/v18.0/debug_token', {
+        params: {
+          input_token: accessToken,
+          access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`
+        }
+      });
+      tokenPermissions = debugTokenResponse.data.data?.scopes || [];
+    } catch (debugError) {
+      // Continue even if debug fails
+    }
+
     // Get WhatsApp Business Account ID and phone numbers
     // For test accounts, we need to access through the app's WhatsApp configuration
     let wabaId = null;
@@ -295,9 +309,11 @@ async function handleWhatsAppCallback(req, res) {
         success: false,
         message: 'Could not find WhatsApp phone number',
         error: 'no_phone_number_found',
-        details: lastError || {
-          message: 'All API methods failed to retrieve WhatsApp Business Account or phone number',
-          waba_id_found: !!wabaId
+        details: {
+          ...lastError,
+          token_permissions: tokenPermissions,
+          required_permissions: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+          note: 'Ensure you granted WhatsApp Business Management and WhatsApp Business Messaging permissions during OAuth'
         }
       });
     }
@@ -408,7 +424,6 @@ async function handleWhatsAppCallback(req, res) {
       success: false,
       message: 'Failed to connect WhatsApp',
       error: 'connection_failed',
-      waba_id: wabaId,
       details: error.message
     });
   }
