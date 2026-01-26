@@ -6,8 +6,15 @@ const crypto = require('crypto');
  */
 async function getConnectionStatus(req, res) {
   try {
+    // Get tenant info to determine subscription plan
+    const tenantId = req.user.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    const subscriptionPlan = tenant?.subscription_plan || 'enterprise';
+    
+    const configWhere = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
     const config = await req.db.models.AIAgentConfig.findOne({
-      where: {},
+      where: configWhere,
       order: [['created_at', 'DESC']]
     });
 
@@ -190,13 +197,15 @@ async function handleWhatsAppCallback(req, res) {
       });
       
       // Update AI agent config
+      const configWhereEmbedded = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
       let config = await models.AIAgentConfig.findOne({
-        where: {},
+        where: configWhereEmbedded,
         order: [['created_at', 'DESC']]
       });
       
       if (!config) {
         config = await models.AIAgentConfig.create({
+          ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
           whatsapp_enabled: true,
           whatsapp_phone_number_id: phone_number_id,
           whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
@@ -279,7 +288,7 @@ async function handleWhatsAppCallback(req, res) {
       }
       
       // Exchange code for access token
-      const redirectUri = 'https://mycroshop.com/';
+      const redirectUri = 'https://mycroshop.com';
       
       let tokenResponse;
       try {
@@ -504,13 +513,15 @@ async function handleWhatsAppCallback(req, res) {
       });
       
       // Update AI agent config
+      const configWhere = subscriptionPlan === 'free' ? { tenant_id: parsedTenantId } : {};
       let config = await models.AIAgentConfig.findOne({
-        where: {},
+        where: configWhere,
         order: [['created_at', 'DESC']]
       });
       
       if (!config) {
         config = await models.AIAgentConfig.create({
+          ...(subscriptionPlan === 'free' && { tenant_id: parsedTenantId }),
           whatsapp_enabled: true,
           whatsapp_phone_number_id: phoneNumberId,
           whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
@@ -757,13 +768,15 @@ async function handleInstagramCallback(req, res) {
     const models = initializeModels(sequelize);
 
     // Update or create AI agent config
+    const configWhereInstagram = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
     let config = await models.AIAgentConfig.findOne({
-      where: {},
+      where: configWhereInstagram,
       order: [['created_at', 'DESC']]
     });
 
     if (!config) {
       config = await models.AIAgentConfig.create({
+        ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
         instagram_enabled: true,
         instagram_account_id: instagramAccountId,
         instagram_access_token: accessToken
@@ -800,8 +813,15 @@ async function handleInstagramCallback(req, res) {
  */
 async function disconnectWhatsApp(req, res) {
   try {
+    // Get tenant info to determine subscription plan
+    const tenantId = req.user.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    const subscriptionPlan = tenant?.subscription_plan || 'enterprise';
+    
+    const configWhere = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
     const config = await req.db.models.AIAgentConfig.findOne({
-      where: {},
+      where: configWhere,
       order: [['created_at', 'DESC']]
     });
 
@@ -831,8 +851,15 @@ async function disconnectWhatsApp(req, res) {
  */
 async function disconnectInstagram(req, res) {
   try {
+    // Get tenant info to determine subscription plan
+    const tenantId = req.user.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    const subscriptionPlan = tenant?.subscription_plan || 'enterprise';
+    
+    const configWhere = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
     const config = await req.db.models.AIAgentConfig.findOne({
-      where: {},
+      where: configWhere,
       order: [['created_at', 'DESC']]
     });
 
@@ -1125,8 +1152,15 @@ async function verifyOAuthToken(req, res) {
  */
 async function testWhatsAppConnection(req, res) {
   try {
+    // Get tenant info to determine subscription plan
+    const tenantId = req.user.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    const subscriptionPlan = tenant?.subscription_plan || 'enterprise';
+    
+    const configWhere = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
     const config = await req.db.models.AIAgentConfig.findOne({
-      where: {},
+      where: configWhere,
       order: [['created_at', 'DESC']]
     });
 
@@ -1166,8 +1200,15 @@ async function testWhatsAppConnection(req, res) {
  */
 async function testInstagramConnection(req, res) {
   try {
+    // Get tenant info to determine subscription plan
+    const tenantId = req.user.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    const subscriptionPlan = tenant?.subscription_plan || 'enterprise';
+    
+    const configWhere = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
     const config = await req.db.models.AIAgentConfig.findOne({
-      where: {},
+      where: configWhere,
       order: [['created_at', 'DESC']]
     });
 
@@ -1246,8 +1287,9 @@ async function manuallyConnectWhatsApp(req, res) {
     
     if (!finalAccessToken) {
       // Try to get from existing config
+      const configWhereManual = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
       const existingConfig = await models.AIAgentConfig.findOne({
-        where: {},
+        where: configWhereManual,
         order: [['created_at', 'DESC']]
       });
       
@@ -1294,13 +1336,15 @@ async function manuallyConnectWhatsApp(req, res) {
     }
 
     // Update or create AI agent config
+    const configWhereManual = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
     let config = await models.AIAgentConfig.findOne({
-      where: {},
+      where: configWhereManual,
       order: [['created_at', 'DESC']]
     });
 
     if (!config) {
       config = await models.AIAgentConfig.create({
+        ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
         whatsapp_enabled: true,
         whatsapp_phone_number_id: phone_number_id,
         whatsapp_phone_number: phoneNumberInfo?.display_phone_number || phoneNumberInfo?.verified_name || null,
