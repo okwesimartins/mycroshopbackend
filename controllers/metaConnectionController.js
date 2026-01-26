@@ -2,6 +2,46 @@ const axios = require('axios');
 const crypto = require('crypto');
 
 /**
+ * Exchange short-lived access token for long-lived token (60 days)
+ * @param {string} shortLivedToken - The short-lived access token
+ * @returns {Promise<{access_token: string, expires_in: number}>} - Long-lived token and expiration
+ */
+async function exchangeForLongLivedToken(shortLivedToken) {
+  try {
+    const response = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+      params: {
+        grant_type: 'fb_exchange_token',
+        client_id: process.env.META_APP_ID,
+        client_secret: process.env.META_APP_SECRET,
+        fb_exchange_token: shortLivedToken
+      }
+    });
+    
+    return {
+      access_token: response.data.access_token,
+      expires_in: response.data.expires_in || 5184000 // Default to 60 days in seconds if not provided
+    };
+  } catch (error) {
+    throw new Error(`Failed to exchange for long-lived token: ${error.response?.data?.error?.message || error.message}`);
+  }
+}
+
+/**
+ * Calculate expiration date from expires_in (seconds)
+ * @param {number} expiresIn - Expiration time in seconds
+ * @returns {Date} - Expiration date
+ */
+function calculateExpirationDate(expiresIn) {
+  if (!expiresIn) {
+    // Default to 60 days if not provided (long-lived token)
+    expiresIn = 5184000;
+  }
+  const expiresAt = new Date();
+  expiresAt.setSeconds(expiresAt.getSeconds() + expiresIn);
+  return expiresAt;
+}
+
+/**
  * Get connection status for tenant
  */
 async function getConnectionStatus(req, res) {
@@ -163,6 +203,10 @@ async function handleWhatsAppCallback(req, res) {
       // Get access token for this WABA (use App Access Token - in production, use System User token)
       const appAccessToken = `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`;
       
+      // App Access Tokens don't expire, but we'll set a far future date for consistency
+      // In production with System User tokens, they also don't expire
+      const expiresAt = null; // App Access Tokens don't expire
+      
       // Get phone number details
       let phoneNumber = null;
       try {
@@ -193,7 +237,8 @@ async function handleWhatsAppCallback(req, res) {
         ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
         phone_number_id: phone_number_id,
         waba_id: waba_id,
-        access_token: encryptedToken
+        access_token: encryptedToken,
+        token_expires_at: expiresAt
       });
       
       // Update AI agent config
@@ -209,14 +254,16 @@ async function handleWhatsAppCallback(req, res) {
           whatsapp_enabled: true,
           whatsapp_phone_number_id: phone_number_id,
           whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
-          whatsapp_access_token: encryptedToken
+          whatsapp_access_token: encryptedToken,
+          whatsapp_token_expires_at: expiresAt
         });
       } else {
         await config.update({
           whatsapp_enabled: true,
           whatsapp_phone_number_id: phone_number_id,
           whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
-          whatsapp_access_token: encryptedToken
+          whatsapp_access_token: encryptedToken,
+          whatsapp_token_expires_at: expiresAt
         });
       }
       
@@ -225,14 +272,15 @@ async function handleWhatsAppCallback(req, res) {
         const { mainSequelize } = require('../config/database');
         await mainSequelize.query(`
           INSERT INTO whatsapp_connections 
-          (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
-          VALUES (?, ?, ?, ?, NOW(), NOW())
+          (tenant_id, phone_number_id, waba_id, access_token, token_expires_at, connected_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, NOW(), NOW())
           ON DUPLICATE KEY UPDATE
           waba_id = VALUES(waba_id),
           access_token = VALUES(access_token),
+          token_expires_at = VALUES(token_expires_at),
           updated_at = NOW()
         `, {
-          replacements: [tenantId, phone_number_id, waba_id, encryptedToken]
+          replacements: [tenantId, phone_number_id, waba_id, encryptedToken, expiresAt]
         });
       } catch (error) {
         // Don't fail if this fails - it's for AI agent lookup only
@@ -288,7 +336,7 @@ async function handleWhatsAppCallback(req, res) {
       }
       
       // Exchange code for access token
-      const redirectUri = 'https://mycroshop.com/';
+      const redirectUri = 'https://mycroshop.com';
       
       let tokenResponse;
       try {
@@ -309,7 +357,8 @@ async function handleWhatsAppCallback(req, res) {
         });
       }
 
-      const accessToken = tokenResponse.data.access_token;
+      let accessToken = tokenResponse.data.access_token;
+      let expiresIn = tokenResponse.data.expires_in; // Usually 3600 (1 hour) for short-lived tokens
 
       if (!accessToken) {
         return res.status(400).json({
@@ -318,6 +367,21 @@ async function handleWhatsAppCallback(req, res) {
           error: 'no_access_token'
         });
       }
+
+      // Exchange short-lived token for long-lived token (60 days)
+      try {
+        const longLivedTokenData = await exchangeForLongLivedToken(accessToken);
+        accessToken = longLivedTokenData.access_token;
+        expiresIn = longLivedTokenData.expires_in; // ~5184000 seconds (60 days)
+      } catch (exchangeError) {
+        // If exchange fails, use short-lived token but log warning
+        // This can happen if token is already long-lived or if there's an API issue
+        console.warn('Could not exchange for long-lived token, using short-lived token:', exchangeError.message);
+        // expiresIn remains from initial response (usually 3600 seconds)
+      }
+
+      // Calculate expiration date
+      const expiresAt = calculateExpirationDate(expiresIn);
 
       // First, verify token permissions
       let tokenPermissions = [];
@@ -509,7 +573,8 @@ async function handleWhatsAppCallback(req, res) {
         ...(subscriptionPlan === 'free' && { tenant_id: parsedTenantId }),
         phone_number_id: phoneNumberId,
         waba_id: wabaId,
-        access_token: encryptedToken
+        access_token: encryptedToken,
+        token_expires_at: expiresAt
       });
       
       // Update AI agent config
@@ -525,14 +590,16 @@ async function handleWhatsAppCallback(req, res) {
           whatsapp_enabled: true,
           whatsapp_phone_number_id: phoneNumberId,
           whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
-          whatsapp_access_token: encryptedToken
+          whatsapp_access_token: encryptedToken,
+          whatsapp_token_expires_at: expiresAt
         });
       } else {
         await config.update({
           whatsapp_enabled: true,
           whatsapp_phone_number_id: phoneNumberId,
           whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
-          whatsapp_access_token: encryptedToken
+          whatsapp_access_token: encryptedToken,
+          whatsapp_token_expires_at: expiresAt
         });
       }
       
@@ -687,7 +754,8 @@ async function handleInstagramCallback(req, res) {
       });
     }
 
-    const accessToken = tokenResponse.data.access_token;
+    let accessToken = tokenResponse.data.access_token;
+    let expiresIn = tokenResponse.data.expires_in;
 
     if (!accessToken) {
       return res.status(400).json({
@@ -696,6 +764,18 @@ async function handleInstagramCallback(req, res) {
         error: 'no_access_token'
       });
     }
+
+    // Exchange short-lived token for long-lived token (60 days)
+    try {
+      const longLivedTokenData = await exchangeForLongLivedToken(accessToken);
+      accessToken = longLivedTokenData.access_token;
+      expiresIn = longLivedTokenData.expires_in;
+    } catch (exchangeError) {
+      console.warn('Could not exchange for long-lived token, using short-lived token:', exchangeError.message);
+    }
+
+    // Calculate expiration date
+    const expiresAt = calculateExpirationDate(expiresIn);
 
     // Get Instagram Business Account
     let pagesResponse;
@@ -779,13 +859,15 @@ async function handleInstagramCallback(req, res) {
         ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
         instagram_enabled: true,
         instagram_account_id: instagramAccountId,
-        instagram_access_token: accessToken
+        instagram_access_token: accessToken,
+        instagram_token_expires_at: expiresAt
       });
     } else {
       await config.update({
         instagram_enabled: true,
         instagram_account_id: instagramAccountId,
-        instagram_access_token: accessToken
+        instagram_access_token: accessToken,
+        instagram_token_expires_at: expiresAt
       });
     }
 
@@ -1284,6 +1366,7 @@ async function manuallyConnectWhatsApp(req, res) {
     // If access_token is provided, use it; otherwise, try to get from OAuth flow
     // For manual connection, we'll use the provided access_token or require OAuth first
     let finalAccessToken = access_token;
+    let expiresAt = null;
     
     if (!finalAccessToken) {
       // Try to get from existing config
@@ -1295,12 +1378,24 @@ async function manuallyConnectWhatsApp(req, res) {
       
       if (existingConfig && existingConfig.whatsapp_access_token) {
         finalAccessToken = existingConfig.whatsapp_access_token;
+        expiresAt = existingConfig.whatsapp_token_expires_at;
       } else {
         return res.status(400).json({
           success: false,
           message: 'Access token is required. Please provide access_token or complete OAuth flow first.',
           error: 'missing_access_token'
         });
+      }
+    } else {
+      // If new token provided, try to exchange for long-lived token
+      try {
+        const longLivedTokenData = await exchangeForLongLivedToken(finalAccessToken);
+        finalAccessToken = longLivedTokenData.access_token;
+        expiresAt = calculateExpirationDate(longLivedTokenData.expires_in);
+      } catch (exchangeError) {
+        // If exchange fails, assume it's already long-lived or use as-is
+        // Set expiration to 60 days from now as default
+        expiresAt = calculateExpirationDate(5184000);
       }
     }
 
@@ -1348,14 +1443,16 @@ async function manuallyConnectWhatsApp(req, res) {
         whatsapp_enabled: true,
         whatsapp_phone_number_id: phone_number_id,
         whatsapp_phone_number: phoneNumberInfo?.display_phone_number || phoneNumberInfo?.verified_name || null,
-        whatsapp_access_token: finalAccessToken
+        whatsapp_access_token: finalAccessToken,
+        whatsapp_token_expires_at: expiresAt
       });
     } else {
       await config.update({
         whatsapp_enabled: true,
         whatsapp_phone_number_id: phone_number_id,
         whatsapp_phone_number: phoneNumberInfo?.display_phone_number || phoneNumberInfo?.verified_name || null,
-        whatsapp_access_token: finalAccessToken
+        whatsapp_access_token: finalAccessToken,
+        whatsapp_token_expires_at: expiresAt
       });
     }
 
@@ -1364,7 +1461,8 @@ async function manuallyConnectWhatsApp(req, res) {
       ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
       phone_number_id: phone_number_id,
       waba_id: waba_id || null,
-      access_token: encryptedToken
+      access_token: encryptedToken,
+      token_expires_at: expiresAt
     });
 
     // Also store in main database for AI agent lookup
@@ -1373,14 +1471,15 @@ async function manuallyConnectWhatsApp(req, res) {
       
       await mainSequelize.query(`
         INSERT INTO whatsapp_connections 
-        (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
-        VALUES (?, ?, ?, ?, NOW(), NOW())
+        (tenant_id, phone_number_id, waba_id, access_token, token_expires_at, connected_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, NOW(), NOW())
         ON DUPLICATE KEY UPDATE
         waba_id = VALUES(waba_id),
         access_token = VALUES(access_token),
+        token_expires_at = VALUES(token_expires_at),
         updated_at = NOW()
       `, {
-        replacements: [tenantId, phone_number_id, waba_id || null, encryptedToken]
+        replacements: [tenantId, phone_number_id, waba_id || null, encryptedToken, expiresAt]
       });
       
     } catch (error) {
@@ -1408,6 +1507,133 @@ async function manuallyConnectWhatsApp(req, res) {
   }
 }
 
+/**
+ * Refresh access tokens that are expiring soon (within 7 days)
+ * This function should be called periodically (e.g., via cron job) to prevent token expiration
+ * @param {number} daysBeforeExpiration - Number of days before expiration to refresh (default: 7)
+ * @returns {Promise<{refreshed: number, failed: number, errors: Array}>}
+ */
+async function refreshExpiringTokens(daysBeforeExpiration = 7) {
+  const results = {
+    refreshed: 0,
+    failed: 0,
+    errors: []
+  };
+
+  try {
+    const { mainSequelize } = require('../config/database');
+    const { getTenantById } = require('../config/tenant');
+    
+    // Calculate expiration threshold (7 days from now)
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() + daysBeforeExpiration);
+    
+    // Find all tokens expiring within the threshold
+    const expiringConnections = await mainSequelize.query(`
+      SELECT tenant_id, phone_number_id, access_token, token_expires_at
+      FROM whatsapp_connections
+      WHERE token_expires_at IS NOT NULL
+      AND token_expires_at <= ?
+      AND token_expires_at > NOW()
+      ORDER BY token_expires_at ASC
+    `, {
+      replacements: [thresholdDate],
+      type: mainSequelize.QueryTypes.SELECT
+    });
+    
+    for (const connection of expiringConnections) {
+      try {
+        // Get tenant info
+        const tenant = await getTenantById(connection.tenant_id);
+        if (!tenant) {
+          results.failed++;
+          results.errors.push(`Tenant ${connection.tenant_id} not found`);
+          continue;
+        }
+        
+        const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+        
+        // Get tenant database connection
+        const { getTenantConnection } = require('../config/database');
+        const sequelize = await getTenantConnection(connection.tenant_id, subscriptionPlan);
+        const initializeModels = require('../models');
+        const models = initializeModels(sequelize);
+        
+        // Decrypt token if needed
+        let currentToken = connection.access_token;
+        try {
+          const { decrypt } = require('../utils/encryption');
+          if (decrypt) {
+            currentToken = decrypt(currentToken);
+          }
+        } catch (e) {
+          // Token might not be encrypted
+        }
+        
+        // Exchange for new long-lived token
+        const longLivedTokenData = await exchangeForLongLivedToken(currentToken);
+        const newToken = longLivedTokenData.access_token;
+        const newExpiresAt = calculateExpirationDate(longLivedTokenData.expires_in);
+        
+        // Encrypt new token
+        let encryptedToken = newToken;
+        try {
+          const { encrypt } = require('../utils/encryption');
+          if (encrypt) {
+            encryptedToken = encrypt(newToken);
+          }
+        } catch (e) {
+          // Encryption not available
+        }
+        
+        // Update tenant database
+        await models.WhatsAppConnection.update(
+          {
+            access_token: encryptedToken,
+            token_expires_at: newExpiresAt
+          },
+          {
+            where: { phone_number_id: connection.phone_number_id }
+          }
+        );
+        
+        // Update AI agent config
+        const configWhere = subscriptionPlan === 'free' ? { tenant_id: connection.tenant_id } : {};
+        await models.AIAgentConfig.update(
+          {
+            whatsapp_access_token: encryptedToken,
+            whatsapp_token_expires_at: newExpiresAt
+          },
+          {
+            where: configWhere
+          }
+        );
+        
+        // Update main database
+        await mainSequelize.query(`
+          UPDATE whatsapp_connections
+          SET access_token = ?,
+              token_expires_at = ?,
+              updated_at = NOW()
+          WHERE tenant_id = ? AND phone_number_id = ?
+        `, {
+          replacements: [encryptedToken, newExpiresAt, connection.tenant_id, connection.phone_number_id]
+        });
+        
+        results.refreshed++;
+      } catch (error) {
+        results.failed++;
+        results.errors.push(`Failed to refresh token for tenant ${connection.tenant_id}: ${error.message}`);
+      }
+    }
+    
+    return results;
+  } catch (error) {
+    results.errors.push(`Token refresh process failed: ${error.message}`);
+    return results;
+  }
+}
+
 module.exports = {
   getConnectionStatus,
   initiateWhatsAppConnection,
@@ -1419,7 +1645,8 @@ module.exports = {
   testWhatsAppConnection,
   testInstagramConnection,
   manuallyConnectWhatsApp,
-  verifyOAuthToken
+  verifyOAuthToken,
+  refreshExpiringTokens
 };
 
 

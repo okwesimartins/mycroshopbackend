@@ -1207,8 +1207,10 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       whatsapp_phone_number VARCHAR(50),
       whatsapp_phone_number_id VARCHAR(100),
       whatsapp_access_token TEXT,
+      whatsapp_token_expires_at DATETIME NULL,
       instagram_account_id VARCHAR(100),
       instagram_access_token TEXT,
+      instagram_token_expires_at DATETIME NULL,
       greeting_message TEXT,
       unavailable_message TEXT,
       business_hours JSON,
@@ -1217,10 +1219,42 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       ${aiAgentTenantIndex}
       INDEX idx_whatsapp_enabled (whatsapp_enabled),
-      INDEX idx_instagram_enabled (instagram_enabled)
+      INDEX idx_instagram_enabled (instagram_enabled),
+      INDEX idx_whatsapp_token_expires (whatsapp_token_expires_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   console.log('✅ AI Agent Configs table created/verified');
+  
+  // Add token_expires_at columns if they don't exist (migration)
+  try {
+    const columns = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'ai_agent_configs' 
+      AND COLUMN_NAME IN ('whatsapp_token_expires_at', 'instagram_token_expires_at')
+    `);
+    const existingColumns = columns[0].map(col => col.COLUMN_NAME);
+    
+    if (!existingColumns.includes('whatsapp_token_expires_at')) {
+      await connection.query(`
+        ALTER TABLE ai_agent_configs 
+        ADD COLUMN whatsapp_token_expires_at DATETIME NULL AFTER whatsapp_access_token,
+        ADD INDEX idx_whatsapp_token_expires (whatsapp_token_expires_at)
+      `);
+      console.log('✅ Added whatsapp_token_expires_at column to ai_agent_configs');
+    }
+    
+    if (!existingColumns.includes('instagram_token_expires_at')) {
+      await connection.query(`
+        ALTER TABLE ai_agent_configs 
+        ADD COLUMN instagram_token_expires_at DATETIME NULL AFTER instagram_access_token
+      `);
+      console.log('✅ Added instagram_token_expires_at column to ai_agent_configs');
+    }
+  } catch (alterError) {
+    console.warn('Could not add token_expires_at columns to ai_agent_configs:', alterError.message);
+  }
 
   // WhatsApp Connections table (for tenant databases)
   const whatsappConnTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
@@ -1233,14 +1267,38 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       phone_number_id VARCHAR(255) NOT NULL,
       waba_id VARCHAR(255),
       access_token TEXT NOT NULL,
+      token_expires_at DATETIME NULL,
       connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       ${whatsappConnTenantIndex}
       INDEX idx_phone_number_id (phone_number_id),
+      INDEX idx_token_expires (token_expires_at),
       UNIQUE KEY unique_phone_number_id (phone_number_id${isSharedDb ? ', tenant_id' : ''})
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   console.log('✅ WhatsApp Connections table created/verified in tenant database');
+  
+  // Add token_expires_at column if it doesn't exist (migration)
+  try {
+    const columns = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'whatsapp_connections' 
+      AND COLUMN_NAME = 'token_expires_at'
+    `);
+    
+    if (columns[0].length === 0) {
+      await connection.query(`
+        ALTER TABLE whatsapp_connections 
+        ADD COLUMN token_expires_at DATETIME NULL AFTER access_token,
+        ADD INDEX idx_token_expires (token_expires_at)
+      `);
+      console.log('✅ Added token_expires_at column to whatsapp_connections (tenant DB)');
+    }
+  } catch (alterError) {
+    console.warn('Could not add token_expires_at column to whatsapp_connections:', alterError.message);
+  }
 
   // All online store tables are now complete!
   // Note: Additional enterprise-only tables (roles, suppliers, purchase_orders, pos_transactions, etc.)
@@ -1390,15 +1448,39 @@ async function initializeMainDatabaseTables() {
         phone_number_id VARCHAR(255) NOT NULL,
         waba_id VARCHAR(255),
         access_token TEXT NOT NULL,
+        token_expires_at DATETIME NULL,
         connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_tenant_id (tenant_id),
         INDEX idx_phone_number_id (phone_number_id),
+        INDEX idx_token_expires (token_expires_at),
         UNIQUE KEY unique_tenant_phone (tenant_id, phone_number_id),
         FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     console.log('✅ whatsapp_connections table created/verified in main database');
+    
+    // Add token_expires_at column if it doesn't exist (migration)
+    try {
+      const columns = await connection.query(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = ? 
+        AND TABLE_NAME = 'whatsapp_connections' 
+        AND COLUMN_NAME = 'token_expires_at'
+      `, [dbName]);
+      
+      if (columns[0].length === 0) {
+        await connection.query(`
+          ALTER TABLE whatsapp_connections 
+          ADD COLUMN token_expires_at DATETIME NULL AFTER access_token,
+          ADD INDEX idx_token_expires (token_expires_at)
+        `);
+        console.log('✅ Added token_expires_at column to whatsapp_connections (main DB)');
+      }
+    } catch (alterError) {
+      console.warn('Could not add token_expires_at column to whatsapp_connections (main DB):', alterError.message);
+    }
 
     await connection.end();
     return true;

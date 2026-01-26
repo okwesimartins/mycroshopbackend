@@ -5,7 +5,12 @@ const { attachTenantDb } = require('../middleware/tenant');
 const { initializeTenantModels } = require('../middleware/models');
 const metaConnectionController = require('../controllers/metaConnectionController');
 
-// All routes require authentication
+// Public route for cron job - token refresh (no authentication required)
+// This endpoint can be called by cron jobs via simple HTTP request
+router.post('/refresh-tokens', metaConnectionController.refreshExpiringTokensHandler);
+router.get('/refresh-tokens', metaConnectionController.refreshExpiringTokensHandler);
+
+// All other routes require authentication
 router.use(authenticate);
 router.use(attachTenantDb);
 router.use(initializeTenantModels);

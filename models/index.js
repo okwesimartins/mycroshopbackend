@@ -1131,6 +1131,11 @@ function initializeModels(sequelize) {
       type: DataTypes.TEXT,
       allowNull: true
     },
+    whatsapp_token_expires_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'When the WhatsApp access token expires (for long-lived tokens, typically 60 days)'
+    },
     instagram_account_id: {
       type: DataTypes.STRING(100),
       allowNull: true
@@ -1138,6 +1143,11 @@ function initializeModels(sequelize) {
     instagram_access_token: {
       type: DataTypes.TEXT,
       allowNull: true
+    },
+    instagram_token_expires_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'When the Instagram access token expires (for long-lived tokens, typically 60 days)'
     },
     greeting_message: {
       type: DataTypes.TEXT,
@@ -1185,6 +1195,11 @@ function initializeModels(sequelize) {
     access_token: {
       type: DataTypes.TEXT,
       allowNull: false
+    },
+    token_expires_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'When the access token expires (for long-lived tokens, typically 60 days)'
     }
   }, {
     tableName: 'whatsapp_connections',
