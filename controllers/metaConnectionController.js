@@ -1508,6 +1508,39 @@ async function manuallyConnectWhatsApp(req, res) {
 }
 
 /**
+ * HTTP handler for refreshing expiring tokens (called by cron jobs)
+ * This endpoint does not require authentication - designed for cron job access
+ */
+async function refreshExpiringTokensHandler(req, res) {
+  try {
+    // Get daysBeforeExpiration from query parameter (default: 7 days)
+    const daysBeforeExpiration = parseInt(req.query.days || req.body.days || 7);
+    
+    // Call the refresh function
+    const results = await refreshExpiringTokens(daysBeforeExpiration);
+    
+    return res.json({
+      success: true,
+      message: 'Token refresh completed',
+      data: {
+        refreshed: results.refreshed,
+        failed: results.failed,
+        total_processed: results.refreshed + results.failed,
+        errors: results.errors.length > 0 ? results.errors : undefined
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Token refresh failed',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
+/**
  * Refresh access tokens that are expiring soon (within 7 days)
  * This function should be called periodically (e.g., via cron job) to prevent token expiration
  * @param {number} daysBeforeExpiration - Number of days before expiration to refresh (default: 7)
@@ -1646,7 +1679,8 @@ module.exports = {
   testInstagramConnection,
   manuallyConnectWhatsApp,
   verifyOAuthToken,
-  refreshExpiringTokens
+  refreshExpiringTokens,
+  refreshExpiringTokensHandler
 };
 
 
