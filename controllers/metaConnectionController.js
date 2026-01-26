@@ -288,7 +288,7 @@ async function handleWhatsAppCallback(req, res) {
       }
       
       // Exchange code for access token
-      const redirectUri = 'https://mycroshop.com';
+      const redirectUri = 'https://mycroshop.com/';
       
       let tokenResponse;
       try {
