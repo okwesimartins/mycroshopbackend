@@ -2876,10 +2876,17 @@ async function getOnlineStoreProducts(req, res) {
       };
     }
 
-    // Get products with pagination
+    // Get products with pagination, including publish status from store_products
     const { count, rows } = await models.Product.findAndCountAll({
       where,
       attributes: ['id', 'name', 'sku', 'price', 'image_url', 'category', 'stock', 'description', 'created_at'],
+      include: [
+        {
+          model: models.StoreProduct,
+          attributes: ['id', 'is_published', 'featured', 'sort_order'],
+          required: false // LEFT JOIN - include products even if not in store_products
+        }
+      ],
       order: [['created_at', 'DESC']],
       limit: limitNum,
       offset: offset
@@ -2896,12 +2903,26 @@ async function getOnlineStoreProducts(req, res) {
       return `${protocol}://${host}${relativePath}`;
     };
 
-    // Convert image_url to full URL for each product
+    // Convert image_url to full URL and add publish status for each product
     const products = rows.map(product => {
       const productData = product.toJSON();
       if (productData.image_url) {
         productData.image_url = getFullUrl(productData.image_url);
       }
+      
+      // Extract publish status from StoreProduct (if exists)
+      // StoreProduct is hasMany, so it could be an array or single object
+      const storeProducts = productData.StoreProducts || (productData.StoreProduct ? [productData.StoreProduct] : []);
+      const storeProduct = storeProducts.length > 0 ? storeProducts[0] : null;
+      
+      productData.is_published = storeProduct ? (storeProduct.is_published || false) : false;
+      productData.featured = storeProduct ? (storeProduct.featured || false) : false;
+      productData.sort_order = storeProduct ? (storeProduct.sort_order || null) : null;
+      
+      // Remove nested StoreProduct objects
+      delete productData.StoreProduct;
+      delete productData.StoreProducts;
+      
       return productData;
     });
 
@@ -2923,6 +2944,209 @@ async function getOnlineStoreProducts(req, res) {
     res.status(500).json({
       success: false,
       message: 'Failed to get online store products',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Get detailed product information for online store
+ * Includes all product details, variants, metrics (total orders), and publish status
+ * Works for both free and enterprise users
+ * GET /api/v1/online-stores/:id/products/:product_id/details
+ */
+async function getOnlineStoreProductDetails(req, res) {
+  try {
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const { id: online_store_id, product_id } = req.params;
+
+    // Verify online store belongs to current tenant
+    const onlineStore = await findTenantOnlineStoreById(req, models, online_store_id);
+    if (!onlineStore) {
+      return res.status(403).json({
+        success: false,
+        message: 'Online store not found or access denied'
+      });
+    }
+
+    // Get tenant to check subscription plan
+    const tenantId = req.user?.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    let tenant = null;
+    let isFreePlan = false;
+    try {
+      tenant = await getTenantById(tenantId);
+      isFreePlan = tenant && tenant.subscription_plan === 'free';
+    } catch (error) {
+      console.warn('Could not fetch tenant:', error);
+    }
+
+    // Get product with all details
+    // Note: StoreProduct hasMany relationship, but for online store we only need one (per tenant)
+    const product = await models.Product.findByPk(product_id, {
+      include: [
+        {
+          model: models.StoreProduct,
+          attributes: ['id', 'is_published', 'featured', 'sort_order', 'created_at', 'updated_at'],
+          required: false
+        },
+        {
+          model: models.ProductVariation,
+          attributes: ['id', 'variation_name', 'variation_type', 'is_required', 'sort_order'],
+          include: [
+            {
+              model: models.ProductVariationOption,
+              attributes: [
+                'id', 'option_value', 'option_display_name', 'price_adjustment', 
+                'stock', 'sku', 'image_url', 'is_default', 'is_available', 'sort_order'
+              ],
+              order: [['sort_order', 'ASC']]
+            }
+          ],
+          order: [['sort_order', 'ASC']],
+          required: false
+        },
+        // Include Store for enterprise users (if product has store_id)
+        ...(isFreePlan ? [] : [{
+          model: models.Store,
+          attributes: ['id', 'name', 'store_type', 'city', 'state'],
+          required: false
+        }])
+      ]
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Get product metrics - total orders
+    const { QueryTypes } = require('sequelize');
+    const orderMetrics = await req.db.query(
+      `SELECT 
+        COUNT(DISTINCT o.id) as total_orders,
+        COALESCE(SUM(oi.quantity), 0) as total_quantity_sold,
+        COALESCE(SUM(oi.total), 0) as total_revenue
+      FROM online_store_orders o
+      INNER JOIN online_store_order_items oi ON o.id = oi.order_id
+      WHERE oi.product_id = :productId
+        AND o.online_store_id = :onlineStoreId
+        AND o.status != 'cancelled'
+        ${isFreePlan ? 'AND o.tenant_id = :tenantId' : ''}`,
+      {
+        replacements: {
+          productId: product_id,
+          onlineStoreId: online_store_id,
+          ...(isFreePlan && { tenantId })
+        },
+        type: QueryTypes.SELECT
+      }
+    );
+
+    const metrics = orderMetrics && orderMetrics.length > 0 ? orderMetrics[0] : {
+      total_orders: 0,
+      total_quantity_sold: 0,
+      total_revenue: 0
+    };
+
+    // Helper function to get full URL
+    const getFullUrl = (relativePath) => {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+        return relativePath;
+      }
+      const protocol = req.protocol;
+      const host = req.get('host');
+      return `${protocol}://${host}${relativePath}`;
+    };
+
+    // Format product data
+    const productData = product.toJSON();
+
+    // Convert image URLs to full URLs
+    if (productData.image_url) {
+      productData.image_url = getFullUrl(productData.image_url);
+    }
+
+    // Format variations with full image URLs
+    if (productData.ProductVariations && Array.isArray(productData.ProductVariations)) {
+      productData.variations = productData.ProductVariations.map(variation => {
+        const variationData = {
+          id: variation.id,
+          variation_name: variation.variation_name,
+          variation_type: variation.variation_type,
+          is_required: variation.is_required,
+          sort_order: variation.sort_order,
+          options: []
+        };
+
+        if (variation.ProductVariationOptions && Array.isArray(variation.ProductVariationOptions)) {
+          variationData.options = variation.ProductVariationOptions.map(option => ({
+            id: option.id,
+            value: option.option_value,
+            display_name: option.option_display_name,
+            price_adjustment: parseFloat(option.price_adjustment || 0),
+            stock: parseInt(option.stock || 0),
+            sku: option.sku,
+            image_url: option.image_url ? getFullUrl(option.image_url) : null,
+            is_default: option.is_default || false,
+            is_available: option.is_available !== false,
+            sort_order: option.sort_order
+          }));
+        }
+
+        return variationData;
+      });
+    } else {
+      productData.variations = [];
+    }
+
+    // Extract publish status from StoreProduct
+    // StoreProduct is hasMany, so it's an array - get the first one
+    const storeProducts = productData.StoreProducts || [];
+    const storeProduct = storeProducts.length > 0 ? storeProducts[0] : null;
+    
+    productData.is_published = storeProduct ? (storeProduct.is_published || false) : false;
+    productData.featured = storeProduct ? (storeProduct.featured || false) : false;
+    productData.sort_order = storeProduct ? (storeProduct.sort_order || null) : null;
+    productData.published_at = storeProduct && storeProduct.created_at ? storeProduct.created_at : null;
+    productData.last_updated = storeProduct && storeProduct.updated_at ? storeProduct.updated_at : productData.updated_at;
+
+    // Add metrics
+    productData.metrics = {
+      total_orders: parseInt(metrics.total_orders || 0),
+      total_quantity_sold: parseFloat(metrics.total_quantity_sold || 0),
+      total_revenue: parseFloat(metrics.total_revenue || 0)
+    };
+
+    // Remove nested objects
+    delete productData.StoreProducts;
+    delete productData.ProductVariations;
+    if (productData.Store) {
+      productData.store = productData.Store;
+      delete productData.Store;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        product: productData
+      }
+    });
+  } catch (error) {
+    console.error('Error getting online store product details:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get product details',
       error: error.message
     });
   }
@@ -4609,6 +4833,7 @@ module.exports = {
   updateOnlineStoreProduct,
   removeOnlineStoreProduct,
   publishOnlineStoreProduct,
-  getOnlineStoreProducts
+  getOnlineStoreProducts,
+  getOnlineStoreProductDetails
 };
 

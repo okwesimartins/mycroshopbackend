@@ -188,5 +188,8 @@ router.delete('/:id/products/:product_id', onlineStoreController.removeOnlineSto
 // This shows products that can be added to collections
 router.get('/:id/products', onlineStoreController.getOnlineStoreProducts);
 
+// Get detailed product information (includes variants, metrics, publish status)
+router.get('/:id/products/:product_id/details', onlineStoreController.getOnlineStoreProductDetails);
+
 module.exports = router;
 
