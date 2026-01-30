@@ -2988,9 +2988,15 @@ async function getOnlineStoreProductDetails(req, res) {
       console.warn('Could not fetch tenant:', error);
     }
 
+    // Define Product attributes - exclude store_id for free users
+    const productAttributes = isFreePlan
+      ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
+      : ['id', 'tenant_id', 'store_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at'];
+
     // Get product with all details
     // Note: StoreProduct hasMany relationship, but for online store we only need one (per tenant)
     const product = await models.Product.findByPk(product_id, {
+      attributes: productAttributes, // Explicitly set attributes to exclude store_id for free users
       include: [
         {
           model: models.StoreProduct,
@@ -3013,7 +3019,7 @@ async function getOnlineStoreProductDetails(req, res) {
           order: [['sort_order', 'ASC']],
           required: false
         },
-        // Include Store for enterprise users (if product has store_id)
+        // Include Store for enterprise users only (if product has store_id)
         ...(isFreePlan ? [] : [{
           model: models.Store,
           attributes: ['id', 'name', 'store_type', 'city', 'state'],
@@ -3131,15 +3137,49 @@ async function getOnlineStoreProductDetails(req, res) {
     // Remove nested objects
     delete productData.StoreProducts;
     delete productData.ProductVariations;
-    if (productData.Store) {
+    
+    // Handle Store for enterprise users only
+    if (!isFreePlan && productData.Store) {
       productData.store = productData.Store;
       delete productData.Store;
+    } else if (isFreePlan) {
+      // Remove store_id if it exists (shouldn't, but just in case)
+      delete productData.store_id;
     }
+
+    // Response structure:
+    // {
+    //   success: true,
+    //   data: {
+    //     product: {
+    //       id, name, sku, price, stock, description, image_url, category, etc.
+    //       variations: [ // ✅ Variations are included
+    //         {
+    //           id, variation_name, variation_type, is_required, sort_order,
+    //           options: [
+    //             { id, value, display_name, price_adjustment, stock, sku, image_url, is_default, is_available, sort_order }
+    //           ]
+    //         }
+    //       ],
+    //       is_published: boolean,
+    //       featured: boolean,
+    //       sort_order: number,
+    //       published_at: date,
+    //       last_updated: date,
+    //       metrics: {
+    //         total_orders: number,
+    //         total_quantity_sold: number,
+    //         total_revenue: number
+    //       },
+    //       store: { ... } // Only for enterprise users
+    //     }
+    //   }
+    // }
 
     res.json({
       success: true,
       data: {
-        product: productData
+        product: productData // ✅ Includes variations, metrics, publish status - works for both free and enterprise users
       }
     });
   } catch (error) {
