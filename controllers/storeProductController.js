@@ -15,6 +15,64 @@ function getFullUrl(req, relativePath) {
 }
 
 /**
+ * Helper function to verify online store belongs to current tenant
+ * Returns the online store if valid, null otherwise
+ */
+async function verifyOnlineStoreOwnership(req, online_store_id) {
+  if (!req.db) {
+    return null;
+  }
+
+  const models = initModels(req.db);
+  const tenant = req.tenant;
+  const tenantId = req.user?.tenantId;
+  const isFreePlan = tenant && tenant.subscription_plan === 'free';
+
+  const numericId = Number(online_store_id);
+  if (!numericId || Number.isNaN(numericId)) {
+    return null;
+  }
+
+  if (isFreePlan) {
+    // For free users, check tenant_id in shared database
+    const [rows] = await req.db.query(
+      'SELECT id FROM online_stores WHERE id = ? AND tenant_id = ? LIMIT 1',
+      { replacements: [numericId, tenantId] }
+    );
+    if (!rows || rows.length === 0) {
+      return null; // Either not found or belongs to another tenant
+    }
+  }
+
+  // For enterprise users, database is already tenant-isolated
+  // So any online store found belongs to this tenant
+  return await models.OnlineStore.findByPk(numericId);
+}
+
+/**
+ * Helper function to verify collection belongs to current tenant's online store
+ */
+async function verifyCollectionOwnership(req, collection_id) {
+  if (!req.db) {
+    return null;
+  }
+
+  const models = initModels(req.db);
+  const collection = await models.StoreCollection.findByPk(collection_id);
+  if (!collection) {
+    return null;
+  }
+
+  // Verify the collection's online store belongs to the tenant
+  const onlineStore = await verifyOnlineStoreOwnership(req, collection.online_store_id);
+  if (!onlineStore) {
+    return null;
+  }
+
+  return collection;
+}
+
+/**
  * Get products available for adding to store collections
  * This shows products from inventory that can be added to collections
  * Supports pagination with page and limit query parameters
@@ -130,40 +188,100 @@ async function getAvailableProducts(req, res) {
 
 /**
  * Get products already in a collection
+ * Works for both free and enterprise users
+ * Verifies collection ownership and handles products without store_id (free users)
  */
 async function getCollectionProducts(req, res) {
   try {
-    // Initialize models
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
     const models = initModels(req.db);
-    
     const { collection_id } = req.params;
+
+    // Verify collection belongs to current tenant
+    const collection = await verifyCollectionOwnership(req, collection_id);
+    if (!collection) {
+      return res.status(403).json({
+        success: false,
+        message: 'Collection not found or access denied'
+      });
+    }
+
+    // Get tenant info to determine if free user
+    const tenant = req.tenant;
+    const isFreePlan = tenant && tenant.subscription_plan === 'free';
+
+    // Build Product include with conditional Store association
+    // Free users may not have store_id, so Store should be optional
+    const productInclude = {
+      model: models.Product,
+      include: []
+    };
+
+    // Only include Store if not free plan (enterprise users have stores)
+    // For free users, products might not have store_id
+    if (!isFreePlan) {
+      productInclude.include.push({
+        model: models.Store,
+        attributes: ['id', 'name', 'store_type'],
+        required: false // Optional in case some products don't have store_id
+      });
+    }
 
     const collectionProducts = await models.StoreCollectionProduct.findAll({
       where: { collection_id },
-      include: [
-        {
-          model: models.Product
-        }
-      ],
+      include: [productInclude],
       order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
     });
+
+    // Normalize product data and convert image URLs
+    const products = collectionProducts.map(cp => {
+      if (!cp.Product) {
+        return null; // Skip if product was deleted
+      }
+      
+      const productData = cp.Product.toJSON();
+      
+      // Convert image_url to full URL
+      if (productData.image_url) {
+        productData.image_url = getFullUrl(req, productData.image_url);
+      }
+      
+      // For free users, ensure store_id is not included if null
+      if (isFreePlan && productData.store_id === null) {
+        delete productData.store_id;
+      }
+      
+      return {
+        ...productData,
+        is_pinned: cp.is_pinned,
+        sort_order: cp.sort_order,
+        collection_product_id: cp.id
+      };
+    }).filter(Boolean); // Remove null entries
 
     res.json({
       success: true,
       data: {
-        products: collectionProducts.map(cp => ({
-          ...cp.Product.toJSON(),
-          is_pinned: cp.is_pinned,
-          sort_order: cp.sort_order,
-          collection_product_id: cp.id
-        }))
+        collection: {
+          id: collection.id,
+          collection_name: collection.collection_name,
+          collection_type: collection.collection_type
+        },
+        products
       }
     });
   } catch (error) {
     console.error('Error getting collection products:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get collection products'
+      message: 'Failed to get collection products',
+      error: error.message
     });
   }
 }
