@@ -202,6 +202,12 @@ async function getCollectionProducts(req, res) {
 
     const models = initModels(req.db);
     const { collection_id } = req.params;
+    
+    // Pagination parameters
+    const { page = 1, limit = 20 } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const offset = (pageNum - 1) * limitNum;
 
     // Verify collection belongs to current tenant
     const collection = await verifyCollectionOwnership(req, collection_id);
@@ -233,10 +239,14 @@ async function getCollectionProducts(req, res) {
       });
     }
 
-    const collectionProducts = await models.StoreCollectionProduct.findAll({
+    // Get total count and paginated results
+    const { count, rows: collectionProducts } = await models.StoreCollectionProduct.findAndCountAll({
       where: { collection_id },
       include: [productInclude],
-      order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
+      order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']],
+      limit: limitNum,
+      offset: offset,
+      distinct: true // Important for accurate count when using includes
     });
 
     // Normalize product data and convert image URLs
@@ -273,7 +283,13 @@ async function getCollectionProducts(req, res) {
           collection_name: collection.collection_name,
           collection_type: collection.collection_type
         },
-        products
+        products,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total_items: count,
+          total_pages: Math.ceil(count / limitNum)
+        }
       }
     });
   } catch (error) {
