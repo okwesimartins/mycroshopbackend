@@ -222,10 +222,16 @@ async function getCollectionProducts(req, res) {
     const tenant = req.tenant;
     const isFreePlan = tenant && tenant.subscription_plan === 'free';
 
+    // Define Product attributes - exclude store_id for free users
+    const productAttributes = isFreePlan
+      ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
+      : ['id', 'tenant_id', 'store_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at'];
+
     // Build Product include with conditional Store association
     // Free users may not have store_id, so Store should be optional
     const productInclude = {
       model: models.Product,
+      attributes: productAttributes, // Explicitly set attributes to exclude store_id for free users
       include: []
     };
 
