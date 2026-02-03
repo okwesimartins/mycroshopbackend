@@ -313,6 +313,3 @@ module.exports = {
   getCollectionProducts
 };
 
-
-
-

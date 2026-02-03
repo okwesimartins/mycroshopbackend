@@ -183,26 +183,46 @@ async function getCollectionById(req, res) {
       });
     }
 
+    // Get tenant info to determine if free user
+    const tenant = req.tenant;
+    const isFreePlan = tenant && tenant.subscription_plan === 'free';
+
+    // Define Product attributes - exclude store_id for free users
+    const productAttributes = isFreePlan
+      ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
+      : ['id', 'tenant_id', 'store_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at'];
+
     // Build includes based on collection type
     const includes = [];
     
     if (collection.collection_type === 'product') {
+      const productInclude = {
+        model: models.Product,
+        attributes: productAttributes, // Explicitly set attributes to exclude store_id for free users
+        include: []
+      };
+
+      // Only include Store if not free plan (enterprise users have stores)
+      if (!isFreePlan) {
+        productInclude.include.push({
+          model: models.Store,
+          attributes: ['id', 'name', 'store_type'],
+          required: false
+        });
+      }
+
       includes.push({
         model: models.StoreCollectionProduct,
         required: false,
-      include: [
-        {
-            model: models.Product
-          }
-        ],
-        order: [['sort_order', 'ASC']]
+        include: [productInclude],
+        order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
       });
     } else if (collection.collection_type === 'service') {
       includes.push({
         model: models.StoreCollectionService,
         required: false,
-          include: [
-            {
+        include: [
+          {
             model: models.StoreService,
             include: [
               {
@@ -211,9 +231,9 @@ async function getCollectionById(req, res) {
                 required: false
               }
             ]
-            }
-          ],
-          order: [['sort_order', 'ASC']]
+          }
+        ],
+        order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
       });
     }
 
@@ -241,6 +261,28 @@ async function getCollectionById(req, res) {
     collectionData.serviceCount = serviceCount;
     collectionData.totalItems = productCount + serviceCount;
 
+    // Normalize product data if this is a product collection
+    if (collection.collection_type === 'product' && collectionData.StoreCollectionProducts) {
+      collectionData.StoreCollectionProducts = collectionData.StoreCollectionProducts.map(cp => {
+        if (cp.Product) {
+          const productData = cp.Product;
+          
+          // Convert image_url to full URL
+          if (productData.image_url && !productData.image_url.startsWith('http')) {
+            const protocol = req.protocol;
+            const host = req.get('host');
+            productData.image_url = `${protocol}://${host}${productData.image_url}`;
+          }
+          
+          // For free users, ensure store_id is not included if null
+          if (isFreePlan && productData.store_id === null) {
+            delete productData.store_id;
+          }
+        }
+        return cp;
+      });
+    }
+
     // Normalize availability for services if this is a service collection
     if (collection.collection_type === 'service' && collectionData.StoreCollectionServices) {
       // Normalize availability in nested StoreService objects
@@ -260,7 +302,8 @@ async function getCollectionById(req, res) {
     console.error('Error getting collection:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get collection'
+      message: 'Failed to get collection',
+      error: error.message
     });
   }
 }

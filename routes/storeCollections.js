@@ -66,5 +66,6 @@ router.delete('/collections/:collection_id/services/:service_id', authorize('adm
 // Update service in collection (pin, sort order)
 router.patch('/collections/:collection_id/services/:service_id', authorize('admin', 'manager'), storeCollectionController.updateServiceInCollection);
 
+
 module.exports = router;
 
