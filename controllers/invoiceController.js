@@ -1516,17 +1516,11 @@ async function createInvoice(req, res) {
     let templateData = null;
     try {
       console.log(`Generating templates for invoice ${invoice.id} with ${completeInvoiceForTemplates.InvoiceItems.length} items...`);
-      
-      // Set timeout for template generation (60 seconds - increased since we're not using AI for templates)
-      // Color extraction has its own 10s timeout, so this gives plenty of time for PDF generation
-      const templatePromise = generateTemplatesForInvoice(completeInvoiceForTemplates, tenantId, req);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => {
-          reject(new Error('Template generation timeout after 60 seconds'));
-        }, 60000)
-      );
-      
-      templateData = await Promise.race([templatePromise, timeoutPromise]);
+      // Directly await template generation.
+      // generateTemplatesForInvoice already has internal timeouts for logo color extraction
+      // and Puppeteer, so we avoid adding another artificial 60s timeout that can mask
+      // the real root cause.
+      templateData = await generateTemplatesForInvoice(completeInvoiceForTemplates, tenantId, req);
       
       // Validate that templates were generated
       if (!templateData || !templateData.templates || !Array.isArray(templateData.templates) || templateData.templates.length === 0) {

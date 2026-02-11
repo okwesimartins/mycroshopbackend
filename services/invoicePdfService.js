@@ -96,9 +96,14 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
     console.log('[PDF Service] Puppeteer browser launched successfully');
 
     const page = await browser.newPage();
+    // Make sure we never hang forever on HTML load
+    page.setDefaultNavigationTimeout(30000);
+    page.setDefaultTimeout(30000);
     console.log('[PDF Service] New page created, setting HTML content...');
     
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    // Use a faster, more reliable event than networkidle0 to avoid hanging
+    // on external fonts/images; DOMContentLoaded is enough for our static HTML.
+    await page.setContent(html, { waitUntil: 'domcontentloaded' });
     console.log('[PDF Service] HTML content loaded, generating PDF...');
 
     await page.pdf({
