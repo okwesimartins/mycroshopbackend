@@ -42,18 +42,27 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
   try {
     // Configuration for Puppeteer to find Chrome/Chromium
     // On Linux servers, we need to try multiple approaches
-    const launchOptions = {
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--disable-web-security'
-      ],
-      headless: true,
-      timeout: 30000 // 30 second timeout
-    };
+   const launchOptions = {
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+  headless: true,
+
+  // IMPORTANT: increase both timeouts
+  timeout: 90000,            // launch timeout
+  protocolTimeout: 120000,   // CDP timeout (fixes Network.enable timed out)
+
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-web-security",
+
+    // extra stability on low-resource servers
+    "--no-zygote",
+    "--single-process",
+    "--disable-features=VizDisplayCompositor",
+  ],
+};
 
     // Check for custom Chrome path in environment variable first
     if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
