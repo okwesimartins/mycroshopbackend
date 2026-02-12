@@ -262,6 +262,14 @@ async function getAllInvoices(req, res) {
     // Add preview URLs and PDF URLs to invoice objects
     const invoicesWithPreview = rows.map(invoice => {
       const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
+      // Ensure tax_breakdown is always an object (not a JSON string)
+      if (invoiceJson.tax_breakdown && typeof invoiceJson.tax_breakdown === 'string') {
+        try {
+          invoiceJson.tax_breakdown = JSON.parse(invoiceJson.tax_breakdown);
+        } catch {
+          // leave as-is if parsing fails
+        }
+      }
       const hasPreview = previewUrls[invoice.id] !== undefined;
       const hasPdf = pdfUrls[invoice.id] !== undefined;
       const error = urlErrors[invoice.id];
@@ -610,7 +618,7 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
           //   Linux: /home/user/.../uploads/invoices/pdfs/file.pdf
           // We need: /uploads/invoices/pdfs/file.pdf (relative to server root)
           // This will be accessible at: http://backend.mycroshop.com/uploads/invoices/pdfs/file.pdf
-          const normalizePath = (localPath, fileType) => {
+      const normalizePath = (localPath, fileType) => {
             if (!localPath) {
               console.warn(`normalizePath received empty path for ${fileType}`);
               return null;
@@ -623,22 +631,35 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
             
             // Method 1: Find '/uploads' in the path (most common case)
             const uploadsIndex = normalized.indexOf('/uploads');
+            let relativePath = null;
             if (uploadsIndex !== -1) {
-              const relativePath = normalized.substring(uploadsIndex);
+              relativePath = normalized.substring(uploadsIndex);
               console.log(`    - ✅ Extracted path using '/uploads' method: ${relativePath}`);
-              return relativePath;
+            } else {
+              // Method 2: Find 'uploads' (case-insensitive, works for Windows paths like C:\...\uploads\...)
+              const normalizedLower = normalized.toLowerCase();
+              const uploadsIndex2 = normalizedLower.indexOf('uploads');
+              if (uploadsIndex2 !== -1) {
+                // Extract from 'uploads' onwards
+                const afterUploads = normalized.substring(uploadsIndex2);
+                // Ensure it starts with '/uploads'
+                relativePath = afterUploads.startsWith('/')
+                  ? afterUploads
+                  : '/uploads' + afterUploads.substring(7);
+                console.log(`    - ✅ Extracted path using 'uploads' method: ${relativePath}`);
+              }
             }
             
-            // Method 2: Find 'uploads' (case-insensitive, works for Windows paths like C:\...\uploads\...)
-            const normalizedLower = normalized.toLowerCase();
-            const uploadsIndex2 = normalizedLower.indexOf('uploads');
-            if (uploadsIndex2 !== -1) {
-              // Extract from 'uploads' onwards
-              const afterUploads = normalized.substring(uploadsIndex2);
-              // Ensure it starts with '/uploads'
-              const relativePath = afterUploads.startsWith('/') ? afterUploads : '/uploads' + afterUploads.substring(7);
-              console.log(`    - ✅ Extracted path using 'uploads' method: ${relativePath}`);
-              return relativePath;
+            if (relativePath) {
+              // Prefix with backend base URL to return full URLs
+              const rawBase =
+                process.env.BASE_URL ||
+                process.env.API_URL ||
+                'https://backend.mycroshop.com';
+              const baseUrl = String(rawBase).replace(/\/+$/, '');
+              const fullUrl = `${baseUrl}${relativePath}`;
+              console.log(`    - ✅ Final ${fileType} URL with base: ${fullUrl}`);
+              return fullUrl;
             }
             
             // Method 3: Extract filename from path (last part after last slash)
@@ -1093,6 +1114,14 @@ async function getInvoiceById(req, res) {
 
     // Add preview URL and PDF URL to invoice object
     const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
+    // Normalize tax_breakdown to object (MySQL may return it as JSON string)
+    if (invoiceJson.tax_breakdown && typeof invoiceJson.tax_breakdown === 'string') {
+      try {
+        invoiceJson.tax_breakdown = JSON.parse(invoiceJson.tax_breakdown);
+      } catch {
+        // ignore parse errors, leave raw value
+      }
+    }
     const invoiceWithPreview = {
       ...invoiceJson,
       preview_url: previewUrl,
@@ -1390,8 +1419,18 @@ async function createInvoice(req, res) {
     // Create invoice
     const isFreePlan = tenant && tenant.subscription_plan === 'free';
     // Get currency and currency_symbol from request body
-    const currency = req.body.currency || 'NGN';
-    const currency_symbol = req.body.currency_symbol || (currency === 'USD' ? '$' : currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : currency === 'NGN' ? '₦' : '₦');
+    // Normalize and derive currency + symbol server-side (ignore any bad client symbol)
+    const currencyRaw = req.body.currency || 'NGN';
+    const currency = String(currencyRaw).toUpperCase();
+    const currency_symbol = currency === 'USD'
+      ? '$'
+      : currency === 'GBP'
+      ? '£'
+      : currency === 'EUR'
+      ? '€'
+      : currency === 'NGN'
+      ? '₦'
+      : '₦';
     
     const invoice = await req.db.models.Invoice.create({
       tenant_id: isFreePlan ? tenantId : null, // Set tenant_id for free users (shared DB)
@@ -1910,10 +1949,19 @@ async function createInvoice(req, res) {
       };
     }
 
+    // Ensure tax_breakdown in response is an object, not JSON string
+    if (safeInvoice && safeInvoice.tax_breakdown && typeof safeInvoice.tax_breakdown === 'string') {
+      try {
+        safeInvoice.tax_breakdown = JSON.parse(safeInvoice.tax_breakdown);
+      } catch {
+        // ignore parse error
+      }
+    }
+
     try {
-    res.status(201).json({
-      success: true,
-      message: 'Invoice created successfully',
+      res.status(201).json({
+        success: true,
+        message: 'Invoice created successfully',
         data: {
           invoice: safeInvoice,
           templates: templateData.templates || [],

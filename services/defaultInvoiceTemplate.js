@@ -54,7 +54,19 @@ function generateDefaultTemplate(data) {
   const invoiceNumber = invoice?.invoice_number || 'INV-001';
   const issueDate = invoice?.issue_date || '';
   const dueDate = invoice?.due_date || '';
-  const currency = invoice?.currency_symbol || (invoice?.currency === 'USD' ? '$' : invoice?.currency === 'GBP' ? '£' : invoice?.currency === 'EUR' ? '€' : invoice?.currency === 'NGN' ? '₦' : '$');
+  // Prefer explicit symbol from DB; otherwise derive from currency code.
+  // Default hard-coded to NGN (₦) instead of USD to match MycroShop's primary market.
+  const currency =
+    invoice?.currency_symbol ||
+    (invoice?.currency === 'USD'
+      ? '$'
+      : invoice?.currency === 'GBP'
+      ? '£'
+      : invoice?.currency === 'EUR'
+      ? '€'
+      : invoice?.currency === 'NGN'
+      ? '₦'
+      : '₦');
 
   // Totals
   const subtotal = Number(invoice?.subtotal || 0);
