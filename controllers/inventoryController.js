@@ -290,9 +290,15 @@ async function getBasicInventoryForFreeUsers(req, res) {
       required: !!collection_id // Required only when filtering by collection
     });
 
+    // For free users, explicitly exclude store_id which doesn't exist in their products table
+    // Free users don't have physical stores, only online stores (StoreProduct)
+    // The products table for free users doesn't have store_id column (only tenant_id)
     const { count, rows } = await req.db.models.Product.findAndCountAll({
       where,
       include,
+      attributes: {
+        exclude: ['store_id'] // Explicitly exclude store_id (doesn't exist in free users' products table)
+      },
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [['created_at', 'DESC']],
@@ -405,9 +411,17 @@ async function getBasicInventoryForFreeUsers(req, res) {
     });
   } catch (error) {
     console.error('Error getting basic inventory:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Provide more helpful error messages
+    let errorMessage = 'Failed to get inventory';
+    if (error.message && error.message.includes('store_id')) {
+      errorMessage = 'Database schema error: store_id column does not exist for free users. Products are tied to online stores, not physical stores.';
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Failed to get inventory',
+      message: errorMessage,
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
