@@ -253,12 +253,33 @@ async function getBasicInventoryForFreeUsers(req, res) {
     }
 
     // Build include array
+    // For free users, explicitly specify attributes for ProductVariationOptions
+    // Database columns: tenant_id, id, variation_id, option_value, option_display_name,
+    //                  price_adjustment, stock, sku, image_url, is_default, is_available,
+    //                  sort_order, created_at
+    // Missing: barcode (enterprise only)
     const include = [
       {
         model: req.db.models.ProductVariation,
         include: [
           {
-            model: req.db.models.ProductVariationOption
+            model: req.db.models.ProductVariationOption,
+            attributes: [
+              'id',
+              'tenant_id',
+              'variation_id',
+              'option_value',
+              'option_display_name',
+              'price_adjustment',
+              'stock',
+              'sku',
+              'image_url',
+              'is_default',
+              'is_available',
+              'sort_order',
+              'created_at'
+              // NOT including: barcode (doesn't exist for free users)
+            ]
           }
         ],
         required: false
@@ -373,6 +394,7 @@ async function getBasicInventoryForFreeUsers(req, res) {
           };
           
           // Process variation options with full image URLs
+          // Note: barcode doesn't exist for free users (enterprise only)
           if (variation.ProductVariationOptions && variation.ProductVariationOptions.length > 0) {
             variationData.options = variation.ProductVariationOptions.map(option => {
               const optionData = {
@@ -381,8 +403,9 @@ async function getBasicInventoryForFreeUsers(req, res) {
                 display_name: option.option_display_name || option.option_value,
                 price_adjustment: parseFloat(option.price_adjustment) || 0,
                 stock: option.stock || 0,
-                sku: option.sku,
-                barcode: option.barcode,
+                sku: option.sku || null,
+                // barcode doesn't exist for free users (enterprise only)
+                barcode: null,
                 is_default: option.is_default || false,
                 is_available: option.is_available !== false,
                 sort_order: option.sort_order || 0,
