@@ -290,15 +290,34 @@ async function getBasicInventoryForFreeUsers(req, res) {
       required: !!collection_id // Required only when filtering by collection
     });
 
-    // For free users, explicitly exclude store_id which doesn't exist in their products table
-    // Free users don't have physical stores, only online stores (StoreProduct)
-    // The products table for free users doesn't have store_id column (only tenant_id)
+    // For free users, explicitly list only columns that exist in their products table
+    // Free users' products table has fewer columns than enterprise users
+    // Database columns: tenant_id, id, name, description, sku, barcode, price, cost_price, 
+    //                  stock, low_stock_threshold, category, image_url, expiry_date, 
+    //                  is_active, created_at, updated_at
+    // Missing columns: store_id, batch_number, unit_of_measure, cost (DB has cost_price)
     const { count, rows } = await req.db.models.Product.findAndCountAll({
       where,
       include,
-      attributes: {
-        exclude: ['store_id'] // Explicitly exclude store_id (doesn't exist in free users' products table)
-      },
+      attributes: [
+        'id',
+        'tenant_id',
+        'name',
+        'description',
+        'sku',
+        'barcode',
+        'price',
+        [Sequelize.col('cost_price'), 'cost'], // Map cost_price to cost for consistency
+        'stock',
+        'low_stock_threshold',
+        'category',
+        'image_url',
+        'expiry_date',
+        'is_active',
+        'created_at',
+        'updated_at'
+        // Explicitly NOT including: store_id, batch_number, unit_of_measure (don't exist for free users)
+      ],
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [['created_at', 'DESC']],
