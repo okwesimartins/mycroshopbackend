@@ -12,98 +12,261 @@ function generateOrderNumber() {
 }
 
 /**
- * Get all online store orders
+ * Get all orders (product orders and booking orders combined)
+ * Returns both OnlineStoreOrder (product orders) and Booking (service booking orders)
  */
 async function getAllOrders(req, res) {
   try {
-    const { page = 1, limit = 50, status, payment_status, store_id, online_store_id, start_date, end_date } = req.query;
+    const { 
+      page = 1, 
+      limit = 50, 
+      status, 
+      payment_status, 
+      store_id, 
+      online_store_id, 
+      start_date, 
+      end_date,
+      order_type, // 'product_order', 'booking_order', or undefined (both)
+      customer_id,
+      service_id
+    } = req.query;
     const offset = (page - 1) * limit;
 
-    const where = {};
-    
-    if (online_store_id) {
-      where.online_store_id = online_store_id;
-    }
-    if (store_id) {
-      where.store_id = store_id;
-    }
-    if (status) {
-      where.status = status;
-    }
-    if (payment_status) {
-      where.payment_status = payment_status;
+    // Validate order_type if provided
+    if (order_type && !['product_order', 'booking_order'].includes(order_type)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid order_type. Must be "product_order", "booking_order", or omitted (for both)'
+      });
     }
 
-    // Build includes
-    const include = [
-      {
-        model: req.db.models.OnlineStore,
-        attributes: ['id', 'username', 'store_name']
-      },
-      {
-        model: req.db.models.Store,
-        attributes: ['id', 'name', 'store_type', 'address', 'city', 'state']
-      },
-      {
-        model: req.db.models.OnlineStoreOrderItem,
-        include: [
-          {
-            model: req.db.models.Product,
-            attributes: ['id', 'name', 'sku']
-          }
-        ]
+    // Get tenant info to determine if free or enterprise
+    const tenant = req.tenant || req.user?.tenant;
+    const isFreePlan = tenant?.subscription_plan === 'free';
+    const tenantId = req.user?.tenantId;
+
+    // Arrays to store both types of orders
+    let productOrders = [];
+    let bookingOrders = [];
+    let productOrdersCount = 0;
+    let bookingOrdersCount = 0;
+
+    // Fetch product orders (OnlineStoreOrder) if order_type is not 'booking_order'
+    if (!order_type || order_type === 'product_order') {
+      const productOrderWhere = {};
+      
+      // For free users, filter by tenant_id
+      if (isFreePlan && tenantId) {
+        productOrderWhere.tenant_id = tenantId;
       }
-    ];
-
-    // If start_date/end_date provided, filter by payment date (paid_at) from PaymentTransaction instead
-    // Interpret start_date/end_date as calendar days, not exact timestamps
-    if (start_date || end_date) {
-      const paymentDateWhere = {};
-
-      if (start_date) {
-        // Start of day (00:00:00)
-        paymentDateWhere[Sequelize.Op.gte] = new Date(`${start_date}T00:00:00.000Z`);
+      
+      if (online_store_id) {
+        productOrderWhere.online_store_id = online_store_id;
       }
-      if (end_date) {
-        // End of day (23:59:59.999)
-        paymentDateWhere[Sequelize.Op.lte] = new Date(`${end_date}T23:59:59.999Z`);
+      if (store_id) {
+        productOrderWhere.store_id = store_id;
+      }
+      if (status) {
+        productOrderWhere.status = status;
+      }
+      if (payment_status) {
+        productOrderWhere.payment_status = payment_status;
       }
 
-      include.push({
-        model: req.db.models.PaymentTransaction,
-        attributes: ['id', 'status', 'paid_at'],
-        required: true, // only orders with matching payment in this range
-        where: {
-          status: 'success',
-          paid_at: paymentDateWhere
+      // Build includes for product orders
+      const productOrderInclude = [
+        {
+          model: req.db.models.OnlineStore,
+          attributes: ['id', 'username', 'store_name'],
+          required: false
+        },
+        {
+          model: req.db.models.Store,
+          attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
+          required: false // Optional - free users may not have stores
+        },
+        {
+          model: req.db.models.OnlineStoreOrderItem,
+          include: [
+            {
+              model: req.db.models.Product,
+              attributes: ['id', 'name', 'sku'],
+              required: false
+            }
+          ]
         }
+      ];
+
+      // Handle date filtering for product orders
+      if (start_date || end_date) {
+        const paymentDateWhere = {};
+        if (start_date) {
+          paymentDateWhere[Sequelize.Op.gte] = new Date(`${start_date}T00:00:00.000Z`);
+        }
+        if (end_date) {
+          paymentDateWhere[Sequelize.Op.lte] = new Date(`${end_date}T23:59:59.999Z`);
+        }
+
+        productOrderInclude.push({
+          model: req.db.models.PaymentTransaction,
+          attributes: ['id', 'status', 'paid_at'],
+          required: true,
+          where: {
+            status: 'success',
+            paid_at: paymentDateWhere
+          }
+        });
+      } else {
+        productOrderInclude.push({
+          model: req.db.models.PaymentTransaction,
+          attributes: ['id', 'status', 'paid_at'],
+          required: false
+        });
+      }
+
+      const productOrderResult = await req.db.models.OnlineStoreOrder.findAndCountAll({
+        where: productOrderWhere,
+        include: productOrderInclude,
+        distinct: true,
+        order: [['created_at', 'DESC']]
       });
-    } else {
-      // Optional include of payment info without filtering
-      include.push({
-        model: req.db.models.PaymentTransaction,
-        attributes: ['id', 'status', 'paid_at'],
-        required: false
-      });
+
+      productOrders = productOrderResult.rows;
+      productOrdersCount = productOrderResult.count;
     }
 
-    const { count, rows } = await req.db.models.OnlineStoreOrder.findAndCountAll({
-      where,
-      include,
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [['created_at', 'DESC']]
+    // Fetch booking orders (Booking) if order_type is not 'product_order'
+    if (!order_type || order_type === 'booking_order') {
+      const bookingWhere = {};
+      
+      // For free users, filter by tenant_id
+      // Note: Database table has tenant_id even if model definition doesn't include it
+      // Sequelize will work with it as long as the column exists in the database
+      if (isFreePlan && tenantId) {
+        bookingWhere.tenant_id = tenantId;
+      }
+      
+      if (store_id) {
+        bookingWhere.store_id = store_id;
+      }
+      if (status) {
+        bookingWhere.status = status;
+      }
+      if (customer_id) {
+        bookingWhere.customer_id = customer_id;
+      }
+      if (service_id) {
+        bookingWhere.service_id = service_id;
+      }
+      if (start_date || end_date) {
+        bookingWhere.scheduled_at = {};
+        if (start_date) {
+          bookingWhere.scheduled_at[Sequelize.Op.gte] = new Date(`${start_date}T00:00:00.000Z`);
+        }
+        if (end_date) {
+          bookingWhere.scheduled_at[Sequelize.Op.lte] = new Date(`${end_date}T23:59:59.999Z`);
+        }
+      }
+
+      const bookingInclude = [
+        {
+          model: req.db.models.Store,
+          attributes: ['id', 'name', 'store_type'],
+          required: false // Optional - free users may not have stores
+        },
+        {
+          model: req.db.models.StoreService,
+          attributes: ['id', 'service_title', 'duration_minutes', 'price']
+        },
+        {
+          model: req.db.models.Customer,
+          attributes: ['id', 'name', 'email', 'phone'],
+          required: false
+        }
+      ];
+
+      const bookingResult = await req.db.models.Booking.findAndCountAll({
+        where: bookingWhere,
+        include: bookingInclude,
+        distinct: true,
+        order: [['scheduled_at', 'DESC']]
+      });
+
+      bookingOrders = bookingResult.rows;
+      bookingOrdersCount = bookingResult.count;
+    }
+
+    // Combine and format orders
+    const allOrders = [];
+    
+    // Format product orders
+    productOrders.forEach(order => {
+      const orderData = order.toJSON();
+      allOrders.push({
+        ...orderData,
+        order_type: 'product_order',
+        order_id: orderData.id,
+        order_number: orderData.order_number,
+        customer_name: orderData.customer_name,
+        customer_email: orderData.customer_email,
+        customer_phone: orderData.customer_phone,
+        total_amount: orderData.total,
+        order_date: orderData.created_at,
+        scheduled_at: null, // Product orders don't have scheduled_at
+        items: orderData.OnlineStoreOrderItems || [],
+        service: null, // Product orders don't have service
+        payment_transaction: orderData.PaymentTransaction || null
+      });
     });
+
+    // Format booking orders
+    bookingOrders.forEach(booking => {
+      const bookingData = booking.toJSON();
+      const service = bookingData.StoreService || {};
+      allOrders.push({
+        ...bookingData,
+        order_type: 'booking_order',
+        order_id: bookingData.id,
+        order_number: `BOOK-${bookingData.id}`, // Generate order number for bookings
+        customer_name: bookingData.Customer?.name || null,
+        customer_email: bookingData.Customer?.email || null,
+        customer_phone: bookingData.Customer?.phone || null,
+        total_amount: service.price || 0,
+        order_date: bookingData.created_at,
+        scheduled_at: bookingData.scheduled_at,
+        items: [], // Bookings don't have items array
+        service: {
+          id: service.id,
+          title: service.service_title,
+          duration_minutes: service.duration_minutes,
+          price: service.price
+        },
+        payment_transaction: null // Bookings may have payment but it's handled differently
+      });
+    });
+
+    // Sort combined orders by order_date (most recent first)
+    allOrders.sort((a, b) => {
+      const dateA = new Date(a.order_date);
+      const dateB = new Date(b.order_date);
+      return dateB - dateA;
+    });
+
+    // Apply pagination to combined results
+    const totalOrders = allOrders.length;
+    const paginatedOrders = allOrders.slice(offset, offset + parseInt(limit));
 
     res.json({
       success: true,
       data: {
-        orders: rows,
+        orders: paginatedOrders,
         pagination: {
-          total: count,
+          total: totalOrders,
+          product_orders_count: productOrdersCount,
+          booking_orders_count: bookingOrdersCount,
           page: parseInt(page),
           limit: parseInt(limit),
-          totalPages: Math.ceil(count / limit)
+          totalPages: Math.ceil(totalOrders / limit)
         }
       }
     });
