@@ -76,25 +76,85 @@ router.use(authenticate);
 router.use(attachTenantDb);
 router.use(initializeTenantModels);
 
-// Get all products
-router.get('/', inventoryController.getAllProducts);
+// Middleware to route free users to basic inventory, enterprise to full inventory
+async function routeInventoryByPlan(req, res, next) {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
 
-// Get low stock products (MUST come before /:id to avoid route conflicts)
-router.get('/alerts/low-stock', inventoryController.getLowStockProducts);
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    
+    if (tenant && tenant.subscription_plan === 'free') {
+      // Free users get basic inventory
+      return inventoryController.getBasicInventoryForFreeUsers(req, res);
+    } else {
+      // Enterprise users get full inventory
+      return inventoryController.getAllProducts(req, res);
+    }
+  } catch (error) {
+    console.error('Error routing inventory:', error);
+    // Fallback to enterprise inventory
+    return inventoryController.getAllProducts(req, res);
+  }
+}
 
-// Get product categories (MUST come before /:id to avoid route conflicts)
+// Get all products (automatically routes free users to basic inventory, enterprise to full inventory)
+router.get('/', routeInventoryByPlan);
+
+// Middleware to restrict routes to enterprise users only
+async function requireEnterprise(req, res, next) {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    
+    if (tenant && tenant.subscription_plan === 'free') {
+      return res.status(403).json({
+        success: false,
+        message: 'This feature is only available for enterprise users. Free users should use the online store routes for product management.'
+      });
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Error checking subscription plan:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to verify subscription plan'
+    });
+  }
+}
+
+// Get low stock products (Enterprise only - MUST come before /:id to avoid route conflicts)
+router.get('/alerts/low-stock', requireEnterprise, inventoryController.getLowStockProducts);
+
+// Get product categories (Available for all users - MUST come before /:id to avoid route conflicts)
 router.get('/categories', inventoryController.getProductCategories);
 
-// Barcode scanning endpoints for inventory management (MUST come before /:id)
-router.get('/lookup/barcode', inventoryController.lookupProductByBarcode);
-router.put('/stock/by-barcode', inventoryController.updateStockByBarcode);
-router.post('/stock/bulk-update', inventoryController.bulkUpdateStock);
+// Barcode scanning endpoints for inventory management (Enterprise only - MUST come before /:id)
+router.get('/lookup/barcode', requireEnterprise, inventoryController.lookupProductByBarcode);
+router.put('/stock/by-barcode', requireEnterprise, inventoryController.updateStockByBarcode);
+router.post('/stock/bulk-update', requireEnterprise, inventoryController.bulkUpdateStock);
 
 // Get product by ID (parameterized routes should come last)
 router.get('/:id', inventoryController.getProductById);
 
-// Create product (with file upload support for product image and variation option images)
+// Create product (Enterprise only - with file upload support for product image and variation option images)
 router.post('/',
+  requireEnterprise,
   (req, res, next) => {
     // Use dynamic storage to save product_image to /uploads/products/ 
     // and variation_option_image_* to /uploads/product-variations/
@@ -152,17 +212,19 @@ router.post('/',
   inventoryController.createProduct
 );
 
-// Update product (with file upload support)
-router.put('/:id', uploadProductImageMulter, inventoryController.updateProduct);
+// Update product (Enterprise only - with file upload support)
+// Note: Free users should use PUT /api/v1/online-stores/:id/products/:product_id
+router.put('/:id', requireEnterprise, uploadProductImageMulter, inventoryController.updateProduct);
 
-// Delete product
-router.delete('/:id', authorize('admin', 'manager'), inventoryController.deleteProduct);
+// Delete product (Enterprise only)
+// Note: Free users should use DELETE /api/v1/online-stores/:id/products/:product_id
+router.delete('/:id', requireEnterprise, authorize('admin', 'manager'), inventoryController.deleteProduct);
 
-// Add product to additional stores
-router.post('/:product_id/stores', inventoryController.addProductToStores);
+// Add product to additional stores (Enterprise only - multi-store feature)
+router.post('/:product_id/stores', requireEnterprise, inventoryController.addProductToStores);
 
-// Remove product from store
-router.delete('/:product_id/stores/:store_id', inventoryController.removeProductFromStore);
+// Remove product from store (Enterprise only - multi-store feature)
+router.delete('/:product_id/stores/:store_id', requireEnterprise, inventoryController.removeProductFromStore);
 
 module.exports = router;
 

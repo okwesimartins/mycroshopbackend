@@ -4,19 +4,32 @@ const path = require('path');
 
 /**
  * Helper function to get full URL from relative path
+ * Uses backend.mycroshop.com as base domain
  */
 function getFullUrl(req, relativePath) {
   if (!relativePath) return null;
   if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
     return relativePath;
   }
-  const protocol = req.protocol;
-  const host = req.get('host');
-  return `${protocol}://${host}${relativePath}`;
+  
+  // Use environment variable or default to backend.mycroshop.com
+  const baseUrl = process.env.BASE_URL || 
+                 process.env.API_URL || 
+                 process.env.BACKEND_URL || 
+                 'https://backend.mycroshop.com';
+  
+  // Ensure baseUrl doesn't end with slash
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+  
+  // Ensure relativePath starts with slash
+  const cleanPath = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
+  
+  return `${cleanBaseUrl}${cleanPath}`;
 }
 
 /**
  * Get all products (store-specific or all stores)
+ * For enterprise users only - full inventory management
  */
 async function getAllProducts(req, res) {
   try {
@@ -65,10 +78,75 @@ async function getAllProducts(req, res) {
       order: [['created_at', 'DESC']]
     });
 
+    // Enhance products with full image URLs and variations array
+    const enhancedProducts = rows.map(product => {
+      const productData = product.toJSON();
+      
+      // Convert product image_url to full URL if it's a relative path
+      if (productData.image_url) {
+        if (productData.image_url.startsWith('/uploads/')) {
+          productData.image_url = getFullUrl(req, productData.image_url);
+        }
+      }
+      
+      // Format variations as clean array with full image URLs
+      if (productData.ProductVariations && productData.ProductVariations.length > 0) {
+        productData.variations = productData.ProductVariations.map(variation => {
+          const variationData = {
+            id: variation.id,
+            variation_name: variation.variation_name,
+            variation_type: variation.variation_type,
+            is_required: variation.is_required,
+            sort_order: variation.sort_order,
+            options: []
+          };
+          
+          // Process variation options with full image URLs
+          if (variation.ProductVariationOptions && variation.ProductVariationOptions.length > 0) {
+            variationData.options = variation.ProductVariationOptions.map(option => {
+              const optionData = {
+                id: option.id,
+                value: option.option_value,
+                display_name: option.option_display_name || option.option_value,
+                price_adjustment: parseFloat(option.price_adjustment) || 0,
+                stock: option.stock || 0,
+                sku: option.sku,
+                barcode: option.barcode,
+                is_default: option.is_default || false,
+                is_available: option.is_available !== false,
+                sort_order: option.sort_order || 0,
+                image_url: null
+              };
+              
+              // Convert variation option image_url to full URL
+              if (option.image_url) {
+                if (option.image_url.startsWith('/uploads/')) {
+                  optionData.image_url = getFullUrl(req, option.image_url);
+                } else {
+                  optionData.image_url = option.image_url; // Already full URL
+                }
+              }
+              
+              return optionData;
+            });
+          }
+          
+          return variationData;
+        });
+      } else {
+        productData.variations = [];
+      }
+      
+      // Remove the raw ProductVariations data (we've converted it to variations array)
+      delete productData.ProductVariations;
+      
+      return productData;
+    });
+
     res.json({
       success: true,
       data: {
-        products: rows,
+        products: enhancedProducts,
         pagination: {
           total: count,
           page: parseInt(page),
@@ -82,6 +160,255 @@ async function getAllProducts(req, res) {
     res.status(500).json({
       success: false,
       message: 'Failed to get products'
+    });
+  }
+}
+
+/**
+ * Get basic inventory for free users
+ * Basic inventory management with filtering by status, collection, and search
+ */
+async function getBasicInventoryForFreeUsers(req, res) {
+  try {
+    const { 
+      page = 1, 
+      limit = 50, 
+      search, 
+      category, 
+      isActive, 
+      isPublished,
+      stock_status, // 'in_stock' | 'out_of_stock'
+      collection_id, // Filter by collection
+    } = req.query;
+    const offset = (page - 1) * limit;
+
+    // Get tenant info - this should only be called for free users
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    const { getTenantById } = require('../config/tenant');
+    let tenant = null;
+    try {
+      tenant = await getTenantById(tenantId);
+      // Verify this is a free user
+      if (!tenant || tenant.subscription_plan !== 'free') {
+        return res.status(403).json({
+          success: false,
+          message: 'This endpoint is for free users only. Enterprise users should use /api/v1/inventory'
+        });
+      }
+    } catch (error) {
+      console.warn('Could not fetch tenant:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to verify tenant'
+      });
+    }
+
+    const where = {};
+    const andConditions = [];
+    
+    // For free users, always filter by tenant_id (shared database)
+    where.tenant_id = tenantId;
+    
+    // Search by product name (enhanced)
+    if (search) {
+      andConditions.push({
+        [Sequelize.Op.or]: [
+          { name: { [Sequelize.Op.like]: `%${search}%` } },
+          { sku: { [Sequelize.Op.like]: `%${search}%` } },
+          { description: { [Sequelize.Op.like]: `%${search}%` } }
+        ]
+      });
+    }
+    
+    if (category) {
+      where.category = category;
+    }
+    
+    if (isActive !== undefined) {
+      where.is_active = isActive === 'true';
+    }
+
+    // Filter by stock status (in_stock or out_of_stock)
+    if (stock_status === 'out_of_stock') {
+      andConditions.push({
+        [Sequelize.Op.or]: [
+          { stock: { [Sequelize.Op.lte]: 0 } },
+          { stock: null }
+        ]
+      });
+    } else if (stock_status === 'in_stock') {
+      where.stock = { [Sequelize.Op.gt]: 0 };
+    }
+    
+    // Combine all AND conditions
+    if (andConditions.length > 0) {
+      where[Sequelize.Op.and] = andConditions;
+    }
+
+    // Build include array
+    const include = [
+      {
+        model: req.db.models.ProductVariation,
+        include: [
+          {
+            model: req.db.models.ProductVariationOption
+          }
+        ],
+        required: false
+      },
+      {
+        model: req.db.models.StoreProduct,
+        attributes: ['id', 'is_published', 'featured', 'sort_order'],
+        required: isPublished !== undefined, // Required when filtering by published status
+        where: (() => {
+          const storeProductWhere = { tenant_id: tenantId };
+          if (isPublished !== undefined) {
+            storeProductWhere.is_published = isPublished === 'true';
+          }
+          return storeProductWhere;
+        })()
+      }
+    ];
+
+    // Filter by collection if collection_id provided
+    const collectionWhere = { tenant_id: tenantId };
+    if (collection_id) {
+      collectionWhere.collection_id = collection_id;
+    }
+    
+    include.push({
+      model: req.db.models.StoreCollectionProduct,
+      where: collectionWhere,
+      attributes: ['id', 'collection_id', 'sort_order', 'is_pinned'],
+      required: !!collection_id // Required only when filtering by collection
+    });
+
+    const { count, rows } = await req.db.models.Product.findAndCountAll({
+      where,
+      include,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [['created_at', 'DESC']],
+      distinct: true // Important for correct count when using joins
+    });
+
+    // Enhance products with stock status, published status, full image URLs, and variations array
+    const enhancedProducts = rows.map(product => {
+      const productData = product.toJSON();
+      
+      // Calculate stock status
+      const currentStock = productData.stock || 0;
+      productData.stock_status = currentStock > 0 ? 'in_stock' : 'out_of_stock';
+      
+      // Get published status from StoreProduct
+      if (productData.StoreProducts && productData.StoreProducts.length > 0) {
+        productData.is_published = productData.StoreProducts.some(sp => sp.is_published === true);
+        productData.is_featured = productData.StoreProducts.some(sp => sp.featured === true);
+      } else {
+        productData.is_published = false;
+        productData.is_featured = false;
+      }
+      
+      // Get collections this product belongs to
+      if (productData.StoreCollectionProducts && productData.StoreCollectionProducts.length > 0) {
+        productData.collections = productData.StoreCollectionProducts.map(scp => ({
+          collection_id: scp.collection_id,
+          sort_order: scp.sort_order,
+          is_pinned: scp.is_pinned
+        }));
+      } else {
+        productData.collections = [];
+      }
+      
+      // Convert product image_url to full URL if it's a relative path
+      if (productData.image_url) {
+        if (productData.image_url.startsWith('/uploads/')) {
+          productData.image_url = getFullUrl(req, productData.image_url);
+        }
+        // If already a full URL, keep it as is
+      }
+      
+      // Format variations as clean array with full image URLs
+      if (productData.ProductVariations && productData.ProductVariations.length > 0) {
+        productData.variations = productData.ProductVariations.map(variation => {
+          const variationData = {
+            id: variation.id,
+            variation_name: variation.variation_name,
+            variation_type: variation.variation_type,
+            is_required: variation.is_required,
+            sort_order: variation.sort_order,
+            options: []
+          };
+          
+          // Process variation options with full image URLs
+          if (variation.ProductVariationOptions && variation.ProductVariationOptions.length > 0) {
+            variationData.options = variation.ProductVariationOptions.map(option => {
+              const optionData = {
+                id: option.id,
+                value: option.option_value,
+                display_name: option.option_display_name || option.option_value,
+                price_adjustment: parseFloat(option.price_adjustment) || 0,
+                stock: option.stock || 0,
+                sku: option.sku,
+                barcode: option.barcode,
+                is_default: option.is_default || false,
+                is_available: option.is_available !== false,
+                sort_order: option.sort_order || 0,
+                image_url: null
+              };
+              
+              // Convert variation option image_url to full URL
+              if (option.image_url) {
+                if (option.image_url.startsWith('/uploads/')) {
+                  optionData.image_url = getFullUrl(req, option.image_url);
+                } else {
+                  optionData.image_url = option.image_url; // Already full URL
+                }
+              }
+              
+              return optionData;
+            });
+          }
+          
+          return variationData;
+        });
+      } else {
+        productData.variations = [];
+      }
+      
+      // Remove the raw ProductVariations data (we've converted it to variations array)
+      delete productData.ProductVariations;
+      delete productData.StoreProducts;
+      delete productData.StoreCollectionProducts;
+      
+      return productData;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        products: enhancedProducts,
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(count / limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error getting basic inventory:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get inventory',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }
@@ -101,6 +428,15 @@ async function getProductById(req, res) {
           model: req.db.models.Store,
           as: 'Stores', // Products in multiple stores via ProductStore
           through: { attributes: ['stock', 'price_override'] }
+        },
+        {
+          model: req.db.models.ProductVariation,
+          include: [
+            {
+              model: req.db.models.ProductVariationOption
+            }
+          ],
+          required: false
         }
       ]
     });
@@ -112,9 +448,70 @@ async function getProductById(req, res) {
       });
     }
 
+    // Enhance product with full image URLs and variations array
+    const productData = product.toJSON();
+    
+    // Convert product image_url to full URL if it's a relative path
+    if (productData.image_url) {
+      if (productData.image_url.startsWith('/uploads/')) {
+        productData.image_url = getFullUrl(req, productData.image_url);
+      }
+    }
+    
+    // Format variations as clean array with full image URLs
+    if (productData.ProductVariations && productData.ProductVariations.length > 0) {
+      productData.variations = productData.ProductVariations.map(variation => {
+        const variationData = {
+          id: variation.id,
+          variation_name: variation.variation_name,
+          variation_type: variation.variation_type,
+          is_required: variation.is_required,
+          sort_order: variation.sort_order,
+          options: []
+        };
+        
+        // Process variation options with full image URLs
+        if (variation.ProductVariationOptions && variation.ProductVariationOptions.length > 0) {
+          variationData.options = variation.ProductVariationOptions.map(option => {
+            const optionData = {
+              id: option.id,
+              value: option.option_value,
+              display_name: option.option_display_name || option.option_value,
+              price_adjustment: parseFloat(option.price_adjustment) || 0,
+              stock: option.stock || 0,
+              sku: option.sku,
+              barcode: option.barcode,
+              is_default: option.is_default || false,
+              is_available: option.is_available !== false,
+              sort_order: option.sort_order || 0,
+              image_url: null
+            };
+            
+            // Convert variation option image_url to full URL
+            if (option.image_url) {
+              if (option.image_url.startsWith('/uploads/')) {
+                optionData.image_url = getFullUrl(req, option.image_url);
+              } else {
+                optionData.image_url = option.image_url; // Already full URL
+              }
+            }
+            
+            return optionData;
+          });
+        }
+        
+        return variationData;
+      });
+    } else {
+      productData.variations = [];
+    }
+    
+    // Remove the raw ProductVariations data (we've converted it to variations array)
+    delete productData.ProductVariations;
+
     res.json({
       success: true,
-      data: { product }
+      data: { product: productData }
     });
   } catch (error) {
     console.error('Error getting product:', error);
@@ -1532,6 +1929,7 @@ async function getProductCategories(req, res) {
 
 module.exports = {
   getAllProducts,
+  getBasicInventoryForFreeUsers,
   getProductById,
   createProduct,
   updateProduct,
