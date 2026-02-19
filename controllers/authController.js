@@ -328,6 +328,7 @@ async function getCurrentUser(req, res) {
 
 /**
  * Get tenant profile
+ * Returns tenant info along with online store and physical stores (for enterprise users)
  */
 async function getTenantProfile(req, res) {
   try {
@@ -340,7 +341,46 @@ async function getTenantProfile(req, res) {
       });
     }
 
-    res.json({
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+    const isFreeUser = subscriptionPlan === 'free';
+
+    // Get tenant database connection and models
+    const { getTenantConnection } = require('../config/database');
+    const sequelize = await getTenantConnection(req.user.tenantId, subscriptionPlan);
+    const initializeModels = require('../models');
+    const models = initializeModels(sequelize);
+
+    // Build where clause for stores based on tenant type
+    const storeWhere = {};
+    if (isFreeUser) {
+      // Free users: only query stores with tenant_id
+      storeWhere.tenant_id = req.user.tenantId;
+    }
+
+    // Get online stores (all users have online stores)
+    const onlineStores = await models.OnlineStore.findAll({
+      where: storeWhere,
+      attributes: ['id', 'username', 'store_name', 'custom_domain', 'is_published', 'setup_completed'],
+      order: [['created_at', 'DESC']]
+    });
+
+    // Get physical stores (only for enterprise users)
+    let physicalStores = [];
+    if (!isFreeUser) {
+      const { Sequelize } = require('sequelize');
+      physicalStores = await models.Store.findAll({
+        where: {
+          ...storeWhere,
+          store_type: { [Sequelize.Op.ne]: 'online_only' },
+          is_active: true
+        },
+        attributes: ['id', 'name', 'store_type', 'address', 'city', 'state', 'country', 'phone', 'email'],
+        order: [['created_at', 'DESC']]
+      });
+    }
+
+    // Format response
+    const response = {
       success: true,
       data: {
         tenant: {
@@ -356,15 +396,42 @@ async function getTenantProfile(req, res) {
           annual_turnover: tenant.annual_turnover,
           total_fixed_assets: tenant.total_fixed_assets,
           status: tenant.status,
+          subscription_plan: subscriptionPlan,
           created_at: tenant.created_at
-        }
+        },
+        online_stores: onlineStores.map(store => ({
+          id: store.id,
+          name: store.store_name,
+          username: store.username,
+          custom_domain: store.custom_domain,
+          is_published: store.is_published,
+          setup_completed: store.setup_completed
+        }))
       }
-    });
+    };
+
+    // Add physical stores only for enterprise users
+    if (!isFreeUser) {
+      response.data.physical_stores = physicalStores.map(store => ({
+        id: store.id,
+        name: store.name,
+        store_type: store.store_type,
+        address: store.address,
+        city: store.city,
+        state: store.state,
+        country: store.country,
+        phone: store.phone,
+        email: store.email
+      }));
+    }
+
+    res.json(response);
   } catch (error) {
     console.error('Error getting tenant profile:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to get tenant profile'
+      message: 'Failed to get tenant profile',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }
