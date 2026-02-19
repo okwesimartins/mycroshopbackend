@@ -1300,8 +1300,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     console.warn('Could not add token_expires_at column to whatsapp_connections:', alterError.message);
   }
 
-
-    // Domains table (for purchased domains linked to online stores)
+  // Domains table (for purchased domains linked to online stores)
   const domainTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
   const domainTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
   
@@ -1359,6 +1358,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
   } catch (alterError) {
     console.warn('Could not add custom_domain column to online_stores:', alterError.message);
   }
+
   // All online store tables are now complete!
   // Note: Additional enterprise-only tables (roles, suppliers, purchase_orders, pos_transactions, etc.)
   // are not included here as free users only need online store functionality
@@ -1541,8 +1541,7 @@ async function initializeMainDatabaseTables() {
       console.warn('Could not add token_expires_at column to whatsapp_connections (main DB):', alterError.message);
     }
 
-
-        // Create domain_lookup table for efficient custom domain routing
+    // Create domain_lookup table for efficient custom domain routing
     // This table maps custom domains to tenant_id and online_store_id
     // Allows fast lookup without searching all tenant databases
     await connection.query(`
@@ -1564,7 +1563,6 @@ async function initializeMainDatabaseTables() {
     `);
     console.log('✅ domain_lookup table created/verified in main database');
 
-  
     await connection.end();
     return true;
   } catch (error) {

@@ -204,7 +204,8 @@ async function login(req, res) {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Login failed'
+      message: 'Login failed',
+      error: error.message
     });
   }
 }
