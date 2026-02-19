@@ -87,7 +87,7 @@ const Tenant = mainSequelize.define('Tenant', {
     defaultValue: require('sequelize').DataTypes.NOW
   }
 }, {
-  tableName: 'Tenant',
+  tableName: 'tenants',
   timestamps: false
 });
 
@@ -182,6 +182,57 @@ const LicenseKey = mainSequelize.define('LicenseKey', {
   timestamps: false
 });
 
+// Domain Lookup Model (for fast custom domain routing)
+const DomainLookup = mainSequelize.define('DomainLookup', {
+  id: {
+    type: require('sequelize').DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  domain_name: {
+    type: require('sequelize').DataTypes.STRING(255),
+    allowNull: false,
+    unique: true
+  },
+  tenant_id: {
+    type: require('sequelize').DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: 'tenants',
+      key: 'id'
+    }
+  },
+  online_store_id: {
+    type: require('sequelize').DataTypes.INTEGER,
+    allowNull: false
+  },
+  online_store_username: {
+    type: require('sequelize').DataTypes.STRING(100),
+    allowNull: true
+  },
+  subscription_plan: {
+    type: require('sequelize').DataTypes.ENUM('free', 'enterprise'),
+    allowNull: false
+  },
+  is_active: {
+    type: require('sequelize').DataTypes.BOOLEAN,
+    defaultValue: true
+  },
+  created_at: {
+    type: require('sequelize').DataTypes.DATE,
+    defaultValue: require('sequelize').DataTypes.NOW
+  },
+  updated_at: {
+    type: require('sequelize').DataTypes.DATE,
+    defaultValue: require('sequelize').DataTypes.NOW
+  }
+}, {
+  tableName: 'domain_lookup',
+  timestamps: true,
+  createdAt: 'created_at',
+  updatedAt: 'updated_at'
+});
+
 // Initialize main database tables
 async function initializeMainDatabase() {
   try {
@@ -209,6 +260,27 @@ async function initializeMainDatabase() {
     // Create license_keys table
     await LicenseKey.sync({ alter: false });
 
+    // Create domain_lookup table for efficient custom domain routing
+    // This table maps custom domains to tenant_id and online_store_id
+    // Allows fast lookup without searching all tenant databases
+    await mainSequelize.query(`
+      CREATE TABLE IF NOT EXISTS domain_lookup (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        domain_name VARCHAR(255) NOT NULL UNIQUE,
+        tenant_id INT NOT NULL,
+        online_store_id INT NOT NULL,
+        online_store_username VARCHAR(100),
+        subscription_plan ENUM('free', 'enterprise') NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_domain_name (domain_name),
+        INDEX idx_tenant_id (tenant_id),
+        INDEX idx_online_store_id (online_store_id),
+        INDEX idx_is_active (is_active)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     console.log('Main database tables initialized.');
   } catch (error) {
     console.error('Error initializing main database:', error);
@@ -228,6 +300,16 @@ async function getTenantById(tenantId) {
  */
 async function getTenantBySubdomain(subdomain) {
   return await Tenant.findOne({ where: { subdomain } });
+}
+
+/**
+ * Get all tenants (for domain lookup across all tenants)
+ */
+async function getAllTenants() {
+  return await Tenant.findAll({
+    where: { status: 'active' },
+    attributes: ['id', 'name', 'subdomain', 'subscription_plan']
+  });
 }
 
 /**
@@ -405,15 +487,19 @@ User.belongsTo(Tenant, { foreignKey: 'tenant_id', as: 'Tenant' });
 Tenant.hasMany(User, { foreignKey: 'tenant_id', as: 'Users' });
 LicenseKey.belongsTo(Tenant, { foreignKey: 'tenant_id', as: 'Tenant' });
 Tenant.hasMany(LicenseKey, { foreignKey: 'tenant_id', as: 'LicenseKeys' });
+DomainLookup.belongsTo(Tenant, { foreignKey: 'tenant_id', as: 'Tenant' });
+Tenant.hasMany(DomainLookup, { foreignKey: 'tenant_id', as: 'DomainLookups' });
 
 module.exports = {
   Tenant,
   User,
   LicenseKey,
+  DomainLookup,
   initializeMainDatabase,
   getTenantById,
   getTenantBySubdomain,
   getTenantByUserEmail,
+  getAllTenants,
   createTenant,
   createLicenseKey,
   validateAndUseLicenseKey,

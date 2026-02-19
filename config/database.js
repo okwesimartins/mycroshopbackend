@@ -1300,6 +1300,65 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     console.warn('Could not add token_expires_at column to whatsapp_connections:', alterError.message);
   }
 
+
+    // Domains table (for purchased domains linked to online stores)
+  const domainTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const domainTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+  
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS domains (
+      ${domainTenantId}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      domain_name VARCHAR(255) NOT NULL,
+      online_store_id INT,
+      status ENUM('pending', 'active', 'expired', 'cancelled') DEFAULT 'pending',
+      registration_date DATE,
+      expiration_date DATE,
+      auto_renew BOOLEAN DEFAULT TRUE,
+      namecheap_order_id VARCHAR(100),
+      namecheap_transaction_id VARCHAR(100),
+      price DECIMAL(10, 2),
+      currency VARCHAR(10) DEFAULT 'USD',
+      years INT DEFAULT 1,
+      nameservers JSON,
+      dns_records JSON,
+      registrant_info JSON,
+      is_verified BOOLEAN DEFAULT FALSE,
+      ssl_enabled BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      ${domainTenantIndex}
+      FOREIGN KEY (online_store_id) REFERENCES online_stores(id) ON DELETE SET NULL,
+      INDEX idx_domain_name (domain_name),
+      INDEX idx_online_store_id (online_store_id),
+      INDEX idx_status (status),
+      UNIQUE KEY unique_domain_name (domain_name${isSharedDb ? ', tenant_id' : ''})
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('✅ Domains table created/verified');
+
+  // Add custom_domain column to online_stores table if it doesn't exist
+  try {
+    const [columns] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'online_stores' 
+      AND COLUMN_NAME = 'custom_domain'
+    `);
+    
+    if (!columns || columns.length === 0) {
+      console.log('Adding custom_domain column to online_stores table...');
+      await connection.query(`
+        ALTER TABLE online_stores 
+        ADD COLUMN custom_domain VARCHAR(255) NULL AFTER username,
+        ADD INDEX idx_custom_domain (custom_domain)
+      `);
+      console.log('✅ custom_domain column added to online_stores table');
+    }
+  } catch (alterError) {
+    console.warn('Could not add custom_domain column to online_stores:', alterError.message);
+  }
   // All online store tables are now complete!
   // Note: Additional enterprise-only tables (roles, suppliers, purchase_orders, pos_transactions, etc.)
   // are not included here as free users only need online store functionality
@@ -1482,6 +1541,30 @@ async function initializeMainDatabaseTables() {
       console.warn('Could not add token_expires_at column to whatsapp_connections (main DB):', alterError.message);
     }
 
+
+        // Create domain_lookup table for efficient custom domain routing
+    // This table maps custom domains to tenant_id and online_store_id
+    // Allows fast lookup without searching all tenant databases
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS domain_lookup (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        domain_name VARCHAR(255) NOT NULL UNIQUE,
+        tenant_id INT NOT NULL,
+        online_store_id INT NOT NULL,
+        online_store_username VARCHAR(100),
+        subscription_plan ENUM('free', 'enterprise') NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_domain_name (domain_name),
+        INDEX idx_tenant_id (tenant_id),
+        INDEX idx_online_store_id (online_store_id),
+        INDEX idx_is_active (is_active)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ domain_lookup table created/verified in main database');
+
+  
     await connection.end();
     return true;
   } catch (error) {
