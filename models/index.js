@@ -1282,6 +1282,11 @@ function initializeModels(sequelize) {
       allowNull: false,
       unique: true
     },
+    custom_domain: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      comment: 'Custom domain purchased and linked to this online store'
+    },
     store_name: {
       type: DataTypes.STRING(255),
       allowNull: false
@@ -1596,6 +1601,94 @@ function initializeModels(sequelize) {
     updatedAt: false
   });
 
+  // Domain Model (for purchased domains)
+  const Domain = sequelize.define('Domain', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Nullable for enterprise users (they have separate DBs), required for free users (shared DB)
+      comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+    },
+    domain_name: {
+      type: DataTypes.STRING(255),
+      allowNull: false,
+      unique: true
+    },
+    online_store_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: 'online_stores',
+        key: 'id'
+      }
+    },
+    status: {
+      type: DataTypes.ENUM('pending', 'active', 'expired', 'cancelled'),
+      defaultValue: 'pending'
+    },
+    registration_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true
+    },
+    expiration_date: {
+      type: DataTypes.DATEONLY,
+      allowNull: true
+    },
+    auto_renew: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true
+    },
+    namecheap_order_id: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    namecheap_transaction_id: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    price: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true
+    },
+    currency: {
+      type: DataTypes.STRING(10),
+      defaultValue: 'USD'
+    },
+    years: {
+      type: DataTypes.INTEGER,
+      defaultValue: 1
+    },
+    nameservers: {
+      type: DataTypes.JSON,
+      allowNull: true
+    },
+    dns_records: {
+      type: DataTypes.JSON,
+      allowNull: true
+    },
+    registrant_info: {
+      type: DataTypes.JSON,
+      allowNull: true
+    },
+    is_verified: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false
+    },
+    ssl_enabled: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false
+    }
+  }, {
+    tableName: 'domains',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  });
+
   // Online Store Order Model
   const OnlineStoreOrder = sequelize.define('OnlineStoreOrder', {
     id: {
@@ -1830,6 +1923,10 @@ function initializeModels(sequelize) {
   // OnlineStore ↔ StoreCollection (collections on online store)
   OnlineStore.hasMany(StoreCollection, { foreignKey: 'online_store_id', onDelete: 'CASCADE' });
   StoreCollection.belongsTo(OnlineStore, { foreignKey: 'online_store_id' });
+
+  // Domain ↔ OnlineStore (one domain can be linked to one online store)
+  Domain.belongsTo(OnlineStore, { foreignKey: 'online_store_id', onDelete: 'SET NULL' });
+  OnlineStore.hasMany(Domain, { foreignKey: 'online_store_id', onDelete: 'SET NULL' });
 
   // StoreCollection ↔ StoreCollectionProduct ↔ Product
   StoreCollection.hasMany(StoreCollectionProduct, { foreignKey: 'collection_id', onDelete: 'CASCADE' });
@@ -3132,6 +3229,7 @@ function initializeModels(sequelize) {
     StoreCollection,
     StoreCollectionProduct,
     StoreCollectionService,
+    Domain,
     OnlineStoreOrder,
     OnlineStoreOrderItem,
     Staff,

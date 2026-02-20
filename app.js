@@ -31,7 +31,20 @@ uploadDirs.forEach(dir => {
   }
 });
 
-// Subdomain identification (for web access via subdomain)
+// Custom domain identification (for custom domains pointing to MycroShop)
+// This runs FIRST - checks for custom domains (e.g., customerstore.com)
+// Technology: HTTP Host Header - server uses Host header to identify which online store to serve
+const { identifyStoreByCustomDomain } = require('./middleware/customDomain');
+app.use(identifyStoreByCustomDomain);
+
+// Online store subdomain identification (for username.mycroshop.com)
+// This runs SECOND - checks for online store subdomains (e.g., mystore.mycroshop.com)
+// Allows users to access their online store before linking a custom domain
+const { identifyStoreBySubdomain } = require('./middleware/onlineStoreSubdomain');
+app.use(identifyStoreBySubdomain);
+
+// Tenant subdomain identification (for tenant admin access via subdomain)
+// This runs LAST - checks for tenant subdomains (e.g., tenantname.mycroshop.com)
 const { identifyTenantBySubdomain } = require('./middleware/subdomain');
 app.use(identifyTenantBySubdomain);
 
@@ -55,6 +68,7 @@ app.use('/api/v1/stores', require('./routes/storeCollections')); // Store collec
 app.use('/api/v1/stores', require('./routes/onlineStoreServices')); // Online store services (matches Figma flow)
 app.use('/api/v1/store-services', require('./routes/storeServices')); // Legacy store services (for backward compatibility)
 app.use('/api/v1/online-store-orders', require('./routes/onlineStoreOrders')); // Online store order management
+app.use('/api/v1/domains', require('./routes/domains')); // Domain purchase and management
 app.use('/api/v1/tax', require('./routes/tax')); // Tax information and calculation
 app.use('/api/v1/pos', require('./routes/pos')); // POS system with barcode scanning
 app.use('/api/v1/staff', require('./routes/staff')); // Staff management
