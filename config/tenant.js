@@ -87,7 +87,7 @@ const Tenant = mainSequelize.define('Tenant', {
     defaultValue: require('sequelize').DataTypes.NOW
   }
 }, {
-  tableName: 'tenants',
+  tableName: 'Tenant',
   timestamps: false
 });
 
@@ -101,7 +101,7 @@ const User = mainSequelize.define('User', {
     type: require('sequelize').DataTypes.INTEGER,
     allowNull: true,
     references: {
-      model: 'tenants',
+      model: 'Tenant',
       key: 'id'
     },
     comment: 'NULL for platform admins (Mycroshop owners)'
@@ -153,7 +153,7 @@ const LicenseKey = mainSequelize.define('LicenseKey', {
     type: require('sequelize').DataTypes.INTEGER,
     allowNull: true,
     references: {
-      model: 'tenants',
+      model: 'Tenant',
       key: 'id'
     }
   },
@@ -198,7 +198,7 @@ const DomainLookup = mainSequelize.define('DomainLookup', {
     type: require('sequelize').DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: 'tenants',
+      model: 'Tenant',
       key: 'id'
     }
   },
@@ -252,7 +252,7 @@ async function initializeMainDatabase() {
         config_value TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES Tenant(id) ON DELETE CASCADE,
         UNIQUE KEY unique_tenant_config (tenant_id, config_key)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
