@@ -518,10 +518,31 @@ class NamecheapService {
         throw new Error('DNS records must be a non-empty array');
       }
 
-      const tld = domain.split('.').pop();
+      // Namecheap API requires SLD (Second Level Domain) and TLD (Top Level Domain) separately
+      // Example: "example.com" -> SLD: "example", TLD: "COM"
+      // For "sub.example.com", we still use SLD: "example", TLD: "COM" (ignore subdomain)
+      const domainParts = domain.split('.');
+      if (domainParts.length < 2) {
+        throw new Error(`Invalid domain format: ${domain}`);
+      }
+      
+      // Extract TLD (last part, e.g., "com")
+      const tld = domainParts.pop().toUpperCase();
+      
+      // Extract SLD (second-level domain, e.g., "example" from "example.com")
+      // If domain is "sub.example.com", we want SLD="example" (not "sub.example")
+      // So we take the last part before TLD
+      const sld = domainParts.length > 0 ? domainParts[domainParts.length - 1] : domainParts[0];
+      
+      if (!sld || !tld) {
+        throw new Error(`Could not extract SLD and TLD from domain: ${domain}`);
+      }
+      
+      console.log(`🔍 Domain parsing for DNS: ${domain} -> SLD: ${sld}, TLD: ${tld}`);
+      
       const params = {
-        DomainName: domain,
-        Tld: tld
+        SLD: sld, // Second Level Domain (required by Namecheap API)
+        TLD: tld // Top Level Domain (required by Namecheap API, uppercase)
       };
 
       // Build parameters for each record
