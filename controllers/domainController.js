@@ -214,9 +214,29 @@ async function checkoutDomain(req, res) {
       console.log(`💰 Using USD for ${tenantCountry}: $${finalPrice}`);
     }
 
+    // Validate online_store_id if provided (must belong to this tenant)
+    if (online_store_id) {
+      const onlineStore = await req.db.models.OnlineStore.findOne({
+        where: {
+          id: online_store_id,
+          tenant_id: tenantId // Ensure it belongs to this tenant
+        },
+        transaction
+      });
+
+      if (!onlineStore) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Online store not found or does not belong to your account'
+        });
+      }
+    }
+
     // Create pending domain record (will be activated after payment)
+    // ALWAYS set tenant_id from JWT token (required for both free and enterprise)
     const domainRecord = await req.db.models.Domain.create({
-      tenant_id: req.user?.tenant?.subscription_plan === 'free' ? tenantId : null,
+      tenant_id: tenantId, // Always set tenant_id from JWT token
       domain_name: domain,
       online_store_id: online_store_id || null,
       status: 'pending', // Pending until payment is verified
@@ -1603,30 +1623,47 @@ async function completeDomainPurchase(domainData, models, transaction) {
 
         const onlineStore = await models.OnlineStore.findByPk(online_store_id, { transaction });
         if (onlineStore) {
-          // Get tenant_id from domain record
-          const tenantId = domainRecord.tenant_id || (await models.Tenant?.findOne?.())?.id;
+          // Get tenant_id from domain record (should always be set)
+          const tenantId = domainRecord.tenant_id;
           
-          await DomainLookup.upsert({
-            domain_name: domain_name,
-            tenant_id: tenantId,
-            online_store_id: online_store_id,
-            online_store_username: onlineStore.username,
-            subscription_plan: domainRecord.tenant_id ? 'free' : 'enterprise',
-            is_active: true
-          });
+          if (!tenantId) {
+            console.error(`⚠️  Domain ${domain_name} has no tenant_id! Cannot update domain_lookup.`);
+          } else {
+            // Get tenant to determine subscription plan
+            const { getTenantById } = require('../config/tenant');
+            const tenant = await getTenantById(tenantId);
+            const subscriptionPlan = tenant?.subscription_plan || 'free';
+            
+            await DomainLookup.upsert({
+              domain_name: domain_name,
+              tenant_id: tenantId,
+              online_store_id: online_store_id,
+              online_store_username: onlineStore.username,
+              subscription_plan: subscriptionPlan,
+              is_active: true
+            });
+            
+            console.log(`✅ Updated domain_lookup table: ${domain_name} → Store: ${onlineStore.username} (Tenant: ${tenantId})`);
+          }
 
           // Update online store custom_domain
           await onlineStore.update({
             custom_domain: domain_name
           }, { transaction });
+          
+          console.log(`🔗 Linked domain ${domain_name} to online store: ${onlineStore.username}`);
 
-          // Auto-configure DNS
+          // AUTO-CONFIGURE DNS AND SSL (automatic setup when online_store_id provided)
+          console.log(`⚙️  Starting automatic DNS and SSL setup for ${domain_name}...`);
+          
           const mycroshopServerIp = process.env.MYCROSHOP_SERVER_IP || process.env.SERVER_IP;
           const mycroshopServerHost = process.env.MYCROSHOP_SERVER_HOST || process.env.SERVER_HOST;
           
           if (mycroshopServerIp || mycroshopServerHost) {
             try {
               const dnsRecords = [];
+              
+              // A record for root domain (@)
               if (mycroshopServerIp) {
                 dnsRecords.push({
                   type: 'A',
@@ -1634,7 +1671,10 @@ async function completeDomainPurchase(domainData, models, transaction) {
                   address: mycroshopServerIp,
                   ttl: '1800'
                 });
+                console.log(`📡 DNS: Added A record @ → ${mycroshopServerIp}`);
               }
+              
+              // CNAME for www subdomain
               if (mycroshopServerHost) {
                 dnsRecords.push({
                   type: 'CNAME',
@@ -1642,31 +1682,59 @@ async function completeDomainPurchase(domainData, models, transaction) {
                   address: mycroshopServerHost,
                   ttl: '1800'
                 });
+                console.log(`📡 DNS: Added CNAME www → ${mycroshopServerHost}`);
+              } else if (mycroshopServerIp) {
+                // Fallback: Use A record for www if no hostname
+                dnsRecords.push({
+                  type: 'A',
+                  name: 'www',
+                  address: mycroshopServerIp,
+                  ttl: '1800'
+                });
+                console.log(`📡 DNS: Added A record www → ${mycroshopServerIp}`);
               }
 
               if (dnsRecords.length > 0) {
+                console.log(`🌐 Configuring DNS records for ${domain_name}...`);
                 const dnsResult = await namecheapService.setDNSHostRecords(domain_name, dnsRecords);
+                
                 if (dnsResult.success) {
                   await domainRecord.update({
                     dns_records: dnsRecords
                   }, { transaction });
+                  console.log(`✅ DNS configured successfully for ${domain_name}`);
                   
-                  // Provision SSL
+                  // Provision SSL certificate (automatic)
+                  console.log(`🔒 Provisioning SSL certificate for ${domain_name}...`);
                   try {
+                    const sslService = require('../services/sslService');
                     const sslResult = await sslService.provisionSSL(domain_name, onlineStore.username);
+                    
                     if (sslResult.success) {
                       await domainRecord.update({
                         ssl_enabled: true
                       }, { transaction });
+                      console.log(`✅ SSL certificate provisioned successfully for ${domain_name}`);
+                    } else {
+                      console.warn(`⚠️  SSL provisioning returned success=false: ${sslResult.message || 'Unknown error'}`);
                     }
                   } catch (sslError) {
-                    console.error('SSL provisioning error:', sslError);
+                    console.error(`❌ SSL provisioning error for ${domain_name}:`, sslError.message);
+                    // Don't fail domain purchase if SSL fails - can be retried later
                   }
+                } else {
+                  console.error(`❌ DNS configuration failed for ${domain_name}:`, dnsResult.message || 'Unknown error');
+                  // Don't fail domain purchase if DNS fails - can be configured manually
                 }
+              } else {
+                console.warn(`⚠️  No DNS records to configure. Set MYCROSHOP_SERVER_IP or MYCROSHOP_SERVER_HOST in .env`);
               }
             } catch (dnsError) {
-              console.error('DNS configuration error:', dnsError);
+              console.error(`❌ DNS configuration error for ${domain_name}:`, dnsError.message);
+              // Don't fail domain purchase if DNS fails - can be configured manually
             }
+          } else {
+            console.warn(`⚠️  DNS auto-configuration skipped: MYCROSHOP_SERVER_IP and MYCROSHOP_SERVER_HOST not set in .env`);
           }
         }
       } catch (lookupError) {
