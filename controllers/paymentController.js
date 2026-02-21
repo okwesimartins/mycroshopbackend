@@ -736,22 +736,86 @@ async function verifyPayment(req, res) {
       }
 
       // Preserve original metadata from gateway_response before updating
-      // This is important for domain purchases and other metadata-dependent operations
-      const originalGatewayResponse = currentTransaction.gateway_response || {};
-      const originalMetadata = originalGatewayResponse.metadata || originalGatewayResponse.data?.metadata || null;
+      // This is CRITICAL for domain purchases and other metadata-dependent operations
+      // gateway_response might be stored as JSON string or object, handle both
+      let originalGatewayResponse = {};
+      try {
+        if (currentTransaction.gateway_response) {
+          if (typeof currentTransaction.gateway_response === 'string') {
+            originalGatewayResponse = JSON.parse(currentTransaction.gateway_response);
+          } else {
+            originalGatewayResponse = currentTransaction.gateway_response;
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing gateway_response:', parseError);
+        originalGatewayResponse = currentTransaction.gateway_response || {};
+      }
+      
+      // Extract metadata from multiple possible locations in original response
+      let originalMetadata = null;
+      
+      // Try multiple locations for metadata (in order of preference)
+      if (originalGatewayResponse.metadata) {
+        originalMetadata = typeof originalGatewayResponse.metadata === 'string' 
+          ? JSON.parse(originalGatewayResponse.metadata) 
+          : originalGatewayResponse.metadata;
+      } else if (originalGatewayResponse._domain_metadata) {
+        // Backup location we store during checkout
+        originalMetadata = typeof originalGatewayResponse._domain_metadata === 'string'
+          ? JSON.parse(originalGatewayResponse._domain_metadata)
+          : originalGatewayResponse._domain_metadata;
+      } else if (originalGatewayResponse.data?.metadata) {
+        originalMetadata = typeof originalGatewayResponse.data.metadata === 'string'
+          ? JSON.parse(originalGatewayResponse.data.metadata)
+          : originalGatewayResponse.data.metadata;
+      }
+      
+      console.log('🔍 Original gateway_response metadata check:', {
+        hasGatewayResponse: !!currentTransaction.gateway_response,
+        gatewayResponseType: typeof currentTransaction.gateway_response,
+        gatewayResponseIsString: typeof currentTransaction.gateway_response === 'string',
+        hasMetadata: !!originalMetadata,
+        metadataKeys: originalMetadata ? Object.keys(originalMetadata) : [],
+        purchaseType: originalMetadata?.purchase_type,
+        domainId: originalMetadata?.domain_id,
+        originalGatewayResponseKeys: originalGatewayResponse ? Object.keys(originalGatewayResponse) : [],
+        originalGatewayResponsePreview: JSON.stringify(originalGatewayResponse).substring(0, 1000) // First 1000 chars
+      });
+      
+      // If metadata is still not found, log the full gateway_response structure
+      if (!originalMetadata) {
+        console.error('❌ METADATA NOT FOUND! Full gateway_response structure:', {
+          type: typeof currentTransaction.gateway_response,
+          isString: typeof currentTransaction.gateway_response === 'string',
+          rawValue: typeof currentTransaction.gateway_response === 'string' 
+            ? currentTransaction.gateway_response.substring(0, 500)
+            : currentTransaction.gateway_response,
+          parsedValue: originalGatewayResponse,
+          allKeys: originalGatewayResponse ? Object.keys(originalGatewayResponse) : []
+        });
+      }
       
       // Merge verification result with original gateway_response to preserve metadata
       const mergedGatewayResponse = {
         ...originalGatewayResponse,
         ...verificationResult,
-        // Preserve original metadata if it exists
+        // CRITICAL: Preserve original metadata (verification result won't have it)
         metadata: originalMetadata || verificationResult.metadata || verificationResult.data?.metadata || null,
-        // Preserve original data if it exists
+        // Merge data objects but preserve metadata
         data: {
           ...(originalGatewayResponse.data || {}),
-          ...(verificationResult.data || {})
+          ...(verificationResult.data || {}),
+          // Ensure metadata is in data object too
+          metadata: originalMetadata || verificationResult.data?.metadata || originalGatewayResponse.data?.metadata || null
         }
       };
+      
+      console.log('🔍 Merged gateway_response metadata check:', {
+        hasMetadata: !!mergedGatewayResponse.metadata,
+        hasDataMetadata: !!mergedGatewayResponse.data?.metadata,
+        metadataKeys: mergedGatewayResponse.metadata ? Object.keys(mergedGatewayResponse.metadata) : []
+      });
 
       await currentTransaction.update({
         status: newStatus,
@@ -1035,7 +1099,20 @@ async function verifyPayment(req, res) {
           // If metadata is empty, this is a problem
           if (Object.keys(metadata).length === 0) {
             console.error('⚠️  WARNING: Metadata is empty! Domain purchase cannot be processed.');
+            console.error('   Transaction ID:', currentTransaction.id);
+            console.error('   Transaction Reference:', currentTransaction.transaction_reference);
+            console.error('   Gateway Response Type:', typeof currentTransaction.gateway_response);
+            console.error('   Gateway Response:', JSON.stringify(currentTransaction.gateway_response, null, 2));
+            
             responseData.metadata_warning = 'No metadata found in payment transaction. Domain purchase cannot be processed.';
+            responseData.metadata_debug = {
+              transaction_id: currentTransaction.id,
+              transaction_reference: currentTransaction.transaction_reference,
+              has_gateway_response: !!currentTransaction.gateway_response,
+              gateway_response_type: typeof currentTransaction.gateway_response,
+              gateway_response_keys: currentTransaction.gateway_response ? Object.keys(currentTransaction.gateway_response) : [],
+              original_gateway_response: originalGatewayResponse ? Object.keys(originalGatewayResponse) : []
+            };
           }
         }
       }
@@ -1334,12 +1411,29 @@ async function verifyPaystackPayment(reference, secretKey) {
     );
 
     const data = response.data.data;
+    
+    // Paystack returns metadata in data.metadata, preserve it
+    const paystackMetadata = data.metadata || null;
+    
+    console.log('📦 Paystack verification response:', {
+      status: data.status,
+      hasMetadata: !!paystackMetadata,
+      metadataKeys: paystackMetadata ? Object.keys(paystackMetadata) : [],
+      reference: data.reference
+    });
+    
     return {
       status: data.status === 'success' ? 'success' : 'failed',
       message: data.gateway_response || data.message,
       gateway_transaction_id: data.reference,
       amount: data.amount / 100, // Convert from kobo
-      paid_at: data.paid_at
+      paid_at: data.paid_at,
+      // Preserve metadata from Paystack if it exists
+      metadata: paystackMetadata,
+      data: {
+        ...data,
+        metadata: paystackMetadata
+      }
     };
   } catch (error) {
     console.error('Paystack verification error:', error.response?.data || error.message);

@@ -310,7 +310,23 @@ async function checkoutDomain(req, res) {
         merchant_amount: merchantAmount,
         customer_email: email,
         customer_name: `${firstName} ${lastName}`,
-        status: 'pending'
+        status: 'pending',
+        // Store metadata directly in gateway_response for easy retrieval
+        gateway_response: {
+          metadata: paymentMetadata,
+          data: {
+            metadata: paymentMetadata
+          },
+          _domain_metadata: paymentMetadata // Backup location
+        }
+      });
+      
+      console.log('💾 Created payment transaction with metadata:', {
+        transaction_id: paymentTransaction.id,
+        reference: transactionReference,
+        hasMetadata: !!paymentMetadata,
+        purchaseType: paymentMetadata.purchase_type,
+        domainId: paymentMetadata.domain_id
       });
 
       // Use MycroShop's Paystack secret key directly (from .env)
@@ -355,19 +371,43 @@ async function checkoutDomain(req, res) {
       }
 
       // Update transaction with gateway response
-      // IMPORTANT: Store metadata in gateway_response so it's available during verification
+      // IMPORTANT: Merge with existing gateway_response to preserve metadata we stored during creation
+      const existingGatewayResponse = paymentTransaction.gateway_response || {};
       const gatewayResponseWithMetadata = {
-        ...paymentData,
-        metadata: paymentMetadata, // Store our metadata in the response
+        ...existingGatewayResponse, // Preserve metadata we stored during creation
+        ...paymentData, // Add Paystack response
+        metadata: existingGatewayResponse.metadata || existingGatewayResponse._domain_metadata || paymentMetadata, // Preserve existing metadata
         data: {
+          ...(existingGatewayResponse.data || {}),
           ...(paymentData.data || {}),
-          metadata: paymentMetadata // Also store in data.metadata for compatibility
-        }
+          metadata: existingGatewayResponse.data?.metadata || existingGatewayResponse._domain_metadata || paymentMetadata // Preserve existing metadata
+        },
+        _domain_metadata: existingGatewayResponse._domain_metadata || paymentMetadata // Backup location
       };
+      
+      console.log('💾 Updating gateway_response with Paystack data, preserving metadata:', {
+        hasExistingMetadata: !!existingGatewayResponse.metadata,
+        hasNewMetadata: !!paymentMetadata,
+        finalMetadata: !!gatewayResponseWithMetadata.metadata,
+        purchaseType: gatewayResponseWithMetadata.metadata?.purchase_type,
+        domainId: gatewayResponseWithMetadata.metadata?.domain_id
+      });
       
       await paymentTransaction.update({
         gateway_transaction_id: paymentData.gateway_transaction_id || paymentData.reference,
         gateway_response: gatewayResponseWithMetadata
+      });
+      
+      // Verify metadata was stored correctly
+      await paymentTransaction.reload();
+      const storedMetadata = paymentTransaction.gateway_response?.metadata 
+        || paymentTransaction.gateway_response?._domain_metadata
+        || paymentTransaction.gateway_response?.data?.metadata;
+      console.log('✅ Verified stored metadata after update:', {
+        hasMetadata: !!storedMetadata,
+        purchaseType: storedMetadata?.purchase_type,
+        domainId: storedMetadata?.domain_id,
+        metadataLocation: storedMetadata ? 'found' : 'NOT FOUND'
       });
 
       paymentResponse = {
