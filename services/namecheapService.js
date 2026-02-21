@@ -197,6 +197,76 @@ class NamecheapService {
   }
 
   /**
+   * Format phone number for Namecheap API
+   * Namecheap requires format: +CC.NNNNNNNNNN (e.g., +1.1234567890 or +234.1234567890)
+   * @param {string} phone - Phone number in any format
+   * @param {string} country - Country code (e.g., 'US', 'NG')
+   * @returns {string} Formatted phone number
+   */
+  formatPhoneForNamecheap(phone, country = 'US') {
+    if (!phone) return '';
+    
+    // Remove all non-digit characters except +
+    let cleaned = phone.replace(/[^\d+]/g, '');
+    
+    // If already in correct format (has dot), return as-is
+    if (phone.includes('.')) {
+      return phone;
+    }
+    
+    // Map country codes to phone prefixes
+    const countryCodes = {
+      'US': '1', 'CA': '1', 'NG': '234', 'GB': '44', 'KE': '254',
+      'GH': '233', 'ZA': '27', 'EG': '20', 'TZ': '255', 'UG': '256',
+      'IN': '91', 'PK': '92', 'BD': '880', 'LK': '94', 'NP': '977'
+    };
+    
+    let countryCode;
+    let number;
+    
+    // If it starts with +, extract country code
+    if (cleaned.startsWith('+')) {
+      // Try to match known country codes (1-3 digits)
+      const match = cleaned.match(/^\+(\d{1,3})(.+)$/);
+      if (match) {
+        const [, extractedCode, rest] = match;
+        // Check if extracted code matches a known country code
+        const knownCode = Object.values(countryCodes).find(code => 
+          extractedCode === code || extractedCode.startsWith(code) || code.startsWith(extractedCode)
+        );
+        if (knownCode) {
+          countryCode = knownCode;
+          number = rest;
+        } else {
+          // Use extracted code as-is
+          countryCode = extractedCode;
+          number = rest;
+        }
+      } else {
+        // No match, use default
+        countryCode = countryCodes[country.toUpperCase()] || '1';
+        number = cleaned.replace(/^\+/, '');
+      }
+    } else {
+      // No + prefix, add country code based on country parameter
+      countryCode = countryCodes[country.toUpperCase()] || '1';
+      number = cleaned;
+    }
+    
+    // Remove leading zeros from number
+    number = number.replace(/^0+/, '');
+    
+    // Ensure number is not empty
+    if (!number) {
+      // Fallback: use original phone if formatting fails
+      console.warn(`⚠️  Phone number formatting failed for: ${phone}, using original`);
+      return phone;
+    }
+    
+    return `+${countryCode}.${number}`;
+  }
+
+  /**
    * Purchase/Register a domain
    * @param {object} domainData - Domain registration data
    * @returns {Promise<object>} Registration result
@@ -227,13 +297,22 @@ class NamecheapService {
         throw new Error('Missing required domain registration fields');
       }
 
+      // Format phone number for Namecheap (required format: +CC.NNNNNNNNNN)
+      const formattedPhone = this.formatPhoneForNamecheap(phone, country);
+      
+      console.log(`📞 Phone number formatting:`, {
+        original: phone,
+        country: country,
+        formatted: formattedPhone
+      });
+
       const params = {
         DomainName: domain,
         Years: years,
         'AuxBillingFirstName': firstName,
         'AuxBillingLastName': lastName,
         'AuxBillingEmailAddress': email,
-        'AuxBillingPhone': phone,
+        'AuxBillingPhone': formattedPhone,
         'AuxBillingAddress1': address1,
         'AuxBillingAddress2': address2 || '',
         'AuxBillingCity': city,
@@ -248,7 +327,7 @@ class NamecheapService {
         'RegistrantFirstName': firstName,
         'RegistrantLastName': lastName,
         'RegistrantEmailAddress': email,
-        'RegistrantPhone': phone,
+        'RegistrantPhone': formattedPhone, // Use formatted phone
         'RegistrantAddress1': address1,
         'RegistrantAddress2': address2 || '',
         'RegistrantCity': city,
@@ -263,7 +342,7 @@ class NamecheapService {
         'TechFirstName': firstName,
         'TechLastName': lastName,
         'TechEmailAddress': email,
-        'TechPhone': phone,
+        'TechPhone': formattedPhone, // Use formatted phone
         'TechAddress1': address1,
         'TechAddress2': address2 || '',
         'TechCity': city,
@@ -278,14 +357,14 @@ class NamecheapService {
         'AdminFirstName': firstName,
         'AdminLastName': lastName,
         'AdminEmailAddress': email,
-        'AdminPhone': phone,
+        'AdminPhone': formattedPhone, // Use formatted phone
         'AdminAddress1': address1,
         'AdminAddress2': address2 || '',
         'AdminCity': city,
         'AdminStateProvince': stateProvince,
         'AdminPostalCode': postalCode,
         'AdminCountry': country,
-        'AdminPhoneExt': phoneExt,
+        'AdminPhoneExt': phoneExt || '', // Empty string if not provided
         'AdminOrganizationName': organization,
         'AdminJobTitle': jobTitle,
         'AdminIdnCode': idnCode,
