@@ -68,7 +68,9 @@ async function identifyStoreByCustomDomain(req, res, next) {
         is_active: require('sequelize').DataTypes.BOOLEAN
       }, {
         tableName: 'domain_lookup',
-        timestamps: true
+        timestamps: true,
+        createdAt: 'created_at',  // Map to snake_case column name
+        updatedAt: 'updated_at'   // Map to snake_case column name
       });
 
       const domainLookup = await DomainLookup.findOne({

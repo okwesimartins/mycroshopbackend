@@ -695,7 +695,9 @@ async function purchaseDomain(req, res) {
           is_active: require('sequelize').DataTypes.BOOLEAN
         }, {
           tableName: 'domain_lookup',
-          timestamps: true
+          timestamps: true,
+          createdAt: 'created_at',  // Map to snake_case column name
+          updatedAt: 'updated_at'   // Map to snake_case column name
         });
 
         const onlineStore = await req.db.models.OnlineStore.findByPk(online_store_id, { transaction });
@@ -1707,7 +1709,9 @@ async function completeDomainPurchase(domainData, models, transaction) {
           is_active: require('sequelize').DataTypes.BOOLEAN
         }, {
           tableName: 'domain_lookup',
-          timestamps: true
+          timestamps: true,
+          createdAt: 'created_at',  // Map to snake_case column name
+          updatedAt: 'updated_at'   // Map to snake_case column name
         });
 
         const onlineStore = await models.OnlineStore.findByPk(finalOnlineStoreId, { transaction });
