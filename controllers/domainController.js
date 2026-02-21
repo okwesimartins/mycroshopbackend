@@ -265,11 +265,9 @@ async function checkoutDomain(req, res) {
       }
     };
 
-    // Commit domain record first (before payment initialization)
-    await transaction.commit();
-
     // Initialize payment using MycroShop's Paystack account (from .env)
     // Domain purchases are processed by MycroShop admin, not tenant-specific gateways
+    let paymentResponse;
     try {
       // Get MycroShop's Paystack keys from environment variables
       const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
@@ -277,8 +275,13 @@ async function checkoutDomain(req, res) {
       const paystackTestMode = process.env.PAYSTACK_TEST_MODE === 'true' || process.env.NODE_ENV !== 'production';
 
       if (!paystackSecretKey || !paystackPublicKey) {
-        // Delete domain record if Paystack not configured
-        await domainRecord.destroy();
+        // Rollback transaction and delete domain record if Paystack not configured
+        await transaction.rollback();
+        try {
+          await domainRecord.destroy();
+        } catch (destroyError) {
+          console.error('Error destroying domain record:', destroyError);
+        }
         return res.status(500).json({
           success: false,
           message: 'Payment gateway not configured. Please contact support.'
@@ -333,13 +336,23 @@ async function checkoutDomain(req, res) {
         : parseFloat(finalPrice) * 100; // Paystack uses cents for USD
       
       // Initialize payment with MycroShop's Paystack account
-      const paymentData = await paymentController.initializePaystackPayment({
-        amount: amountInSmallestUnit,
-        email,
-        reference: transactionReference,
-        callback_url: finalCallbackUrl,
-        metadata: paymentMetadata
-      }, secretKey, paystackTestMode);
+      let paymentData;
+      try {
+        paymentData = await paymentController.initializePaystackPayment({
+          amount: amountInSmallestUnit,
+          email,
+          reference: transactionReference,
+          callback_url: finalCallbackUrl,
+          metadata: paymentMetadata
+        }, secretKey, paystackTestMode);
+
+        if (!paymentData || !paymentData.authorization_url) {
+          throw new Error('Invalid payment data received from Paystack');
+        }
+      } catch (paystackError) {
+        console.error('Paystack initialization error:', paystackError);
+        throw new Error(`Paystack payment initialization failed: ${paystackError.message}`);
+      }
 
       // Update transaction with gateway response
       await paymentTransaction.update({
@@ -365,43 +378,73 @@ async function checkoutDomain(req, res) {
         }
       };
     } catch (paymentError) {
-      // Delete domain record if payment initialization fails
-      await domainRecord.destroy();
+      // Rollback transaction and delete domain record if payment initialization fails
+      await transaction.rollback();
+      try {
+        await domainRecord.destroy();
+      } catch (destroyError) {
+        console.error('Error destroying domain record:', destroyError);
+      }
+      console.error('Payment initialization error:', paymentError);
       return res.status(400).json({
         success: false,
         message: 'Failed to initialize payment',
-        error: paymentError.message
+        error: process.env.NODE_ENV === 'development' ? paymentError.message : undefined
       });
     }
 
+    // Commit transaction after successful payment initialization
     await transaction.commit();
 
-    res.json({
-      success: true,
-      message: 'Domain checkout initialized. Please complete payment to purchase domain.',
-      data: {
-        domain_id: domainRecord.id,
-        domain: domain,
-        pricing: {
-          pricePerYear: pricing.pricePerYear,
-          totalPrice: pricing.totalPrice,
-          currency: pricing.currency, // USD from Namecheap
-          years: years,
-          billingCurrency: finalCurrency,
-          billingAmount: finalPrice,
-          exchangeRate: exchangeRate,
-          bufferAdded: bufferAmount
-        },
-        payment: {
-          transaction_reference: paymentResponse.data.transaction_reference,
-          authorization_url: paymentResponse.data.authorization_url,
-          access_code: paymentResponse.data.access_code,
-          amount: paymentResponse.data.amount,
-          currency: paymentResponse.data.currency
-        },
-        note: 'After payment is successful, the domain will be automatically purchased and registered.'
-      }
-    });
+    // Ensure paymentResponse is defined before using it
+    if (!paymentResponse || !paymentResponse.data) {
+      console.error('Payment response is missing or invalid:', paymentResponse);
+      return res.status(500).json({
+        success: false,
+        message: 'Payment initialization failed - no payment data received'
+      });
+    }
+
+    // Ensure all required variables are defined
+    if (typeof finalPrice === 'undefined' || typeof finalCurrency === 'undefined') {
+      console.error('Currency variables not defined:', { finalPrice, finalCurrency, exchangeRate, bufferAmount });
+      return res.status(500).json({
+        success: false,
+        message: 'Currency calculation error'
+      });
+    }
+
+    try {
+      res.json({
+        success: true,
+        message: 'Domain checkout initialized. Please complete payment to purchase domain.',
+        data: {
+          domain_id: domainRecord.id,
+          domain: domain,
+          pricing: {
+            pricePerYear: pricing.pricePerYear,
+            totalPrice: pricing.totalPrice,
+            currency: pricing.currency, // USD from Namecheap
+            years: years,
+            billingCurrency: finalCurrency,
+            billingAmount: finalPrice,
+            exchangeRate: exchangeRate || null,
+            bufferAdded: bufferAmount || 0
+          },
+          payment: {
+            transaction_reference: paymentResponse.data.transaction_reference,
+            authorization_url: paymentResponse.data.authorization_url,
+            access_code: paymentResponse.data.access_code,
+            amount: paymentResponse.data.amount,
+            currency: paymentResponse.data.currency
+          },
+          note: 'After payment is successful, the domain will be automatically purchased and registered.'
+        }
+      });
+    } catch (responseError) {
+      console.error('Error sending response:', responseError);
+      // Response might have already been sent, but log the error
+    }
   } catch (error) {
     await transaction.rollback();
     console.error('Error initializing domain checkout:', error);
