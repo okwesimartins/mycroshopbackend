@@ -1605,8 +1605,108 @@ async function completeDomainPurchase(domainData, models, transaction) {
       console.warn(`⚠️  Domain ${domain_name} registered but Namecheap orderId/transactionId are null (sandbox mode)`);
     }
 
-    // Update domain lookup table for fast routing
-    if (online_store_id) {
+    // Get online_store_id from domain record if not provided in domainData
+    // This handles cases where online_store_id was set during checkout but not in metadata
+    const finalOnlineStoreId = online_store_id || domainRecord.online_store_id;
+    
+    console.log(`🔍 Online store ID check:`, {
+      fromDomainData: online_store_id,
+      fromDomainRecord: domainRecord.online_store_id,
+      finalOnlineStoreId: finalOnlineStoreId
+    });
+
+    // AUTO-CONFIGURE DNS (always configure DNS for all domains)
+    console.log(`⚙️  Starting automatic DNS setup for ${domain_name}...`);
+    
+    const mycroshopServerIp = process.env.MYCROSHOP_SERVER_IP || process.env.SERVER_IP;
+    const mycroshopServerHost = process.env.MYCROSHOP_SERVER_HOST || process.env.SERVER_HOST;
+    
+    if (mycroshopServerIp || mycroshopServerHost) {
+      try {
+        const dnsRecords = [];
+        
+        // A record for root domain (@)
+        if (mycroshopServerIp) {
+          dnsRecords.push({
+            type: 'A',
+            name: '@',
+            address: mycroshopServerIp,
+            ttl: '1800'
+          });
+          console.log(`📡 DNS: Added A record @ → ${mycroshopServerIp}`);
+        }
+        
+        // CNAME for www subdomain
+        if (mycroshopServerHost) {
+          dnsRecords.push({
+            type: 'CNAME',
+            name: 'www',
+            address: mycroshopServerHost,
+            ttl: '1800'
+          });
+          console.log(`📡 DNS: Added CNAME www → ${mycroshopServerHost}`);
+        } else if (mycroshopServerIp) {
+          // Fallback: Use A record for www if no hostname
+          dnsRecords.push({
+            type: 'A',
+            name: 'www',
+            address: mycroshopServerIp,
+            ttl: '1800'
+          });
+          console.log(`📡 DNS: Added A record www → ${mycroshopServerIp}`);
+        }
+
+        if (dnsRecords.length > 0) {
+          console.log(`🌐 Configuring DNS records for ${domain_name}...`);
+          console.log(`📋 DNS Records to configure:`, JSON.stringify(dnsRecords, null, 2));
+          
+          try {
+            const dnsResult = await namecheapService.setDNSHostRecords(domain_name, dnsRecords);
+            
+            console.log(`📦 Namecheap DNS API response:`, JSON.stringify(dnsResult, null, 2));
+            
+            if (dnsResult && dnsResult.success) {
+              // Save DNS records to database
+              await domainRecord.update({
+                dns_records: dnsRecords
+              }, { transaction });
+              console.log(`✅ DNS configured successfully for ${domain_name} and saved to database`);
+            } else {
+              const errorMsg = dnsResult?.message || dnsResult?.error || 'Unknown error';
+              console.error(`❌ DNS configuration failed for ${domain_name}:`, errorMsg);
+              console.error(`   Full DNS result:`, JSON.stringify(dnsResult, null, 2));
+              
+              // Still save DNS records to database even if Namecheap API failed
+              // This way we have a record of what should be configured
+              await domainRecord.update({
+                dns_records: dnsRecords
+              }, { transaction });
+              console.log(`⚠️  DNS records saved to database but Namecheap API call failed. Manual configuration may be needed.`);
+            }
+          } catch (dnsApiError) {
+            console.error(`❌ DNS API call error for ${domain_name}:`, dnsApiError.message);
+            console.error(`   Error stack:`, dnsApiError.stack);
+            
+            // Still save DNS records to database even if API call failed
+            await domainRecord.update({
+              dns_records: dnsRecords
+            }, { transaction });
+            console.log(`⚠️  DNS records saved to database but API call failed. Manual configuration may be needed.`);
+          }
+        } else {
+          console.warn(`⚠️  No DNS records to configure. Set MYCROSHOP_SERVER_IP or MYCROSHOP_SERVER_HOST in .env`);
+          console.warn(`   Current values: MYCROSHOP_SERVER_IP=${mycroshopServerIp}, MYCROSHOP_SERVER_HOST=${mycroshopServerHost}`);
+        }
+      } catch (dnsError) {
+        console.error(`❌ DNS configuration error for ${domain_name}:`, dnsError.message);
+        // Don't fail domain purchase if DNS fails - can be configured manually
+      }
+    } else {
+      console.warn(`⚠️  DNS auto-configuration skipped: MYCROSHOP_SERVER_IP and MYCROSHOP_SERVER_HOST not set in .env`);
+    }
+
+    // Update domain lookup table and configure SSL (only if online_store_id is provided)
+    if (finalOnlineStoreId) {
       try {
         const { mainSequelize } = require('../config/database');
         const DomainLookup = mainSequelize.define('DomainLookup', {
@@ -1621,7 +1721,7 @@ async function completeDomainPurchase(domainData, models, transaction) {
           timestamps: true
         });
 
-        const onlineStore = await models.OnlineStore.findByPk(online_store_id, { transaction });
+        const onlineStore = await models.OnlineStore.findByPk(finalOnlineStoreId, { transaction });
         if (onlineStore) {
           // Get tenant_id from domain record (should always be set)
           const tenantId = domainRecord.tenant_id;
@@ -1637,7 +1737,7 @@ async function completeDomainPurchase(domainData, models, transaction) {
             await DomainLookup.upsert({
               domain_name: domain_name,
               tenant_id: tenantId,
-              online_store_id: online_store_id,
+              online_store_id: finalOnlineStoreId,
               online_store_username: onlineStore.username,
               subscription_plan: subscriptionPlan,
               is_active: true
@@ -1653,93 +1753,30 @@ async function completeDomainPurchase(domainData, models, transaction) {
           
           console.log(`🔗 Linked domain ${domain_name} to online store: ${onlineStore.username}`);
 
-          // AUTO-CONFIGURE DNS AND SSL (automatic setup when online_store_id provided)
-          console.log(`⚙️  Starting automatic DNS and SSL setup for ${domain_name}...`);
-          
-          const mycroshopServerIp = process.env.MYCROSHOP_SERVER_IP || process.env.SERVER_IP;
-          const mycroshopServerHost = process.env.MYCROSHOP_SERVER_HOST || process.env.SERVER_HOST;
-          
-          if (mycroshopServerIp || mycroshopServerHost) {
-            try {
-              const dnsRecords = [];
-              
-              // A record for root domain (@)
-              if (mycroshopServerIp) {
-                dnsRecords.push({
-                  type: 'A',
-                  name: '@',
-                  address: mycroshopServerIp,
-                  ttl: '1800'
-                });
-                console.log(`📡 DNS: Added A record @ → ${mycroshopServerIp}`);
-              }
-              
-              // CNAME for www subdomain
-              if (mycroshopServerHost) {
-                dnsRecords.push({
-                  type: 'CNAME',
-                  name: 'www',
-                  address: mycroshopServerHost,
-                  ttl: '1800'
-                });
-                console.log(`📡 DNS: Added CNAME www → ${mycroshopServerHost}`);
-              } else if (mycroshopServerIp) {
-                // Fallback: Use A record for www if no hostname
-                dnsRecords.push({
-                  type: 'A',
-                  name: 'www',
-                  address: mycroshopServerIp,
-                  ttl: '1800'
-                });
-                console.log(`📡 DNS: Added A record www → ${mycroshopServerIp}`);
-              }
-
-              if (dnsRecords.length > 0) {
-                console.log(`🌐 Configuring DNS records for ${domain_name}...`);
-                const dnsResult = await namecheapService.setDNSHostRecords(domain_name, dnsRecords);
-                
-                if (dnsResult.success) {
-                  await domainRecord.update({
-                    dns_records: dnsRecords
-                  }, { transaction });
-                  console.log(`✅ DNS configured successfully for ${domain_name}`);
-                  
-                  // Provision SSL certificate (automatic)
-                  console.log(`🔒 Provisioning SSL certificate for ${domain_name}...`);
-                  try {
-                    const sslService = require('../services/sslService');
-                    const sslResult = await sslService.provisionSSL(domain_name, onlineStore.username);
-                    
-                    if (sslResult.success) {
-                      await domainRecord.update({
-                        ssl_enabled: true
-                      }, { transaction });
-                      console.log(`✅ SSL certificate provisioned successfully for ${domain_name}`);
-                    } else {
-                      console.warn(`⚠️  SSL provisioning returned success=false: ${sslResult.message || 'Unknown error'}`);
-                    }
-                  } catch (sslError) {
-                    console.error(`❌ SSL provisioning error for ${domain_name}:`, sslError.message);
-                    // Don't fail domain purchase if SSL fails - can be retried later
-                  }
-                } else {
-                  console.error(`❌ DNS configuration failed for ${domain_name}:`, dnsResult.message || 'Unknown error');
-                  // Don't fail domain purchase if DNS fails - can be configured manually
-                }
-              } else {
-                console.warn(`⚠️  No DNS records to configure. Set MYCROSHOP_SERVER_IP or MYCROSHOP_SERVER_HOST in .env`);
-              }
-            } catch (dnsError) {
-              console.error(`❌ DNS configuration error for ${domain_name}:`, dnsError.message);
-              // Don't fail domain purchase if DNS fails - can be configured manually
+          // Provision SSL certificate (only when online_store_id is provided)
+          console.log(`🔒 Provisioning SSL certificate for ${domain_name}...`);
+          try {
+            const sslService = require('../services/sslService');
+            const sslResult = await sslService.provisionSSL(domain_name, onlineStore.username);
+            
+            if (sslResult.success) {
+              await domainRecord.update({
+                ssl_enabled: true
+              }, { transaction });
+              console.log(`✅ SSL certificate provisioned successfully for ${domain_name}`);
+            } else {
+              console.warn(`⚠️  SSL provisioning returned success=false: ${sslResult.message || 'Unknown error'}`);
             }
-          } else {
-            console.warn(`⚠️  DNS auto-configuration skipped: MYCROSHOP_SERVER_IP and MYCROSHOP_SERVER_HOST not set in .env`);
+          } catch (sslError) {
+            console.error(`❌ SSL provisioning error for ${domain_name}:`, sslError.message);
+            // Don't fail domain purchase if SSL fails - can be retried later
           }
         }
       } catch (lookupError) {
         console.error('Error updating domain lookup:', lookupError);
       }
+    } else {
+      console.log(`ℹ️  No online_store_id provided. Domain ${domain_name} DNS configured but not linked to store. SSL skipped.`);
     }
 
     // Reload domain record to get updated values
