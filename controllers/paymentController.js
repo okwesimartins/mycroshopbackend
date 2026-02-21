@@ -1249,15 +1249,38 @@ async function verifyPayment(req, res) {
             console.error('Domain error stack:', domainError.stack);
             console.error('Full error:', JSON.stringify(domainError, Object.getOwnPropertyNames(domainError), 2));
             
+            // Extract SSL error details if this is an SSL error
+            const sslErrorDetails = domainError.sslResult || domainError.sslDetails || null;
+            
             responseData.domain_purchase_error = {
               message: errorMessage,
-              details: process.env.NODE_ENV === 'development' ? {
+              details: {
                 stack: domainError.stack,
                 name: domainError.name,
-                code: domainError.code
-              } : null,
+                code: domainError.code,
+                // Include all error properties for debugging
+                fullError: domainError.toString(),
+                errorKeys: Object.keys(domainError),
+                // Include SSL-specific error details if available
+                sslResult: domainError.sslResult || null,
+                sslDetails: domainError.sslDetails || null
+              },
               domain_id: metadata.domain_id,
-              domain_name: metadata.domain_name
+              domain_name: metadata.domain_name,
+              logs: [
+                `Error: ${errorMessage}`,
+                `Stack: ${domainError.stack}`,
+                `Name: ${domainError.name}`,
+                `Code: ${domainError.code || 'N/A'}`,
+                // Add SSL-specific logs if available
+                ...(sslErrorDetails ? [
+                  `SSL Provider: ${sslErrorDetails.provider || domainError.sslDetails?.provider || 'N/A'}`,
+                  `SSL Message: ${sslErrorDetails.message || domainError.sslDetails?.message || 'N/A'}`,
+                  `Certbot Email: ${sslErrorDetails.certbotEmail || domainError.sslDetails?.certbotEmail || 'N/A'}`,
+                  `Webroot Path: ${sslErrorDetails.webrootPath || domainError.sslDetails?.webrootPath || 'N/A'}`,
+                  ...(sslErrorDetails.instructions || domainError.sslDetails?.instructions || []).map(inst => `Instruction: ${inst}`)
+                ] : [])
+              ]
             };
             responseData.domain_purchase_status = 'failed';
           }

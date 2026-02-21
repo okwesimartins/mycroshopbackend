@@ -1727,16 +1727,35 @@ async function completeDomainPurchase(domainData, models, transaction) {
             const tenant = await getTenantById(tenantId);
             const subscriptionPlan = tenant?.subscription_plan || 'free';
             
-            await DomainLookup.upsert({
+            console.log(`📝 Upserting domain_lookup record:`, {
               domain_name: domain_name,
               tenant_id: tenantId,
               online_store_id: finalOnlineStoreId,
               online_store_username: onlineStore.username,
-              subscription_plan: subscriptionPlan,
-              is_active: true
+              subscription_plan: subscriptionPlan
             });
             
-            console.log(`✅ Updated domain_lookup table: ${domain_name} → Store: ${onlineStore.username} (Tenant: ${tenantId})`);
+            try {
+              const lookupResult = await DomainLookup.upsert({
+                domain_name: domain_name,
+                tenant_id: tenantId,
+                online_store_id: finalOnlineStoreId,
+                online_store_username: onlineStore.username,
+                subscription_plan: subscriptionPlan,
+                is_active: true
+              }, {
+                returning: true
+              });
+              
+              console.log(`✅ Updated domain_lookup table: ${domain_name} → Store: ${onlineStore.username} (Tenant: ${tenantId})`);
+              console.log(`   Upsert result:`, JSON.stringify(lookupResult, null, 2));
+            } catch (lookupUpsertError) {
+              console.error(`❌ Failed to upsert domain_lookup:`, lookupUpsertError);
+              console.error(`   Error:`, lookupUpsertError.message);
+              console.error(`   Stack:`, lookupUpsertError.stack);
+              // Don't fail domain purchase if lookup update fails, but log it
+              // The domain will still work, just won't be in the lookup table
+            }
           }
 
           // Update online store custom_domain
@@ -1748,26 +1767,60 @@ async function completeDomainPurchase(domainData, models, transaction) {
 
           // Provision SSL certificate (automatic when online_store_id is provided)
           console.log(`🔒 Provisioning SSL certificate for ${domain_name}...`);
-          const sslService = require('../services/sslService');
-          const sslResult = await sslService.provisionSSL(domain_name, onlineStore.username);
+          console.log(`   SSL Provider: ${process.env.SSL_PROVIDER || 'letsencrypt'}`);
+          console.log(`   Certbot Email: ${process.env.CERTBOT_EMAIL || process.env.ADMIN_EMAIL || 'not set'}`);
+          console.log(`   Webroot Path: ${process.env.WEBROOT_PATH || '/var/www/html'}`);
+          console.log(`   Online Store Username: ${onlineStore.username}`);
           
-          if (sslResult && sslResult.success) {
-            await domainRecord.update({
-              ssl_enabled: true
-            }, { transaction });
-            console.log(`✅ SSL certificate provisioned successfully for ${domain_name}`);
-          } else {
-            const errorMsg = sslResult?.message || sslResult?.error || 'Unknown error';
-            console.error(`❌ SSL provisioning failed for ${domain_name}:`, errorMsg);
-            console.error(`   Full SSL result:`, JSON.stringify(sslResult, null, 2));
-            // DO NOT mark SSL as enabled if provisioning failed
-            throw new Error(`SSL provisioning failed: ${errorMsg}`);
+          try {
+            const sslService = require('../services/sslService');
+            const sslResult = await sslService.provisionSSL(domain_name, onlineStore.username);
+            
+            console.log(`📦 SSL Service Response:`, JSON.stringify(sslResult, null, 2));
+            
+            if (sslResult && sslResult.success) {
+              await domainRecord.update({
+                ssl_enabled: true
+              }, { transaction });
+              console.log(`✅ SSL certificate provisioned successfully for ${domain_name}`);
+              console.log(`   Certificate Path: ${sslResult.certificatePath || 'N/A'}`);
+              console.log(`   Key Path: ${sslResult.keyPath || 'N/A'}`);
+            } else {
+              const errorMsg = sslResult?.message || sslResult?.error || 'Unknown error';
+              console.error(`❌ SSL provisioning failed for ${domain_name}:`, errorMsg);
+              console.error(`   Full SSL result:`, JSON.stringify(sslResult, null, 2));
+              
+              // Create detailed error with SSL result for debugging
+              const sslError = new Error(`SSL provisioning failed: ${errorMsg}`);
+              sslError.sslResult = sslResult; // Attach full SSL result to error
+              sslError.sslDetails = {
+                provider: sslResult?.provider || process.env.SSL_PROVIDER || 'letsencrypt',
+                domain: domain_name,
+                onlineStoreUsername: onlineStore.username,
+                certbotEmail: process.env.CERTBOT_EMAIL || process.env.ADMIN_EMAIL,
+                webrootPath: process.env.WEBROOT_PATH || '/var/www/html',
+                instructions: sslResult?.instructions || []
+              };
+              
+              // DO NOT mark SSL as enabled if provisioning failed
+              throw sslError;
+            }
+          } catch (sslError) {
+            console.error(`❌ SSL provisioning exception for ${domain_name}:`, sslError.message);
+            console.error(`   Error stack:`, sslError.stack);
+            console.error(`   SSL Error details:`, sslError.sslResult || sslError.sslDetails || 'No details');
+            // Re-throw to ensure error is returned with full details
+            throw sslError;
           }
+        } else {
+          console.error(`⚠️  Online store not found for online_store_id: ${finalOnlineStoreId}`);
+          throw new Error(`Online store not found for online_store_id: ${finalOnlineStoreId}`);
         }
       } catch (lookupError) {
         console.error('Error updating domain lookup or SSL:', lookupError);
         console.error('   Error stack:', lookupError.stack);
-        // Re-throw error so it's returned immediately
+        console.error('   Error details:', lookupError.sslResult || lookupError.sslDetails || 'No additional details');
+        // Re-throw error so it's returned immediately with full details
         throw lookupError;
       }
     } else {
