@@ -1660,46 +1660,33 @@ async function completeDomainPurchase(domainData, models, transaction) {
           console.log(`🌐 Configuring DNS records for ${domain_name}...`);
           console.log(`📋 DNS Records to configure:`, JSON.stringify(dnsRecords, null, 2));
           
-          try {
-            const dnsResult = await namecheapService.setDNSHostRecords(domain_name, dnsRecords);
-            
-            console.log(`📦 Namecheap DNS API response:`, JSON.stringify(dnsResult, null, 2));
-            
-            if (dnsResult && dnsResult.success) {
-              // Save DNS records to database
-              await domainRecord.update({
-                dns_records: dnsRecords
-              }, { transaction });
-              console.log(`✅ DNS configured successfully for ${domain_name} and saved to database`);
-            } else {
-              const errorMsg = dnsResult?.message || dnsResult?.error || 'Unknown error';
-              console.error(`❌ DNS configuration failed for ${domain_name}:`, errorMsg);
-              console.error(`   Full DNS result:`, JSON.stringify(dnsResult, null, 2));
-              
-              // Still save DNS records to database even if Namecheap API failed
-              // This way we have a record of what should be configured
-              await domainRecord.update({
-                dns_records: dnsRecords
-              }, { transaction });
-              console.log(`⚠️  DNS records saved to database but Namecheap API call failed. Manual configuration may be needed.`);
-            }
-          } catch (dnsApiError) {
-            console.error(`❌ DNS API call error for ${domain_name}:`, dnsApiError.message);
-            console.error(`   Error stack:`, dnsApiError.stack);
-            
-            // Still save DNS records to database even if API call failed
+          const dnsResult = await namecheapService.setDNSHostRecords(domain_name, dnsRecords);
+          
+          console.log(`📦 Namecheap DNS API response:`, JSON.stringify(dnsResult, null, 2));
+          
+          if (dnsResult && dnsResult.success) {
+            // ONLY save DNS records to database if Namecheap API succeeded
             await domainRecord.update({
               dns_records: dnsRecords
             }, { transaction });
-            console.log(`⚠️  DNS records saved to database but API call failed. Manual configuration may be needed.`);
+            console.log(`✅ DNS configured successfully for ${domain_name} and saved to database`);
+          } else {
+            const errorMsg = dnsResult?.message || dnsResult?.error || 'Unknown error';
+            console.error(`❌ DNS configuration failed for ${domain_name}:`, errorMsg);
+            console.error(`   Full DNS result:`, JSON.stringify(dnsResult, null, 2));
+            // DO NOT save DNS records if API failed - database should reflect actual state
+            throw new Error(`DNS configuration failed: ${errorMsg}`);
           }
         } else {
           console.warn(`⚠️  No DNS records to configure. Set MYCROSHOP_SERVER_IP or MYCROSHOP_SERVER_HOST in .env`);
           console.warn(`   Current values: MYCROSHOP_SERVER_IP=${mycroshopServerIp}, MYCROSHOP_SERVER_HOST=${mycroshopServerHost}`);
+          throw new Error('DNS configuration skipped: MYCROSHOP_SERVER_IP and MYCROSHOP_SERVER_HOST not set in environment variables');
         }
       } catch (dnsError) {
         console.error(`❌ DNS configuration error for ${domain_name}:`, dnsError.message);
-        // Don't fail domain purchase if DNS fails - can be configured manually
+        console.error(`   Error stack:`, dnsError.stack);
+        // Re-throw error so it's returned immediately
+        throw dnsError;
       }
     } else {
       console.warn(`⚠️  DNS auto-configuration skipped: MYCROSHOP_SERVER_IP and MYCROSHOP_SERVER_HOST not set in .env`);
@@ -1753,27 +1740,29 @@ async function completeDomainPurchase(domainData, models, transaction) {
           
           console.log(`🔗 Linked domain ${domain_name} to online store: ${onlineStore.username}`);
 
-          // Provision SSL certificate (only when online_store_id is provided)
+          // Provision SSL certificate (automatic when online_store_id is provided)
           console.log(`🔒 Provisioning SSL certificate for ${domain_name}...`);
-          try {
-            const sslService = require('../services/sslService');
-            const sslResult = await sslService.provisionSSL(domain_name, onlineStore.username);
-            
-            if (sslResult.success) {
-              await domainRecord.update({
-                ssl_enabled: true
-              }, { transaction });
-              console.log(`✅ SSL certificate provisioned successfully for ${domain_name}`);
-            } else {
-              console.warn(`⚠️  SSL provisioning returned success=false: ${sslResult.message || 'Unknown error'}`);
-            }
-          } catch (sslError) {
-            console.error(`❌ SSL provisioning error for ${domain_name}:`, sslError.message);
-            // Don't fail domain purchase if SSL fails - can be retried later
+          const sslService = require('../services/sslService');
+          const sslResult = await sslService.provisionSSL(domain_name, onlineStore.username);
+          
+          if (sslResult && sslResult.success) {
+            await domainRecord.update({
+              ssl_enabled: true
+            }, { transaction });
+            console.log(`✅ SSL certificate provisioned successfully for ${domain_name}`);
+          } else {
+            const errorMsg = sslResult?.message || sslResult?.error || 'Unknown error';
+            console.error(`❌ SSL provisioning failed for ${domain_name}:`, errorMsg);
+            console.error(`   Full SSL result:`, JSON.stringify(sslResult, null, 2));
+            // DO NOT mark SSL as enabled if provisioning failed
+            throw new Error(`SSL provisioning failed: ${errorMsg}`);
           }
         }
       } catch (lookupError) {
-        console.error('Error updating domain lookup:', lookupError);
+        console.error('Error updating domain lookup or SSL:', lookupError);
+        console.error('   Error stack:', lookupError.stack);
+        // Re-throw error so it's returned immediately
+        throw lookupError;
       }
     } else {
       console.log(`ℹ️  No online_store_id provided. Domain ${domain_name} DNS configured but not linked to store. SSL skipped.`);
