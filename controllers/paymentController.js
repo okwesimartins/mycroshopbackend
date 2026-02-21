@@ -913,68 +913,114 @@ async function verifyPayment(req, res) {
         
         if (isDomainPurchase) {
           console.log(`🛒 Processing domain purchase for domain_id: ${metadata.domain_id}, domain: ${metadata.domain_name}`);
+          console.log(`📋 Full metadata:`, JSON.stringify(metadata, null, 2));
+          
           let domainPurchaseError = null;
+          let domainPurchaseResult = null;
+          
           try {
             const domainController = require('./domainController');
-            const domainResult = await domainController.completeDomainPurchase(
+            console.log(`📞 Calling completeDomainPurchase with:`, {
+              domain_id: metadata.domain_id,
+              domain_name: metadata.domain_name,
+              years: metadata.years,
+              hasRegistrantInfo: !!metadata.registrant_info
+            });
+            
+            domainPurchaseResult = await domainController.completeDomainPurchase(
               metadata,
               models,
               dbTransaction
             );
             
-            if (domainResult.success) {
-              domainPurchased = true;
-              console.log(`✅ Domain ${metadata.domain_name} purchased successfully after payment`);
-              // Add domain info to response
-              responseData.domain = {
-                id: metadata.domain_id,
-                domain_name: metadata.domain_name,
-                status: 'active',
-                orderId: domainResult.orderId,
-                transactionId: domainResult.transactionId,
-                sandboxMode: domainResult.sandboxMode || false,
-                note: domainResult.sandboxMode 
-                  ? 'Domain registered in sandbox mode. Order/Transaction IDs may be null.'
-                  : 'Domain registered successfully'
-              };
+            console.log(`📦 completeDomainPurchase returned:`, JSON.stringify(domainPurchaseResult, null, 2));
+            
+            if (domainPurchaseResult.success) {
+              // CRITICAL: Only mark as purchased if Namecheap actually returned order/transaction IDs
+              // OR if we're in sandbox mode (where IDs may be null but registration still succeeds)
+              const hasOrderId = !!domainPurchaseResult.orderId;
+              const hasTransactionId = !!domainPurchaseResult.transactionId;
+              const isSandbox = domainPurchaseResult.sandboxMode;
+              
+              if (hasOrderId && hasTransactionId) {
+                // Production mode - we have IDs
+                domainPurchased = true;
+                console.log(`✅ Domain ${metadata.domain_name} purchased successfully with OrderID: ${domainPurchaseResult.orderId}`);
+                responseData.domain = {
+                  id: metadata.domain_id,
+                  domain_name: metadata.domain_name,
+                  status: 'active',
+                  orderId: domainPurchaseResult.orderId,
+                  transactionId: domainPurchaseResult.transactionId,
+                  sandboxMode: false,
+                  note: 'Domain registered successfully'
+                };
+                responseData.domain_purchase_status = 'success';
+              } else if (isSandbox) {
+                // Sandbox mode - IDs may be null but registration succeeded
+                domainPurchased = true;
+                console.log(`✅ Domain ${metadata.domain_name} registered in sandbox mode (IDs may be null)`);
+                responseData.domain = {
+                  id: metadata.domain_id,
+                  domain_name: metadata.domain_name,
+                  status: 'active',
+                  orderId: domainPurchaseResult.orderId || null,
+                  transactionId: domainPurchaseResult.transactionId || null,
+                  sandboxMode: true,
+                  note: 'Domain registered in sandbox mode. Order/Transaction IDs may be null.'
+                };
+                responseData.domain_purchase_status = 'success';
+              } else {
+                // No IDs and not sandbox - this is an error
+                domainPurchaseError = 'Domain registration succeeded but Namecheap did not return OrderID or TransactionID';
+                console.error(`❌ Domain registration incomplete:`, {
+                  orderId: domainPurchaseResult.orderId,
+                  transactionId: domainPurchaseResult.transactionId,
+                  sandboxMode: isSandbox
+                });
+                responseData.domain_purchase_error = {
+                  message: domainPurchaseError,
+                  details: {
+                    orderId: domainPurchaseResult.orderId,
+                    transactionId: domainPurchaseResult.transactionId,
+                    sandboxMode: isSandbox,
+                    note: 'Namecheap registration may have failed silently'
+                  },
+                  domain_id: metadata.domain_id,
+                  domain_name: metadata.domain_name
+                };
+                responseData.domain_purchase_status = 'failed';
+              }
             } else {
-              domainPurchaseError = domainResult.error || domainResult.message || 'Domain purchase failed';
-              console.error(`❌ Domain purchase failed:`, domainResult);
-              // Add detailed error to response
+              // Domain purchase failed
+              domainPurchaseError = domainPurchaseResult.error || domainPurchaseResult.message || 'Domain purchase failed';
+              console.error(`❌ Domain purchase failed:`, domainPurchaseResult);
               responseData.domain_purchase_error = {
-                message: domainResult.error || 'Domain purchase failed',
-                details: domainResult.errorDetails || null,
+                message: domainPurchaseError,
+                details: domainPurchaseResult.errorDetails || null,
                 domain_id: metadata.domain_id,
-                domain_name: metadata.domain_name
+                domain_name: metadata.domain_name,
+                fullError: domainPurchaseResult
               };
               responseData.domain_purchase_status = 'failed';
             }
           } catch (domainError) {
             const errorMessage = domainError.message || 'Unknown error during domain purchase';
-            console.error('Error completing domain purchase after payment:', domainError);
-            console.error('Domain error details:', {
-              message: domainError.message,
-              stack: domainError.stack,
-              metadata: metadata
-            });
-            // Add error to response
+            console.error('❌ Exception during domain purchase:', domainError);
+            console.error('Domain error stack:', domainError.stack);
+            console.error('Full error:', JSON.stringify(domainError, Object.getOwnPropertyNames(domainError), 2));
+            
             responseData.domain_purchase_error = {
               message: errorMessage,
               details: process.env.NODE_ENV === 'development' ? {
                 stack: domainError.stack,
-                name: domainError.name
+                name: domainError.name,
+                code: domainError.code
               } : null,
               domain_id: metadata.domain_id,
               domain_name: metadata.domain_name
             };
             responseData.domain_purchase_status = 'failed';
-            // Don't fail payment verification if domain purchase fails
-            // The domain record will remain in 'pending' status and can be retried
-          }
-          
-          // Add status if domain purchase was attempted
-          if (domainPurchased) {
-            responseData.domain_purchase_status = 'success';
           }
         } else {
           console.log('ℹ️  Payment is not for a domain purchase. Metadata check:', {
@@ -982,8 +1028,15 @@ async function verifyPayment(req, res) {
             domain_id: metadata.domain_id,
             hasOrderId: !!metadata.order_id,
             hasInvoiceId: !!metadata.invoice_id,
-            allMetadataKeys: Object.keys(metadata)
+            allMetadataKeys: Object.keys(metadata),
+            fullMetadata: JSON.stringify(metadata, null, 2)
           });
+          
+          // If metadata is empty, this is a problem
+          if (Object.keys(metadata).length === 0) {
+            console.error('⚠️  WARNING: Metadata is empty! Domain purchase cannot be processed.');
+            responseData.metadata_warning = 'No metadata found in payment transaction. Domain purchase cannot be processed.';
+          }
         }
       }
 
@@ -1174,9 +1227,21 @@ async function verifyPayment(req, res) {
         }
       }
 
+      // For domain purchases, don't return success if domain purchase failed
+      // This ensures the user knows the domain wasn't registered
+      let finalSuccess = newStatus === 'success';
+      let finalMessage = verificationResult.message;
+      
+      if (responseData.domain_purchase_status === 'failed') {
+        finalSuccess = false;
+        finalMessage = `Payment verified but domain purchase failed: ${responseData.domain_purchase_error?.message || 'Unknown error'}`;
+      } else if (responseData.domain_purchase_status === 'success') {
+        finalMessage = 'Payment verified and domain registered successfully';
+      }
+
       return res.json({
-        success: newStatus === 'success',
-        message: verificationResult.message,
+        success: finalSuccess,
+        message: finalMessage,
         data: responseData
       });
     } catch (dbError) {

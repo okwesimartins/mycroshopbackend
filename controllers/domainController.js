@@ -1456,30 +1456,67 @@ async function completeDomainPurchase(domainData, models, transaction) {
     }
 
     // Register domain with Namecheap
-    const registrationResult = await namecheapService.registerDomain({
-      domain: domain_name,
-      years: years || 1,
+    console.log(`🌐 Calling Namecheap API to register domain: ${domain_name}`);
+    console.log(`📝 Registrant info:`, {
       firstName: registrant_info.firstName,
       lastName: registrant_info.lastName,
       email: registrant_info.email,
-      phone: registrant_info.phone,
-      address1: registrant_info.address1,
-      address2: registrant_info.address2,
-      city: registrant_info.city,
-      stateProvince: registrant_info.stateProvince,
-      postalCode: registrant_info.postalCode,
-      country: registrant_info.country,
-      organization: registrant_info.organization || ''
+      country: registrant_info.country
     });
+    
+    let registrationResult;
+    try {
+      registrationResult = await namecheapService.registerDomain({
+        domain: domain_name,
+        years: years || 1,
+        firstName: registrant_info.firstName,
+        lastName: registrant_info.lastName,
+        email: registrant_info.email,
+        phone: registrant_info.phone,
+        address1: registrant_info.address1,
+        address2: registrant_info.address2,
+        city: registrant_info.city,
+        stateProvince: registrant_info.stateProvince,
+        postalCode: registrant_info.postalCode,
+        country: registrant_info.country,
+        organization: registrant_info.organization || ''
+      });
+      
+      console.log(`📦 Namecheap registration response:`, JSON.stringify(registrationResult, null, 2));
+    } catch (namecheapError) {
+      console.error(`❌ Namecheap API error:`, namecheapError);
+      console.error(`   Error message:`, namecheapError.message);
+      console.error(`   Error stack:`, namecheapError.stack);
+      await domainRecord.update({
+        status: 'cancelled'
+      }, { transaction });
+      throw new Error(`Namecheap API error: ${namecheapError.message}`);
+    }
+
+    if (!registrationResult) {
+      await domainRecord.update({
+        status: 'cancelled'
+      }, { transaction });
+      throw new Error('Namecheap API returned no response');
+    }
 
     if (!registrationResult.success || !registrationResult.registered) {
       const errorMessage = registrationResult.message || 
                           `Domain registration failed. Success: ${registrationResult.success}, Registered: ${registrationResult.registered}`;
+      console.error(`❌ Domain registration failed:`, errorMessage);
+      console.error(`   Full response:`, JSON.stringify(registrationResult, null, 2));
       await domainRecord.update({
         status: 'cancelled'
       }, { transaction });
       throw new Error(errorMessage);
     }
+    
+    console.log(`✅ Namecheap registration successful:`, {
+      domain: registrationResult.domain,
+      orderId: registrationResult.orderId,
+      transactionId: registrationResult.transactionId,
+      chargedAmount: registrationResult.chargedAmount
+    });
 
     // Check if orderId and transactionId are null (common in sandbox mode)
     if (!registrationResult.orderId || !registrationResult.transactionId) {
@@ -1597,12 +1634,26 @@ async function completeDomainPurchase(domainData, models, transaction) {
       }
     }
 
+    // Reload domain record to get updated values
+    await domainRecord.reload({ transaction });
+    
+    console.log(`✅ Domain purchase completed successfully:`, {
+      domain_id: domainRecord.id,
+      domain_name: domainRecord.domain_name,
+      status: domainRecord.status,
+      orderId: domainRecord.namecheap_order_id,
+      transactionId: domainRecord.namecheap_transaction_id,
+      registration_date: domainRecord.registration_date
+    });
+    
     return { 
       success: true, 
       domain: domainRecord,
       orderId: registrationResult.orderId,
       transactionId: registrationResult.transactionId,
-      sandboxMode: !registrationResult.orderId || !registrationResult.transactionId
+      sandboxMode: !registrationResult.orderId || !registrationResult.transactionId,
+      message: 'Domain registered successfully with Namecheap',
+      registrationResult: registrationResult
     };
   } catch (error) {
     console.error('Error completing domain purchase:', error);
