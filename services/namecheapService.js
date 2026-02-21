@@ -1,5 +1,6 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const xml2js = require('xml2js');
 
 /**
  * Namecheap API Service
@@ -66,7 +67,6 @@ class NamecheapService {
       });
 
       // Parse XML response
-      const xml2js = require('xml2js');
       const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
       const result = await parser.parseStringPromise(response.data);
 
@@ -151,7 +151,30 @@ class NamecheapService {
 
       // Handle both single product and array of products
       const product = Array.isArray(pricing) ? pricing[0] : pricing;
-      const price = parseFloat(product.Price) || 0;
+      let price = parseFloat(product.Price) || 0;
+      
+      // Sandbox API returns 0 prices - use mock pricing for testing
+      if (this.useSandbox && price === 0) {
+        // Mock pricing for common TLDs (approximate real prices for testing)
+        const mockPrices = {
+          'com': 12.98,
+          'net': 14.98,
+          'org': 14.98,
+          'info': 2.99,
+          'biz': 15.98,
+          'co': 25.98,
+          'io': 39.99,
+          'xyz': 1.99,
+          'online': 29.99,
+          'store': 49.99,
+          'shop': 19.99
+        };
+        
+        price = mockPrices[tld.toLowerCase()] || 12.98; // Default to .com price
+        
+        console.log(`⚠️  Sandbox mode: Using mock pricing for ${tld} (real prices only available in production)`);
+      }
+      
       const totalPrice = price * years;
 
       return {
@@ -161,7 +184,11 @@ class NamecheapService {
         pricePerYear: price,
         totalPrice,
         currency: product.Currency || 'USD',
-        productId: product.ProductId
+        productId: product.ProductId,
+        isSandbox: this.useSandbox && price > 0 && parseFloat(product.Price) === 0, // Flag if using mock pricing
+        note: this.useSandbox && parseFloat(product.Price) === 0 
+          ? 'Sandbox mode: Mock pricing shown. Real prices available in production.' 
+          : null
       };
     } catch (error) {
       console.error('Error getting domain pricing:', error);
