@@ -714,9 +714,157 @@ async function verifyPayment(req, res) {
       }
 
       // Check if transaction has already been processed successfully
+      // BUT still check if domain purchase needs to be completed
       if (currentTransaction.status === 'success') {
-        await dbTransaction.rollback();
         console.log('Transaction already verified:', currentTransaction.transaction_reference);
+        
+        // Extract metadata to check if domain purchase needs to be completed
+        let metadata = {};
+        try {
+          const gatewayResponse = currentTransaction.gateway_response || {};
+          if (gatewayResponse.metadata) {
+            metadata = typeof gatewayResponse.metadata === 'string' 
+              ? JSON.parse(gatewayResponse.metadata) 
+              : gatewayResponse.metadata;
+          } else if (gatewayResponse.data?.metadata) {
+            metadata = typeof gatewayResponse.data.metadata === 'string'
+              ? JSON.parse(gatewayResponse.data.metadata)
+              : gatewayResponse.data.metadata;
+          }
+        } catch (parseError) {
+          console.warn('Could not parse metadata for already-verified transaction:', parseError);
+        }
+        
+        // Check if this is a domain purchase that might not have been completed
+        const isDomainPurchase = metadata.purchase_type === 'domain' && metadata.domain_id;
+        
+        if (isDomainPurchase) {
+          console.log(`🔄 Transaction already verified but checking domain purchase status for domain_id: ${metadata.domain_id}`);
+          
+          // Check domain status
+          try {
+            const domainRecord = await models.Domain.findByPk(metadata.domain_id, { transaction: dbTransaction });
+            if (domainRecord) {
+              console.log(`📊 Domain status check:`, {
+                domain_id: domainRecord.id,
+                domain_name: domainRecord.domain_name,
+                status: domainRecord.status,
+                has_dns_records: !!domainRecord.dns_records,
+                ssl_enabled: domainRecord.ssl_enabled
+              });
+              
+              // If domain is still pending or DNS/SSL not configured, try to complete it
+              if (domainRecord.status === 'pending' || !domainRecord.dns_records || !domainRecord.ssl_enabled) {
+                console.log(`⚠️  Domain purchase incomplete. Attempting to complete...`);
+                
+                try {
+                  const domainController = require('./domainController');
+                  const domainPurchaseResult = await domainController.completeDomainPurchase(
+                    metadata,
+                    models,
+                    dbTransaction
+                  );
+                  
+                  await dbTransaction.commit();
+                  
+                  return res.json({
+                    success: true,
+                    message: 'Transaction already verified. Domain purchase completed.',
+                    data: {
+                      transaction: {
+                        id: currentTransaction.id,
+                        reference: currentTransaction.transaction_reference,
+                        status: currentTransaction.status,
+                        amount: currentTransaction.amount,
+                        platform_fee: currentTransaction.platform_fee,
+                        merchant_amount: currentTransaction.merchant_amount,
+                        paid_at: currentTransaction.paid_at
+                      },
+                      domain: domainPurchaseResult.domain ? {
+                        id: domainPurchaseResult.domain.id,
+                        domain_name: domainPurchaseResult.domain.domain_name,
+                        status: domainPurchaseResult.domain.status,
+                        dns_records: domainPurchaseResult.domain.dns_records,
+                        ssl_enabled: domainPurchaseResult.domain.ssl_enabled,
+                        orderId: domainPurchaseResult.orderId,
+                        transactionId: domainPurchaseResult.transactionId
+                      } : null,
+                      domain_purchase_status: domainPurchaseResult.success ? 'success' : 'failed',
+                      domain_purchase_logs: {
+                        message: domainPurchaseResult.message || 'Domain purchase completed',
+                        orderId: domainPurchaseResult.orderId,
+                        transactionId: domainPurchaseResult.transactionId,
+                        sandboxMode: domainPurchaseResult.sandboxMode
+                      },
+                      already_verified: true
+                    }
+                  });
+                } catch (domainError) {
+                  await dbTransaction.rollback();
+                  console.error('❌ Error completing domain purchase for already-verified transaction:', domainError);
+                  
+                  return res.json({
+                    success: true,
+                    message: 'Transaction already verified but domain purchase failed',
+                    data: {
+                      transaction: {
+                        id: currentTransaction.id,
+                        reference: currentTransaction.transaction_reference,
+                        status: currentTransaction.status,
+                        amount: currentTransaction.amount,
+                        platform_fee: currentTransaction.platform_fee,
+                        merchant_amount: currentTransaction.merchant_amount,
+                        paid_at: currentTransaction.paid_at
+                      },
+                      domain_purchase_error: {
+                        message: domainError.message || 'Unknown error',
+                        details: process.env.NODE_ENV === 'development' ? {
+                          stack: domainError.stack,
+                          name: domainError.name
+                        } : null,
+                        domain_id: metadata.domain_id,
+                        domain_name: metadata.domain_name
+                      },
+                      domain_purchase_status: 'failed',
+                      already_verified: true
+                    }
+                  });
+                }
+              } else {
+                // Domain is already complete
+                await dbTransaction.rollback();
+                return res.json({
+                  success: true,
+                  message: 'Transaction already verified. Domain purchase already completed.',
+                  data: {
+                    transaction: {
+                      id: currentTransaction.id,
+                      reference: currentTransaction.transaction_reference,
+                      status: currentTransaction.status,
+                      amount: currentTransaction.amount,
+                      platform_fee: currentTransaction.platform_fee,
+                      merchant_amount: currentTransaction.merchant_amount,
+                      paid_at: currentTransaction.paid_at
+                    },
+                    domain: {
+                      id: domainRecord.id,
+                      domain_name: domainRecord.domain_name,
+                      status: domainRecord.status,
+                      dns_records: domainRecord.dns_records,
+                      ssl_enabled: domainRecord.ssl_enabled
+                    },
+                    already_verified: true
+                  }
+                });
+              }
+            }
+          } catch (domainCheckError) {
+            console.error('Error checking domain status:', domainCheckError);
+          }
+        }
+        
+        // Not a domain purchase or domain already complete
+        await dbTransaction.rollback();
         return res.json({
           success: true,
           message: 'Transaction already verified',
@@ -991,6 +1139,8 @@ async function verifyPayment(req, res) {
               hasRegistrantInfo: !!metadata.registrant_info
             });
             
+            // completeDomainPurchase now throws errors instead of returning { success: false }
+            // This ensures DNS/SSL errors are caught and returned immediately
             domainPurchaseResult = await domainController.completeDomainPurchase(
               metadata,
               models,
@@ -999,7 +1149,8 @@ async function verifyPayment(req, res) {
             
             console.log(`📦 completeDomainPurchase returned:`, JSON.stringify(domainPurchaseResult, null, 2));
             
-            if (domainPurchaseResult.success) {
+            // If we reach here, domain purchase succeeded (no exception thrown)
+            if (domainPurchaseResult && domainPurchaseResult.success) {
               // CRITICAL: Only mark as purchased if Namecheap actually returned order/transaction IDs
               // OR if we're in sandbox mode (where IDs may be null but registration still succeeds)
               const hasOrderId = !!domainPurchaseResult.orderId;
@@ -1017,9 +1168,16 @@ async function verifyPayment(req, res) {
                   orderId: domainPurchaseResult.orderId,
                   transactionId: domainPurchaseResult.transactionId,
                   sandboxMode: false,
-                  note: 'Domain registered successfully'
+                  note: 'Domain registered successfully',
+                  dns_records: domainPurchaseResult.domain?.dns_records || null,
+                  ssl_enabled: domainPurchaseResult.domain?.ssl_enabled || false
                 };
                 responseData.domain_purchase_status = 'success';
+                responseData.domain_purchase_logs = domainLogs.concat([
+                  '✅ Domain registered successfully',
+                  `DNS records: ${domainPurchaseResult.domain?.dns_records ? 'configured' : 'not configured'}`,
+                  `SSL enabled: ${domainPurchaseResult.domain?.ssl_enabled ? 'yes' : 'no'}`
+                ]);
               } else if (isSandbox) {
                 // Sandbox mode - IDs may be null but registration succeeded
                 domainPurchased = true;
@@ -1031,9 +1189,16 @@ async function verifyPayment(req, res) {
                   orderId: domainPurchaseResult.orderId || null,
                   transactionId: domainPurchaseResult.transactionId || null,
                   sandboxMode: true,
-                  note: 'Domain registered in sandbox mode. Order/Transaction IDs may be null.'
+                  note: 'Domain registered in sandbox mode. Order/Transaction IDs may be null.',
+                  dns_records: domainPurchaseResult.domain?.dns_records || null,
+                  ssl_enabled: domainPurchaseResult.domain?.ssl_enabled || false
                 };
                 responseData.domain_purchase_status = 'success';
+                responseData.domain_purchase_logs = domainLogs.concat([
+                  '✅ Domain registered in sandbox mode',
+                  `DNS records: ${domainPurchaseResult.domain?.dns_records ? 'configured' : 'not configured'}`,
+                  `SSL enabled: ${domainPurchaseResult.domain?.ssl_enabled ? 'yes' : 'no'}`
+                ]);
               } else {
                 // No IDs and not sandbox - this is an error
                 domainPurchaseError = 'Domain registration succeeded but Namecheap did not return OrderID or TransactionID';
@@ -1042,18 +1207,24 @@ async function verifyPayment(req, res) {
                   transactionId: domainPurchaseResult.transactionId,
                   sandboxMode: isSandbox
                 });
-                responseData.domain_purchase_error = {
-                  message: domainPurchaseError,
-                  details: {
-                    orderId: domainPurchaseResult.orderId,
-                    transactionId: domainPurchaseResult.transactionId,
-                    sandboxMode: isSandbox,
-                    note: 'Namecheap registration may have failed silently'
-                  },
-                  domain_id: metadata.domain_id,
-                  domain_name: metadata.domain_name
-                };
-                responseData.domain_purchase_status = 'failed';
+              responseData.domain_purchase_error = {
+                message: domainPurchaseError,
+                details: {
+                  orderId: domainPurchaseResult.orderId,
+                  transactionId: domainPurchaseResult.transactionId,
+                  sandboxMode: isSandbox,
+                  note: 'Namecheap registration may have failed silently',
+                  fullResult: domainPurchaseResult
+                },
+                domain_id: metadata.domain_id,
+                domain_name: metadata.domain_name,
+                logs: domainLogs.concat([
+                  `❌ Error: ${domainPurchaseError}`,
+                  `Order ID: ${domainPurchaseResult.orderId || 'null'}`,
+                  `Transaction ID: ${domainPurchaseResult.transactionId || 'null'}`
+                ])
+              };
+              responseData.domain_purchase_status = 'failed';
               }
             } else {
               // Domain purchase failed
@@ -1064,7 +1235,11 @@ async function verifyPayment(req, res) {
                 details: domainPurchaseResult.errorDetails || null,
                 domain_id: metadata.domain_id,
                 domain_name: metadata.domain_name,
-                fullError: domainPurchaseResult
+                fullError: domainPurchaseResult,
+                logs: domainLogs.concat([
+                  `❌ Domain purchase failed: ${domainPurchaseError}`,
+                  `Error details: ${JSON.stringify(domainPurchaseResult.errorDetails || {})}`
+                ])
               };
               responseData.domain_purchase_status = 'failed';
             }

@@ -1689,7 +1689,9 @@ async function completeDomainPurchase(domainData, models, transaction) {
         throw dnsError;
       }
     } else {
-      console.warn(`⚠️  DNS auto-configuration skipped: MYCROSHOP_SERVER_IP and MYCROSHOP_SERVER_HOST not set in .env`);
+      const errorMsg = 'DNS auto-configuration skipped: MYCROSHOP_SERVER_IP and MYCROSHOP_SERVER_HOST not set in environment variables';
+      console.error(`❌ ${errorMsg}`);
+      throw new Error(errorMsg);
     }
 
     // Update domain lookup table and configure SSL (only if online_store_id is provided)
@@ -1777,8 +1779,20 @@ async function completeDomainPurchase(domainData, models, transaction) {
       status: domainRecord.status,
       orderId: domainRecord.namecheap_order_id,
       transactionId: domainRecord.namecheap_transaction_id,
-      registration_date: domainRecord.registration_date
+      registration_date: domainRecord.registration_date,
+      dns_records: domainRecord.dns_records ? 'configured' : 'not configured',
+      ssl_enabled: domainRecord.ssl_enabled
     });
+    
+    // Build detailed logs for response
+    const logs = [
+      `✅ Domain ${domain_name} registered successfully with Namecheap`,
+      `Order ID: ${registrationResult.orderId || 'null (sandbox mode)'}`,
+      `Transaction ID: ${registrationResult.transactionId || 'null (sandbox mode)'}`,
+      `DNS records: ${domainRecord.dns_records ? 'configured' : 'not configured'}`,
+      `SSL enabled: ${domainRecord.ssl_enabled ? 'yes' : 'no'}`,
+      `Online store linked: ${domainRecord.online_store_id ? 'yes' : 'no'}`
+    ];
     
     return { 
       success: true, 
@@ -1787,19 +1801,15 @@ async function completeDomainPurchase(domainData, models, transaction) {
       transactionId: registrationResult.transactionId,
       sandboxMode: !registrationResult.orderId || !registrationResult.transactionId,
       message: 'Domain registered successfully with Namecheap',
-      registrationResult: registrationResult
+      registrationResult: registrationResult,
+      logs: logs
     };
   } catch (error) {
     console.error('Error completing domain purchase:', error);
-    // Return error details instead of just throwing
-    return {
-      success: false,
-      error: error.message,
-      errorDetails: process.env.NODE_ENV === 'development' ? {
-        stack: error.stack,
-        name: error.name
-      } : undefined
-    };
+    console.error('   Error stack:', error.stack);
+    // Re-throw error so it propagates to payment verification
+    // This ensures DNS/SSL errors are returned immediately and not silently ignored
+    throw error;
   }
 }
 
