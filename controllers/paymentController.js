@@ -383,12 +383,12 @@ async function initializePayment(req, res) {
 
     // Get default payment gateway
     const gatewayWhere = {
-      is_active: true,
-      is_default: true
+        is_active: true,
+        is_default: true
     };
     if (isFreePlan) {
       gatewayWhere.tenant_id = parsedTenantId;
-    }
+      }
 
     const gateway = await models.PaymentGateway.findOne({
       where: gatewayWhere
@@ -830,11 +830,56 @@ async function verifyPayment(req, res) {
         );
       }
 
+      // Handle domain purchase if payment is for a domain
+      // Check metadata for domain purchase information
+      let domainPurchased = false;
+      if (newStatus === 'success') {
+        // Get metadata from transaction's gateway_response or from transaction metadata field
+        let metadata = {};
+        try {
+          const gatewayResponse = currentTransaction.gateway_response || {};
+          if (gatewayResponse.metadata) {
+            metadata = typeof gatewayResponse.metadata === 'string' 
+              ? JSON.parse(gatewayResponse.metadata) 
+              : gatewayResponse.metadata;
+          } else if (currentTransaction.metadata) {
+            metadata = typeof currentTransaction.metadata === 'string'
+              ? JSON.parse(currentTransaction.metadata)
+              : currentTransaction.metadata;
+          }
+        } catch (parseError) {
+          console.warn('Could not parse metadata:', parseError);
+        }
+
+        // Check if this is a domain purchase
+        const isDomainPurchase = metadata.purchase_type === 'domain' && metadata.domain_id;
+        
+        if (isDomainPurchase) {
+          try {
+            const domainController = require('./domainController');
+            const domainResult = await domainController.completeDomainPurchase(
+              metadata,
+              models,
+              dbTransaction
+            );
+            
+            if (domainResult.success) {
+              domainPurchased = true;
+              console.log(`✅ Domain ${metadata.domain_name} purchased successfully after payment`);
+            }
+          } catch (domainError) {
+            console.error('Error completing domain purchase after payment:', domainError);
+            // Don't fail payment verification if domain purchase fails
+            // The domain record will remain in 'pending' status and can be retried
+          }
+        }
+      }
+
       // Handle booking creation if payment is for a service booking
       // Check metadata for booking information (from transaction gateway_response or metadata field)
       let bookingCreated = false;
-      if (newStatus === 'success') {
-        // Get metadata from transaction's gateway_response or from transaction metadata field
+      if (newStatus === 'success' && !domainPurchased) {
+        // Get metadata again (already parsed above, but re-parse if needed)
         let metadata = {};
         try {
           const gatewayResponse = currentTransaction.gateway_response || {};
@@ -995,14 +1040,14 @@ async function verifyPayment(req, res) {
       
       // Return success response
       const responseData = {
-        transaction: {
-          id: currentTransaction.id,
-          reference: currentTransaction.transaction_reference,
-          status: newStatus,
-          amount: currentTransaction.amount,
-          platform_fee: currentTransaction.platform_fee,
-          merchant_amount: currentTransaction.merchant_amount
-        }
+          transaction: {
+            id: currentTransaction.id,
+            reference: currentTransaction.transaction_reference,
+            status: newStatus,
+            amount: currentTransaction.amount,
+            platform_fee: currentTransaction.platform_fee,
+            merchant_amount: currentTransaction.merchant_amount
+          }
       };
 
       // Include booking info if booking was created
@@ -1359,8 +1404,58 @@ async function handlePaymentWebhook(req, res) {
         });
       }
 
+      // Handle domain purchase if payment is for a domain
+      // Check metadata for domain purchase information
+      let domainPurchased = false;
+      if (transaction.status === 'success') {
+        // Get metadata from webhook data
+        let metadata = {};
+        try {
+          if (data.metadata) {
+            metadata = typeof data.metadata === 'string' 
+              ? JSON.parse(data.metadata) 
+              : data.metadata;
+          }
+        } catch (parseError) {
+          console.warn('Could not parse metadata from webhook:', parseError);
+        }
+
+        // Check if this is a domain purchase
+        const isDomainPurchase = metadata.purchase_type === 'domain' && metadata.domain_id;
+        
+        if (isDomainPurchase) {
+          try {
+            const domainController = require('./domainController');
+            const dbTransaction = await sequelize.transaction();
+            
+            try {
+              const domainResult = await domainController.completeDomainPurchase(
+                metadata,
+                models,
+                dbTransaction
+              );
+              
+              if (domainResult.success) {
+                await dbTransaction.commit();
+                domainPurchased = true;
+                console.log(`✅ Domain ${metadata.domain_name} purchased successfully via webhook`);
+              } else {
+                await dbTransaction.rollback();
+              }
+            } catch (domainError) {
+              await dbTransaction.rollback();
+              console.error('Error completing domain purchase from webhook:', domainError);
+              // Don't fail webhook processing if domain purchase fails
+              // The domain record will remain in 'pending' status and can be retried
+            }
+          } catch (domainError) {
+            console.error('Error completing domain purchase from webhook:', domainError);
+          }
+        }
+      }
+
       // Update order status if payment successful (only if not already paid)
-      if (transaction.order_id) {
+      if (transaction.order_id && !domainPurchased) {
         const orderWhere = { id: transaction.order_id };
         if (isFreePlan && transaction.tenant_id) {
           orderWhere.tenant_id = transaction.tenant_id;
@@ -1715,6 +1810,8 @@ module.exports = {
   initializePayment,
   verifyPayment,
   handlePaymentWebhook,
-  getWebhookUrl
+  getWebhookUrl,
+  initializePaystackPayment,
+  initializeFlutterwavePayment
 };
 

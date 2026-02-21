@@ -16,8 +16,12 @@ router.get('/check', domainController.checkDomainAvailability);
 // Get domain pricing
 router.get('/pricing', domainController.getDomainPricing);
 
-// Purchase/Register domain
-router.post('/purchase', domainController.purchaseDomain);
+// Checkout - Initialize domain purchase with payment
+router.post('/checkout', domainController.checkoutDomain);
+
+// Purchase/Register domain (DEPRECATED - Use /checkout instead)
+// This endpoint returns 410 Gone status - kept for backward compatibility
+// router.post('/purchase', domainController.purchaseDomain);
 
 // Get all domains for current tenant
 router.get('/', domainController.getAllDomains);

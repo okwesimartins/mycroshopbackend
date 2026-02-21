@@ -1,5 +1,45 @@
 const namecheapService = require('../services/namecheapService');
 const sslService = require('../services/sslService');
+const paymentController = require('./paymentController');
+const axios = require('axios');
+
+/**
+ * Get USD to NGN exchange rate
+ * Uses a free API to get current exchange rate
+ */
+async function getUSDToNGNExchangeRate() {
+  try {
+    // Try to get exchange rate from environment variable first (for stability)
+    const envRate = process.env.USD_TO_NGN_RATE;
+    if (envRate) {
+      const rate = parseFloat(envRate);
+      if (!isNaN(rate) && rate > 0) {
+        console.log(`📊 Using exchange rate from .env: ${rate}`);
+        return rate;
+      }
+    }
+    
+    // Fallback to API (you can use any exchange rate API)
+    // Using exchangerate-api.com (free tier: 1,500 requests/month)
+    const response = await axios.get('https://api.exchangerate-api.com/v4/latest/USD', {
+      timeout: 5000
+    });
+    
+    const rate = response.data.rates.NGN;
+    if (!rate || isNaN(rate) || rate <= 0) {
+      throw new Error('Invalid exchange rate received');
+    }
+    
+    console.log(`📊 Fetched exchange rate from API: 1 USD = ₦${rate}`);
+    return rate;
+  } catch (error) {
+    console.error('Error fetching exchange rate:', error.message);
+    // Fallback to a default rate if API fails
+    const fallbackRate = 1500; // Default: 1 USD = ₦1500
+    console.warn(`⚠️  Using fallback exchange rate: ${fallbackRate}`);
+    return fallbackRate;
+  }
+}
 
 /**
  * Check domain availability
@@ -64,10 +104,336 @@ async function getDomainPricing(req, res) {
 }
 
 /**
- * Purchase/Register a domain
+ * Checkout - Initialize domain purchase with payment
+ * POST /api/v1/domains/checkout
+ * 
+ * Flow: User initiates checkout → Payment processed → Domain purchased from Namecheap
+ */
+async function checkoutDomain(req, res) {
+  const transaction = await req.db.transaction();
+  
+  try {
+    const {
+      domain,
+      years = 1,
+      online_store_id,
+      firstName,
+      lastName,
+      email,
+      phone,
+      address1,
+      address2,
+      city,
+      stateProvince,
+      postalCode,
+      country = 'US',
+      phoneExt = '',
+      organization = '',
+      jobTitle = '',
+      callback_url
+    } = req.body;
+
+    // Validate required fields
+    if (!domain || !firstName || !lastName || !email || !phone || !address1 || !city || !stateProvince || !postalCode) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: domain, firstName, lastName, email, phone, address1, city, stateProvince, postalCode'
+      });
+    }
+
+    // Get tenant info
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      await transaction.rollback();
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    // Check if domain is already purchased by this tenant
+    const existingDomain = await req.db.models.Domain.findOne({
+      where: {
+        domain_name: domain,
+        ...(req.user?.tenant?.subscription_plan === 'free' ? { tenant_id: tenantId } : {})
+      },
+      transaction
+    });
+
+    if (existingDomain) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Domain already purchased'
+      });
+    }
+
+    // Check domain availability first
+    const availability = await namecheapService.checkDomainAvailability(domain);
+    if (!availability.available) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Domain is not available for purchase',
+        data: availability
+      });
+    }
+
+    // Get pricing from Namecheap (always returns in USD)
+    const pricing = await namecheapService.getDomainPricing(domain, years);
+    
+    // Get tenant country to determine billing currency
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    const tenantCountry = tenant?.country || 'Nigeria';
+    
+    // Determine billing currency based on tenant country
+    const isNigeria = tenantCountry.toLowerCase() === 'nigeria' || tenantCountry.toLowerCase() === 'ng';
+    const billingCurrency = isNigeria ? 'NGN' : 'USD';
+    
+    // Convert price based on currency
+    let finalPrice;
+    let finalCurrency;
+    let exchangeRate = null;
+    const bufferAmount = isNigeria ? 2000 : 0; // ₦2000 buffer for Nigeria only
+    
+    if (isNigeria) {
+      // For Nigeria: Convert USD to NGN + add ₦2000 buffer
+      exchangeRate = await getUSDToNGNExchangeRate();
+      const convertedPrice = pricing.totalPrice * exchangeRate;
+      finalPrice = convertedPrice + bufferAmount;
+      finalCurrency = 'NGN';
+      
+      console.log(`💰 Currency conversion for Nigeria: $${pricing.totalPrice} USD × ${exchangeRate} = ₦${convertedPrice} + ₦${bufferAmount} buffer = ₦${finalPrice}`);
+    } else {
+      // For other countries: Use USD as-is (what Namecheap returns)
+      finalPrice = pricing.totalPrice;
+      finalCurrency = 'USD';
+      
+      console.log(`💰 Using USD for ${tenantCountry}: $${finalPrice}`);
+    }
+
+    // Create pending domain record (will be activated after payment)
+    const domainRecord = await req.db.models.Domain.create({
+      tenant_id: req.user?.tenant?.subscription_plan === 'free' ? tenantId : null,
+      domain_name: domain,
+      online_store_id: online_store_id || null,
+      status: 'pending', // Pending until payment is verified
+      registration_date: null,
+      expiration_date: null,
+      auto_renew: true,
+      namecheap_order_id: null,
+      namecheap_transaction_id: null,
+      price: pricing.totalPrice,
+      currency: pricing.currency,
+      years: years,
+      registrant_info: {
+        firstName,
+        lastName,
+        email,
+        phone,
+        address1,
+        address2,
+        city,
+        stateProvince,
+        postalCode,
+        country,
+        organization
+      }
+    }, { transaction });
+
+    // Prepare payment metadata for domain purchase
+    const paymentMetadata = {
+      domain_id: domainRecord.id,
+      domain_name: domain,
+      years: years,
+      online_store_id: online_store_id || null,
+      purchase_type: 'domain',
+      registrant_info: {
+        firstName,
+        lastName,
+        email,
+        phone,
+        address1,
+        address2,
+        city,
+        stateProvince,
+        postalCode,
+        country,
+        organization
+      }
+    };
+
+    // Commit domain record first (before payment initialization)
+    await transaction.commit();
+
+    // Initialize payment using MycroShop's Paystack account (from .env)
+    // Domain purchases are processed by MycroShop admin, not tenant-specific gateways
+    try {
+      // Get MycroShop's Paystack keys from environment variables
+      const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+      const paystackPublicKey = process.env.PAYSTACK_PUBLIC_KEY;
+      const paystackTestMode = process.env.PAYSTACK_TEST_MODE === 'true' || process.env.NODE_ENV !== 'production';
+
+      if (!paystackSecretKey || !paystackPublicKey) {
+        // Delete domain record if Paystack not configured
+        await domainRecord.destroy();
+        return res.status(500).json({
+          success: false,
+          message: 'Payment gateway not configured. Please contact support.'
+        });
+      }
+
+      // For domain purchases, MycroShop collects full amount (no platform fee split)
+      // The platform fee is already included in the markup/buffer
+      const platformFee = 0.00; // No additional fee - MycroShop keeps the markup
+      const merchantAmount = parseFloat(finalPrice);
+
+      // Generate transaction reference
+      const crypto = require('crypto');
+      const transactionReference = `DOMAIN-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+
+      // Create payment transaction record
+      // Note: tenant_id is set to track which tenant purchased, but payment goes to MycroShop
+      const paymentTransaction = await req.db.models.PaymentTransaction.create({
+        tenant_id: req.user?.tenant?.subscription_plan === 'free' ? tenantId : null,
+        transaction_reference: transactionReference,
+        gateway_name: 'paystack',
+        amount: parseFloat(finalPrice),
+        currency: finalCurrency,
+        platform_fee: platformFee,
+        merchant_amount: merchantAmount,
+        customer_email: email,
+        customer_name: `${firstName} ${lastName}`,
+        status: 'pending'
+      });
+
+      // Use MycroShop's Paystack secret key directly (from .env)
+      const secretKey = paystackSecretKey;
+      
+      // Build final callback URL
+      const defaultCallbackUrl = callback_url 
+        || process.env.FRONTEND_URL 
+        || process.env.BASE_URL 
+        || 'https://backend.mycroshop.com';
+      const finalCallbackUrl = callback_url 
+        ? callback_url 
+        : (defaultCallbackUrl.includes('/payment/callback') 
+            ? defaultCallbackUrl 
+            : `${defaultCallbackUrl}/payment/callback`);
+
+      // Import payment functions from paymentController
+      const paymentController = require('./paymentController');
+      
+      // Convert amount to smallest currency unit (kobo for NGN, cents for USD)
+      const amountInSmallestUnit = finalCurrency === 'NGN' 
+        ? parseFloat(finalPrice) * 100  // Paystack uses kobo for NGN
+        : parseFloat(finalPrice) * 100; // Paystack uses cents for USD
+      
+      // Initialize payment with MycroShop's Paystack account
+      const paymentData = await paymentController.initializePaystackPayment({
+        amount: amountInSmallestUnit,
+        email,
+        reference: transactionReference,
+        callback_url: finalCallbackUrl,
+        metadata: paymentMetadata
+      }, secretKey, paystackTestMode);
+
+      // Update transaction with gateway response
+      await paymentTransaction.update({
+        gateway_transaction_id: paymentData.gateway_transaction_id || paymentData.reference,
+        gateway_response: paymentData
+      });
+
+      paymentResponse = {
+        success: true,
+        data: {
+          transaction_reference: transactionReference,
+          authorization_url: paymentData.authorization_url,
+          access_code: paymentData.access_code,
+          gateway: 'paystack',
+          amount: parseFloat(finalPrice),
+          currency: finalCurrency,
+          platform_fee: platformFee,
+          merchant_amount: merchantAmount,
+          original_price_usd: pricing.totalPrice,
+          exchange_rate_applied: exchangeRate,
+          buffer_added: bufferAmount,
+          note: 'Payment processed by MycroShop. Domain will be purchased after successful payment.'
+        }
+      };
+    } catch (paymentError) {
+      // Delete domain record if payment initialization fails
+      await domainRecord.destroy();
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to initialize payment',
+        error: paymentError.message
+      });
+    }
+
+    await transaction.commit();
+
+    res.json({
+      success: true,
+      message: 'Domain checkout initialized. Please complete payment to purchase domain.',
+      data: {
+        domain_id: domainRecord.id,
+        domain: domain,
+        pricing: {
+          pricePerYear: pricing.pricePerYear,
+          totalPrice: pricing.totalPrice,
+          currency: pricing.currency, // USD from Namecheap
+          years: years,
+          billingCurrency: finalCurrency,
+          billingAmount: finalPrice,
+          exchangeRate: exchangeRate,
+          bufferAdded: bufferAmount
+        },
+        payment: {
+          transaction_reference: paymentResponse.data.transaction_reference,
+          authorization_url: paymentResponse.data.authorization_url,
+          access_code: paymentResponse.data.access_code,
+          amount: paymentResponse.data.amount,
+          currency: paymentResponse.data.currency
+        },
+        note: 'After payment is successful, the domain will be automatically purchased and registered.'
+      }
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('Error initializing domain checkout:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initialize domain checkout',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
+/**
+ * Purchase/Register a domain (LEGACY - DEPRECATED)
  * POST /api/v1/domains/purchase
+ * 
+ * ⚠️  DEPRECATED: This endpoint is no longer recommended.
+ * Use /api/v1/domains/checkout instead, which requires payment first.
+ * 
+ * This endpoint is kept for backward compatibility but will be removed in future versions.
+ * It directly purchases from Namecheap without payment verification.
  */
 async function purchaseDomain(req, res) {
+  // ⚠️  DEPRECATED ENDPOINT - Redirect to checkout
+  return res.status(410).json({
+    success: false,
+    message: 'This endpoint is deprecated. Please use POST /api/v1/domains/checkout instead.',
+    deprecated: true,
+    new_endpoint: '/api/v1/domains/checkout',
+    reason: 'Direct domain purchase without payment verification is no longer supported. Use checkout flow to ensure payment is collected before purchasing from Namecheap.'
+  });
+  
+  /* LEGACY CODE - KEPT FOR REFERENCE (DO NOT USE)
+  
   const transaction = await req.db.transaction();
   
   try {
@@ -352,6 +718,7 @@ async function purchaseDomain(req, res) {
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
+  */
 }
 
 /**
@@ -997,10 +1364,184 @@ async function checkSSLStatus(req, res) {
   }
 }
 
+/**
+ * Complete domain purchase after payment verification
+ * This is called automatically by payment webhook after successful payment
+ * @param {Object} domainData - Domain purchase data from payment metadata
+ * @param {Object} models - Sequelize models
+ * @param {Object} transaction - Database transaction
+ */
+async function completeDomainPurchase(domainData, models, transaction) {
+  try {
+    const {
+      domain_id,
+      domain_name,
+      years,
+      online_store_id,
+      registrant_info
+    } = domainData;
+
+    // Find pending domain record
+    const domainRecord = await models.Domain.findByPk(domain_id, { transaction });
+    if (!domainRecord) {
+      throw new Error(`Domain record not found: ${domain_id}`);
+    }
+
+    if (domainRecord.status !== 'pending') {
+      console.log(`Domain ${domain_name} already processed. Status: ${domainRecord.status}`);
+      return { success: true, alreadyProcessed: true, domain: domainRecord };
+    }
+
+    // Check domain availability
+    const availability = await namecheapService.checkDomainAvailability(domain_name);
+    if (!availability.available) {
+      await domainRecord.update({
+        status: 'cancelled'
+      }, { transaction });
+      throw new Error(`Domain ${domain_name} is no longer available`);
+    }
+
+    // Register domain with Namecheap
+    const registrationResult = await namecheapService.registerDomain({
+      domain: domain_name,
+      years: years || 1,
+      firstName: registrant_info.firstName,
+      lastName: registrant_info.lastName,
+      email: registrant_info.email,
+      phone: registrant_info.phone,
+      address1: registrant_info.address1,
+      address2: registrant_info.address2,
+      city: registrant_info.city,
+      stateProvince: registrant_info.stateProvince,
+      postalCode: registrant_info.postalCode,
+      country: registrant_info.country,
+      organization: registrant_info.organization || ''
+    });
+
+    if (!registrationResult.success || !registrationResult.registered) {
+      await domainRecord.update({
+        status: 'cancelled'
+      }, { transaction });
+      throw new Error(`Failed to register domain: ${registrationResult.message || 'Unknown error'}`);
+    }
+
+    // Calculate expiration date
+    const registrationDate = new Date();
+    const expirationDate = new Date(registrationDate);
+    expirationDate.setFullYear(expirationDate.getFullYear() + (years || 1));
+
+    // Update domain record with registration details
+    await domainRecord.update({
+      status: 'active',
+      registration_date: registrationDate,
+      expiration_date: expirationDate,
+      namecheap_order_id: registrationResult.orderId,
+      namecheap_transaction_id: registrationResult.transactionId,
+      is_verified: true
+    }, { transaction });
+
+    // Update domain lookup table for fast routing
+    if (online_store_id) {
+      try {
+        const { mainSequelize } = require('../config/database');
+        const DomainLookup = mainSequelize.define('DomainLookup', {
+          domain_name: require('sequelize').DataTypes.STRING(255),
+          tenant_id: require('sequelize').DataTypes.INTEGER,
+          online_store_id: require('sequelize').DataTypes.INTEGER,
+          online_store_username: require('sequelize').DataTypes.STRING(100),
+          subscription_plan: require('sequelize').DataTypes.ENUM('free', 'enterprise'),
+          is_active: require('sequelize').DataTypes.BOOLEAN
+        }, {
+          tableName: 'domain_lookup',
+          timestamps: true
+        });
+
+        const onlineStore = await models.OnlineStore.findByPk(online_store_id, { transaction });
+        if (onlineStore) {
+          // Get tenant_id from domain record
+          const tenantId = domainRecord.tenant_id || (await models.Tenant?.findOne?.())?.id;
+          
+          await DomainLookup.upsert({
+            domain_name: domain_name,
+            tenant_id: tenantId,
+            online_store_id: online_store_id,
+            online_store_username: onlineStore.username,
+            subscription_plan: domainRecord.tenant_id ? 'free' : 'enterprise',
+            is_active: true
+          });
+
+          // Update online store custom_domain
+          await onlineStore.update({
+            custom_domain: domain_name
+          }, { transaction });
+
+          // Auto-configure DNS
+          const mycroshopServerIp = process.env.MYCROSHOP_SERVER_IP || process.env.SERVER_IP;
+          const mycroshopServerHost = process.env.MYCROSHOP_SERVER_HOST || process.env.SERVER_HOST;
+          
+          if (mycroshopServerIp || mycroshopServerHost) {
+            try {
+              const dnsRecords = [];
+              if (mycroshopServerIp) {
+                dnsRecords.push({
+                  type: 'A',
+                  name: '@',
+                  address: mycroshopServerIp,
+                  ttl: '1800'
+                });
+              }
+              if (mycroshopServerHost) {
+                dnsRecords.push({
+                  type: 'CNAME',
+                  name: 'www',
+                  address: mycroshopServerHost,
+                  ttl: '1800'
+                });
+              }
+
+              if (dnsRecords.length > 0) {
+                const dnsResult = await namecheapService.setDNSHostRecords(domain_name, dnsRecords);
+                if (dnsResult.success) {
+                  await domainRecord.update({
+                    dns_records: dnsRecords
+                  }, { transaction });
+                  
+                  // Provision SSL
+                  try {
+                    const sslResult = await sslService.provisionSSL(domain_name, onlineStore.username);
+                    if (sslResult.success) {
+                      await domainRecord.update({
+                        ssl_enabled: true
+                      }, { transaction });
+                    }
+                  } catch (sslError) {
+                    console.error('SSL provisioning error:', sslError);
+                  }
+                }
+              }
+            } catch (dnsError) {
+              console.error('DNS configuration error:', dnsError);
+            }
+          }
+        }
+      } catch (lookupError) {
+        console.error('Error updating domain lookup:', lookupError);
+      }
+    }
+
+    return { success: true, domain: domainRecord };
+  } catch (error) {
+    console.error('Error completing domain purchase:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   checkDomainAvailability,
   getDomainPricing,
+  checkoutDomain,
   purchaseDomain,
+  completeDomainPurchase,
   getAllDomains,
   getDomainById,
   linkDomainToStore,
