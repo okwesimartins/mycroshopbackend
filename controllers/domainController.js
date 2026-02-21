@@ -355,9 +355,19 @@ async function checkoutDomain(req, res) {
       }
 
       // Update transaction with gateway response
+      // IMPORTANT: Store metadata in gateway_response so it's available during verification
+      const gatewayResponseWithMetadata = {
+        ...paymentData,
+        metadata: paymentMetadata, // Store our metadata in the response
+        data: {
+          ...(paymentData.data || {}),
+          metadata: paymentMetadata // Also store in data.metadata for compatibility
+        }
+      };
+      
       await paymentTransaction.update({
         gateway_transaction_id: paymentData.gateway_transaction_id || paymentData.reference,
-        gateway_response: paymentData
+        gateway_response: gatewayResponseWithMetadata
       });
 
       paymentResponse = {
@@ -1463,10 +1473,18 @@ async function completeDomainPurchase(domainData, models, transaction) {
     });
 
     if (!registrationResult.success || !registrationResult.registered) {
+      const errorMessage = registrationResult.message || 
+                          `Domain registration failed. Success: ${registrationResult.success}, Registered: ${registrationResult.registered}`;
       await domainRecord.update({
         status: 'cancelled'
       }, { transaction });
-      throw new Error(`Failed to register domain: ${registrationResult.message || 'Unknown error'}`);
+      throw new Error(errorMessage);
+    }
+
+    // Check if orderId and transactionId are null (common in sandbox mode)
+    if (!registrationResult.orderId || !registrationResult.transactionId) {
+      console.warn(`⚠️  Namecheap returned null orderId/transactionId. This is normal in sandbox mode.`);
+      console.warn(`   OrderID: ${registrationResult.orderId}, TransactionID: ${registrationResult.transactionId}`);
     }
 
     // Calculate expiration date
@@ -1475,14 +1493,20 @@ async function completeDomainPurchase(domainData, models, transaction) {
     expirationDate.setFullYear(expirationDate.getFullYear() + (years || 1));
 
     // Update domain record with registration details
+    // Note: In sandbox mode, orderId and transactionId may be null
     await domainRecord.update({
       status: 'active',
       registration_date: registrationDate,
       expiration_date: expirationDate,
-      namecheap_order_id: registrationResult.orderId,
-      namecheap_transaction_id: registrationResult.transactionId,
+      namecheap_order_id: registrationResult.orderId || null,
+      namecheap_transaction_id: registrationResult.transactionId || null,
       is_verified: true
     }, { transaction });
+
+    // Log warning if IDs are null (sandbox mode)
+    if (!registrationResult.orderId || !registrationResult.transactionId) {
+      console.warn(`⚠️  Domain ${domain_name} registered but Namecheap orderId/transactionId are null (sandbox mode)`);
+    }
 
     // Update domain lookup table for fast routing
     if (online_store_id) {
@@ -1573,10 +1597,24 @@ async function completeDomainPurchase(domainData, models, transaction) {
       }
     }
 
-    return { success: true, domain: domainRecord };
+    return { 
+      success: true, 
+      domain: domainRecord,
+      orderId: registrationResult.orderId,
+      transactionId: registrationResult.transactionId,
+      sandboxMode: !registrationResult.orderId || !registrationResult.transactionId
+    };
   } catch (error) {
     console.error('Error completing domain purchase:', error);
-    throw error;
+    // Return error details instead of just throwing
+    return {
+      success: false,
+      error: error.message,
+      errorDetails: process.env.NODE_ENV === 'development' ? {
+        stack: error.stack,
+        name: error.name
+      } : undefined
+    };
   }
 }
 

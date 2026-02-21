@@ -735,12 +735,33 @@ async function verifyPayment(req, res) {
         });
       }
 
+      // Preserve original metadata from gateway_response before updating
+      // This is important for domain purchases and other metadata-dependent operations
+      const originalGatewayResponse = currentTransaction.gateway_response || {};
+      const originalMetadata = originalGatewayResponse.metadata || originalGatewayResponse.data?.metadata || null;
+      
+      // Merge verification result with original gateway_response to preserve metadata
+      const mergedGatewayResponse = {
+        ...originalGatewayResponse,
+        ...verificationResult,
+        // Preserve original metadata if it exists
+        metadata: originalMetadata || verificationResult.metadata || verificationResult.data?.metadata || null,
+        // Preserve original data if it exists
+        data: {
+          ...(originalGatewayResponse.data || {}),
+          ...(verificationResult.data || {})
+        }
+      };
+
       await currentTransaction.update({
         status: newStatus,
-        gateway_response: verificationResult,
+        gateway_response: mergedGatewayResponse,
         paid_at: newStatus === 'success' ? new Date() : null,
         failure_reason: newStatus === 'failed' ? verificationResult.message : null
       }, { transaction: dbTransaction });
+
+      // Reload transaction to get updated gateway_response with preserved metadata
+      await currentTransaction.reload({ transaction: dbTransaction });
 
       let emailSent = false;
 
@@ -830,31 +851,69 @@ async function verifyPayment(req, res) {
         );
       }
 
+      // Initialize response data early so domain purchase errors can be added
+      const responseData = {
+        transaction: {
+          id: currentTransaction.id,
+          reference: currentTransaction.transaction_reference,
+          status: newStatus,
+          amount: currentTransaction.amount,
+          platform_fee: currentTransaction.platform_fee,
+          merchant_amount: currentTransaction.merchant_amount
+        }
+      };
+
       // Handle domain purchase if payment is for a domain
       // Check metadata for domain purchase information
       let domainPurchased = false;
       if (newStatus === 'success') {
-        // Get metadata from transaction's gateway_response or from transaction metadata field
+        // Get metadata from transaction's gateway_response (use merged response that preserves original metadata)
         let metadata = {};
         try {
-          const gatewayResponse = currentTransaction.gateway_response || {};
+          // Use mergedGatewayResponse which preserves original metadata
+          const gatewayResponse = mergedGatewayResponse || currentTransaction.gateway_response || {};
+          
+          // Try multiple paths to find metadata
           if (gatewayResponse.metadata) {
             metadata = typeof gatewayResponse.metadata === 'string' 
               ? JSON.parse(gatewayResponse.metadata) 
               : gatewayResponse.metadata;
+          } else if (gatewayResponse.data?.metadata) {
+            metadata = typeof gatewayResponse.data.metadata === 'string'
+              ? JSON.parse(gatewayResponse.data.metadata)
+              : gatewayResponse.data.metadata;
+          } else if (originalGatewayResponse.metadata) {
+            metadata = typeof originalGatewayResponse.metadata === 'string'
+              ? JSON.parse(originalGatewayResponse.metadata)
+              : originalGatewayResponse.metadata;
+          } else if (originalGatewayResponse.data?.metadata) {
+            metadata = typeof originalGatewayResponse.data.metadata === 'string'
+              ? JSON.parse(originalGatewayResponse.data.metadata)
+              : originalGatewayResponse.data.metadata;
           } else if (currentTransaction.metadata) {
             metadata = typeof currentTransaction.metadata === 'string'
               ? JSON.parse(currentTransaction.metadata)
               : currentTransaction.metadata;
           }
+          
+          console.log('🔍 Extracted metadata for domain purchase check:', {
+            hasMetadata: !!metadata.purchase_type,
+            purchaseType: metadata.purchase_type,
+            domainId: metadata.domain_id,
+            domainName: metadata.domain_name,
+            metadataKeys: Object.keys(metadata)
+          });
         } catch (parseError) {
           console.warn('Could not parse metadata:', parseError);
+          console.warn('Gateway response structure:', JSON.stringify(mergedGatewayResponse, null, 2));
         }
 
         // Check if this is a domain purchase
         const isDomainPurchase = metadata.purchase_type === 'domain' && metadata.domain_id;
         
         if (isDomainPurchase) {
+          console.log(`🛒 Processing domain purchase for domain_id: ${metadata.domain_id}, domain: ${metadata.domain_name}`);
+          let domainPurchaseError = null;
           try {
             const domainController = require('./domainController');
             const domainResult = await domainController.completeDomainPurchase(
@@ -866,12 +925,65 @@ async function verifyPayment(req, res) {
             if (domainResult.success) {
               domainPurchased = true;
               console.log(`✅ Domain ${metadata.domain_name} purchased successfully after payment`);
+              // Add domain info to response
+              responseData.domain = {
+                id: metadata.domain_id,
+                domain_name: metadata.domain_name,
+                status: 'active',
+                orderId: domainResult.orderId,
+                transactionId: domainResult.transactionId,
+                sandboxMode: domainResult.sandboxMode || false,
+                note: domainResult.sandboxMode 
+                  ? 'Domain registered in sandbox mode. Order/Transaction IDs may be null.'
+                  : 'Domain registered successfully'
+              };
+            } else {
+              domainPurchaseError = domainResult.error || domainResult.message || 'Domain purchase failed';
+              console.error(`❌ Domain purchase failed:`, domainResult);
+              // Add detailed error to response
+              responseData.domain_purchase_error = {
+                message: domainResult.error || 'Domain purchase failed',
+                details: domainResult.errorDetails || null,
+                domain_id: metadata.domain_id,
+                domain_name: metadata.domain_name
+              };
+              responseData.domain_purchase_status = 'failed';
             }
           } catch (domainError) {
+            const errorMessage = domainError.message || 'Unknown error during domain purchase';
             console.error('Error completing domain purchase after payment:', domainError);
+            console.error('Domain error details:', {
+              message: domainError.message,
+              stack: domainError.stack,
+              metadata: metadata
+            });
+            // Add error to response
+            responseData.domain_purchase_error = {
+              message: errorMessage,
+              details: process.env.NODE_ENV === 'development' ? {
+                stack: domainError.stack,
+                name: domainError.name
+              } : null,
+              domain_id: metadata.domain_id,
+              domain_name: metadata.domain_name
+            };
+            responseData.domain_purchase_status = 'failed';
             // Don't fail payment verification if domain purchase fails
             // The domain record will remain in 'pending' status and can be retried
           }
+          
+          // Add status if domain purchase was attempted
+          if (domainPurchased) {
+            responseData.domain_purchase_status = 'success';
+          }
+        } else {
+          console.log('ℹ️  Payment is not for a domain purchase. Metadata check:', {
+            purchase_type: metadata.purchase_type,
+            domain_id: metadata.domain_id,
+            hasOrderId: !!metadata.order_id,
+            hasInvoiceId: !!metadata.invoice_id,
+            allMetadataKeys: Object.keys(metadata)
+          });
         }
       }
 
@@ -1037,18 +1149,6 @@ async function verifyPayment(req, res) {
       if (!emailSent) {
         await dbTransaction.commit();
       }
-      
-      // Return success response
-      const responseData = {
-          transaction: {
-            id: currentTransaction.id,
-            reference: currentTransaction.transaction_reference,
-            status: newStatus,
-            amount: currentTransaction.amount,
-            platform_fee: currentTransaction.platform_fee,
-            merchant_amount: currentTransaction.merchant_amount
-          }
-      };
 
       // Include booking info if booking was created
       if (bookingCreated) {
