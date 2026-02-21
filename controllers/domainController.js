@@ -295,9 +295,10 @@ async function checkoutDomain(req, res) {
       const transactionReference = `DOMAIN-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
       // Create payment transaction record
-      // Note: tenant_id is set to track which tenant purchased, but payment goes to MycroShop
+      // Note: tenant_id is always set to track which tenant purchased (required by model)
+      // Payment goes to MycroShop, but we track which tenant made the purchase
       const paymentTransaction = await req.db.models.PaymentTransaction.create({
-        tenant_id: req.user?.tenant?.subscription_plan === 'free' ? tenantId : null,
+        tenant_id: tenantId, // Always set tenant_id (required by model, even for enterprise users)
         transaction_reference: transactionReference,
         gateway_name: 'paystack',
         amount: parseFloat(finalPrice),
