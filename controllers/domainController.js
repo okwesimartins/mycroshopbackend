@@ -1769,8 +1769,9 @@ async function completeDomainPurchase(domainData, models, transaction) {
           console.log(`🔒 Provisioning SSL certificate for ${domain_name}...`);
           console.log(`   SSL Provider: ${process.env.SSL_PROVIDER || 'letsencrypt'}`);
           console.log(`   Certbot Email: ${process.env.CERTBOT_EMAIL || process.env.ADMIN_EMAIL || 'not set'}`);
-          console.log(`   Webroot Path: ${process.env.WEBROOT_PATH || '/var/www/html'}`);
+          console.log(`   Shared Webroot Path: ${process.env.SSL_WEBROOT_PATH || '/var/www/letsencrypt'}`);
           console.log(`   Online Store Username: ${onlineStore.username}`);
+          console.log(`   Mode: Shared webroot (recommended - all domains use same directory)`);
           
           try {
             const sslService = require('../services/sslService');
@@ -1786,6 +1787,7 @@ async function completeDomainPurchase(domainData, models, transaction) {
               console.log(`   Certificate Path: ${sslResult.certificatePath || 'N/A'}`);
               console.log(`   Key Path: ${sslResult.keyPath || 'N/A'}`);
             } else {
+              // SSL provisioning failed - return error with full details
               const errorMsg = sslResult?.message || sslResult?.error || 'Unknown error';
               console.error(`❌ SSL provisioning failed for ${domain_name}:`, errorMsg);
               console.error(`   Full SSL result:`, JSON.stringify(sslResult, null, 2));
@@ -1798,8 +1800,10 @@ async function completeDomainPurchase(domainData, models, transaction) {
                 domain: domain_name,
                 onlineStoreUsername: onlineStore.username,
                 certbotEmail: process.env.CERTBOT_EMAIL || process.env.ADMIN_EMAIL,
-                webrootPath: process.env.WEBROOT_PATH || '/var/www/html',
-                instructions: sslResult?.instructions || []
+                webrootPath: sslResult?.webrootPath || process.env.SSL_WEBROOT_PATH || '/var/www/letsencrypt',
+                webroot: sslResult?.webroot || 'N/A',
+                instructions: sslResult?.instructions || [],
+                apacheConfig: sslResult?.apacheConfig || null
               };
               
               // DO NOT mark SSL as enabled if provisioning failed

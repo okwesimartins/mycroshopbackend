@@ -15,9 +15,16 @@ class SSLService {
     this.sslProvider = process.env.SSL_PROVIDER || 'letsencrypt'; // 'letsencrypt', 'cloudflare', 'namecheap'
     this.certbotEmail = process.env.CERTBOT_EMAIL || process.env.ADMIN_EMAIL;
     this.serverIp = process.env.MYCROSHOP_SERVER_IP || process.env.SERVER_IP;
+    
+    // Use shared webroot for all Let's Encrypt challenges (BEST PRACTICE)
+    // Default to /var/www/letsencrypt (recommended) or use SSL_WEBROOT_PATH if set
+    // This avoids permission issues and is the recommended approach
+    this.sharedWebrootPath = process.env.SSL_WEBROOT_PATH || process.env.WEBROOT_PATH || '/var/www/letsencrypt';
+    
+    // Legacy: per-store webroot (not recommended due to permission issues)
     this.webrootPath = process.env.WEBROOT_PATH || '/var/www/html';
-    // Use shared webroot if SSL_USE_SHARED_WEBROOT is true (all domains use same webroot)
-    this.useSharedWebroot = process.env.SSL_USE_SHARED_WEBROOT === 'true';
+    this.usePerStoreWebroot = process.env.SSL_USE_PER_STORE_WEBROOT === 'true'; // Default: false (use shared)
+    
     // Use standalone mode if SSL_USE_STANDALONE is true (doesn't require webroot)
     this.useStandalone = process.env.SSL_USE_STANDALONE === 'true';
   }
@@ -93,14 +100,17 @@ class SSLService {
       }
 
       // Build certbot command using webroot method
-      // Use shared webroot if configured, otherwise use per-store webroot
-      let webroot = this.useSharedWebroot 
-        ? this.webrootPath  // All domains use same webroot
-        : (onlineStoreUsername 
-          ? `${this.webrootPath}/${onlineStoreUsername}`  // Per-store webroot
-          : this.webrootPath);
+      // BEST PRACTICE: Use shared webroot for all domains (avoids permission issues)
+      // All Let's Encrypt challenges go to the same directory
+      let webroot = this.usePerStoreWebroot
+        ? (onlineStoreUsername 
+          ? `${this.webrootPath}/${onlineStoreUsername}`  // Per-store webroot (not recommended)
+          : this.webrootPath)
+        : this.sharedWebrootPath;  // Shared webroot for all domains (RECOMMENDED)
 
-      console.log(`📁 Using webroot: ${webroot} (shared: ${this.useSharedWebroot}, store: ${onlineStoreUsername || 'none'})`);
+      console.log(`📁 Using webroot: ${webroot}`);
+      console.log(`   Mode: ${this.usePerStoreWebroot ? 'per-store (not recommended)' : 'shared (recommended)'}`);
+      console.log(`   Store: ${onlineStoreUsername || 'none'}`);
 
       // Ensure webroot directory exists
       try {
@@ -128,7 +138,35 @@ class SSLService {
           }
         } catch (mkdirError) {
           console.error(`❌ Failed to create webroot directory: ${webroot}`, mkdirError);
-          throw new Error(`Webroot directory does not exist and could not be created: ${webroot}. Please create it manually or set SSL_USE_STANDALONE=true to use standalone mode. Error: ${mkdirError.message}`);
+          
+          // Return detailed error with instructions instead of throwing
+          // This allows the error to be properly returned in the response
+          return {
+            success: false,
+            domain,
+            provider: 'letsencrypt',
+            message: `Webroot directory does not exist and could not be created: ${webroot}`,
+            error: mkdirError.message,
+            instructions: [
+              `Create the webroot directory manually: sudo mkdir -p ${webroot}`,
+              `Create acme-challenge directory: sudo mkdir -p ${webroot}/.well-known/acme-challenge`,
+              `Set permissions for Apache: sudo chown -R www-data:www-data ${webroot}`,
+              `Set permissions: sudo chmod -R 755 ${webroot}`,
+              `Configure Apache to serve this directory (see Apache configuration below)`,
+              `OR use standalone mode: Set SSL_USE_STANDALONE=true in .env (requires port 80 free)`,
+              `OR use a different webroot: Set SSL_WEBROOT_PATH=/path/to/webroot in .env`
+            ],
+            apacheConfig: `# Add this to your Apache virtual host configuration:
+Alias /.well-known/acme-challenge ${webroot}/.well-known/acme-challenge
+<Directory "${webroot}/.well-known/acme-challenge">
+    Options None
+    AllowOverride None
+    Require all granted
+</Directory>`,
+            webroot: webroot,
+            webrootPath: this.sharedWebrootPath,
+            onlineStoreUsername: onlineStoreUsername
+          };
         }
       }
 
