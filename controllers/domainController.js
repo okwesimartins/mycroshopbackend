@@ -984,14 +984,14 @@ async function linkDomainToStore(req, res) {
       });
     }
 
-    // Check tenant access
+    // Validate that the domain belongs to the tenant making the request
+    // This ensures only the domain owner can link it to a store
     const tenantId = req.user?.tenantId;
-    const isFreePlan = req.user?.tenant?.subscription_plan === 'free';
-    if (isFreePlan && domain.tenant_id !== tenantId) {
+    if (domain.tenant_id !== tenantId) {
       await transaction.rollback();
       return res.status(403).json({
         success: false,
-        message: 'Access denied'
+        message: 'Access denied. You can only link domains that you own.'
       });
     }
 
@@ -1223,14 +1223,14 @@ async function unlinkDomainFromStore(req, res) {
       });
     }
 
-    // Check tenant access
+    // Validate that the domain belongs to the tenant making the request
+    // This ensures only the domain owner can unlink it from a store
     const tenantId = req.user?.tenantId;
-    const isFreePlan = req.user?.tenant?.subscription_plan === 'free';
-    if (isFreePlan && domain.tenant_id !== tenantId) {
+    if (domain.tenant_id !== tenantId) {
       await transaction.rollback();
       return res.status(403).json({
         success: false,
-        message: 'Access denied'
+        message: 'Access denied. You can only unlink domains that you own.'
       });
     }
 
