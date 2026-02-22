@@ -746,22 +746,24 @@ async function purchaseDomain(req, res) {
               });
             }
             
-            // CNAME for www or A record
-            if (mycroshopServerHost) {
-              dnsRecords.push({
-                type: 'CNAME',
-                name: 'www',
-                address: mycroshopServerHost,
-                ttl: '1800'
-              });
-            } else if (mycroshopServerIp) {
-              dnsRecords.push({
-                type: 'A',
-                name: 'www',
-                address: mycroshopServerIp,
-                ttl: '1800'
-              });
-            }
+              // A record for www (should point to same IP as root domain)
+              // For purchased domains, www should point to the server IP, not to mycroshop.com
+              if (mycroshopServerIp) {
+                dnsRecords.push({
+                  type: 'A',
+                  name: 'www',
+                  address: mycroshopServerIp,
+                  ttl: '1800'
+                });
+              } else if (mycroshopServerHost) {
+                // Fallback: Use CNAME pointing to root domain itself
+                dnsRecords.push({
+                  type: 'CNAME',
+                  name: 'www',
+                  address: domain, // Point www to the root domain itself
+                  ttl: '1800'
+                });
+              }
 
             if (dnsRecords.length > 0) {
               const dnsResult = await namecheapService.setDNSHostRecords(domain, dnsRecords);
@@ -1037,20 +1039,21 @@ async function linkDomainToStore(req, res) {
           });
         }
         
-        // CNAME for www subdomain
-        if (mycroshopServerHost) {
-          dnsRecords.push({
-            type: 'CNAME',
-            name: 'www',
-            address: mycroshopServerHost,
-            ttl: '1800'
-          });
-        } else if (mycroshopServerIp) {
-          // If no host, use A record for www too
+        // A record for www subdomain (should point to same IP as root domain)
+        // For purchased domains, www should point to the server IP, not to mycroshop.com
+        if (mycroshopServerIp) {
           dnsRecords.push({
             type: 'A',
             name: 'www',
             address: mycroshopServerIp,
+            ttl: '1800'
+          });
+        } else if (mycroshopServerHost) {
+          // Fallback: Use CNAME pointing to root domain itself
+          dnsRecords.push({
+            type: 'CNAME',
+            name: 'www',
+            address: domain.domain_name, // Point www to the root domain itself
             ttl: '1800'
           });
         }
@@ -1638,17 +1641,9 @@ async function completeDomainPurchase(domainData, models, transaction) {
           console.log(`📡 DNS: Added A record @ → ${mycroshopServerIp}`);
         }
         
-        // CNAME for www subdomain
-        if (mycroshopServerHost) {
-          dnsRecords.push({
-            type: 'CNAME',
-            name: 'www',
-            address: mycroshopServerHost,
-            ttl: '1800'
-          });
-          console.log(`📡 DNS: Added CNAME www → ${mycroshopServerHost}`);
-        } else if (mycroshopServerIp) {
-          // Fallback: Use A record for www if no hostname
+        // A record for www subdomain (should point to same IP as root domain)
+        // For purchased domains, www should point to the server IP, not to mycroshop.com
+        if (mycroshopServerIp) {
           dnsRecords.push({
             type: 'A',
             name: 'www',
@@ -1656,6 +1651,16 @@ async function completeDomainPurchase(domainData, models, transaction) {
             ttl: '1800'
           });
           console.log(`📡 DNS: Added A record www → ${mycroshopServerIp}`);
+        } else if (mycroshopServerHost) {
+          // Fallback: If only hostname is available, use CNAME pointing to root domain
+          // Note: This is less ideal - prefer using IP address
+          dnsRecords.push({
+            type: 'CNAME',
+            name: 'www',
+            address: domain_name, // Point www to the root domain itself
+            ttl: '1800'
+          });
+          console.log(`📡 DNS: Added CNAME www → ${domain_name} (root domain)`);
         }
 
         if (dnsRecords.length > 0) {
