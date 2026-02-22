@@ -995,12 +995,20 @@ async function linkDomainToStore(req, res) {
       });
     }
 
-    const onlineStore = await req.db.models.OnlineStore.findByPk(online_store_id, { transaction });
+    // Validate that the online store exists AND belongs to this tenant
+    const onlineStore = await req.db.models.OnlineStore.findOne({
+      where: {
+        id: online_store_id,
+        tenant_id: tenantId // Ensure it belongs to this tenant
+      },
+      transaction
+    });
+    
     if (!onlineStore) {
       await transaction.rollback();
       return res.status(404).json({
         success: false,
-        message: 'Online store not found'
+        message: 'Online store not found or does not belong to your account'
       });
     }
 
