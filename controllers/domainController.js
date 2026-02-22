@@ -1289,14 +1289,69 @@ async function getDNSRecords(req, res) {
       });
     }
 
-    const dnsRecords = await namecheapService.getDNSHostRecords(domain.domain_name);
+    // Try to get DNS records from Namecheap API
+    let dnsRecords = [];
+    let apiError = null;
+    let usingExternalDNS = false;
+    let apiNote = null;
+    
+    try {
+      const result = await namecheapService.getDNSHostRecords(domain.domain_name);
+      dnsRecords = result.records || [];
+      usingExternalDNS = result.usingExternalDNS || false;
+      apiNote = result.note || null;
+      apiError = result.error || null;
+      
+      console.log(`📡 DNS records from Namecheap API for ${domain.domain_name}:`, dnsRecords.length, 'records');
+      
+      if (usingExternalDNS) {
+        console.log(`ℹ️  Domain ${domain.domain_name} is using external nameservers, not Namecheap DNS`);
+      }
+      
+      if (apiError) {
+        console.error(`⚠️  API returned error:`, apiError);
+      }
+    } catch (error) {
+      console.error(`⚠️  Error fetching DNS records from Namecheap API:`, error.message);
+      console.error(`   Error stack:`, error.stack);
+      apiError = error.message || error.toString();
+    }
+    
+    // If API returns empty or fails, use records saved in database as fallback
+    const usingDatabaseRecords = dnsRecords.length === 0 && domain.dns_records && Array.isArray(domain.dns_records) && domain.dns_records.length > 0;
+    if (usingDatabaseRecords) {
+      console.log(`📦 Using DNS records from database as fallback (${domain.dns_records.length} records)`);
+      dnsRecords = domain.dns_records;
+    }
+
+    // Build response data
+    const responseData = {
+      domain: domain.domain_name,
+      records: dnsRecords,
+      source: usingDatabaseRecords ? 'database' : 'namecheap_api',
+      usingExternalDNS: usingExternalDNS
+    };
+
+    // Always include error if present
+    if (apiError) {
+      responseData.error = apiError;
+      responseData.apiError = apiError; // Include both for compatibility
+    }
+
+    // Include note/explanation
+    if (usingExternalDNS) {
+      responseData.note = 'Domain is using external nameservers. DNS records are managed externally, not through Namecheap.';
+    } else if (apiError) {
+      responseData.note = `Namecheap API error: ${apiError}. ${usingDatabaseRecords ? 'Showing database records as fallback.' : 'No database records available.'}`;
+    } else if (apiNote) {
+      responseData.note = apiNote;
+    } else if (dnsRecords.length === 0) {
+      responseData.note = 'No DNS records found. Domain may not be fully configured yet, or there may be an issue with the API response.';
+    }
 
     res.json({
       success: true,
-      data: {
-        domain: domain.domain_name,
-        records: dnsRecords
-      }
+      data: responseData
     });
   } catch (error) {
     console.error('Error getting DNS records:', error);

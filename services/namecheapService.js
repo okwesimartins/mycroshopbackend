@@ -503,23 +503,76 @@ class NamecheapService {
         TLD: tld  // Top Level Domain (required by Namecheap API, uppercase)
       });
 
-      const hosts = response.CommandResponse?.DomainDNSGetHostsResult?.Host;
+      // Log full response for debugging
+      console.log(`📦 Full Namecheap API response for ${domain}:`, JSON.stringify(response, null, 2));
+
+      const result = response.CommandResponse?.DomainDNSGetHostsResult;
+      
+      // Log full response for debugging if no result
+      if (!result) {
+        console.error(`❌ No DomainDNSGetHostsResult in response for ${domain}`);
+        console.error(`   Full response:`, JSON.stringify(response, null, 2));
+        throw new Error(`Invalid API response structure. No DomainDNSGetHostsResult found. Check API response format.`);
+      }
+      
+      // Check if domain is using external nameservers (not Namecheap DNS)
+      const isUsingOurDNS = result?.IsUsingOurDNS === 'true';
+      
+      if (!isUsingOurDNS) {
+        console.log(`ℹ️  Domain ${domain} is using external nameservers, not Namecheap DNS`);
+        return {
+          records: [],
+          usingExternalDNS: true,
+          error: null
+        };
+      }
+      
+      // Get hosts - check multiple possible field names (case sensitivity)
+      const hosts = result?.Host || result?.host || result?.HOST;
       
       if (!hosts) {
-        return [];
+        console.log(`ℹ️  No DNS hosts found for domain ${domain}`);
+        console.log(`   Available keys in result:`, Object.keys(result || {}));
+        console.log(`   Full result:`, JSON.stringify(result, null, 2));
+        return {
+          records: [],
+          usingExternalDNS: false,
+          error: null,
+          note: 'No hosts found in API response. Domain may not have DNS records configured yet, or records may be in a different format.'
+        };
       }
 
       // Handle both single host and array of hosts
       const hostList = Array.isArray(hosts) ? hosts : [hosts];
+      
+      console.log(`✅ Found ${hostList.length} DNS record(s) for domain ${domain}`);
+      console.log(`   Hosts data:`, JSON.stringify(hostList, null, 2));
 
-      return hostList.map(h => ({
-        hostId: h.HostId,
-        name: h.Name,
-        type: h.Type,
-        address: h.Address,
-        mxPref: h.MXPref || null,
-        ttl: h.TTL || '1800'
-      }));
+      // Map hosts to records - handle case sensitivity
+      const records = hostList.map(h => {
+        // Handle case sensitivity - Namecheap might return different case
+        const hostId = h.HostId || h.hostId || h.HostID || null;
+        const name = h.Name || h.name || h.NAME || '@';
+        const type = h.Type || h.type || h.TYPE || 'A';
+        const address = h.Address || h.address || h.ADDRESS || '';
+        const mxPref = h.MXPref || h.mxPref || h.MXPreference || h.MXPREF || null;
+        const ttl = h.TTL || h.ttl || h.Ttl || '1800';
+        
+        return {
+          hostId: hostId,
+          name: name,
+          type: type,
+          address: address,
+          mxPref: mxPref,
+          ttl: ttl
+        };
+      });
+
+      return {
+        records: records,
+        usingExternalDNS: false,
+        error: null
+      };
     } catch (error) {
       console.error('Error getting DNS host records:', error);
       throw error;
