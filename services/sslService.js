@@ -158,21 +158,122 @@ class SSLService {
       console.log(`   Mode: ${this.usePerStoreWebroot ? 'per-store (not recommended)' : 'shared (recommended)'}`);
       console.log(`   Store: ${onlineStoreUsername || 'none'}`);
 
-      // Ensure webroot directory exists
+      // Ensure webroot directory exists and is writable
+      const acmeChallengePath = path.join(webroot, '.well-known', 'acme-challenge');
+      
       try {
+        // Check if webroot exists
         await fs.access(webroot);
         console.log(`✅ Webroot directory exists: ${webroot}`);
+        
+        // Check if acme-challenge directory exists, if not create it
+        try {
+          await fs.access(acmeChallengePath);
+          console.log(`✅ ACME challenge directory exists: ${acmeChallengePath}`);
+        } catch {
+          // Try to create acme-challenge directory
+          console.log(`⚠️  ACME challenge directory does not exist. Attempting to create...`);
+          try {
+            await fs.mkdir(acmeChallengePath, { recursive: true });
+            console.log(`✅ Created ACME challenge directory: ${acmeChallengePath}`);
+          } catch (acmeError) {
+            // If we can't create it, the directory isn't writable
+            throw new Error(`Cannot create ACME challenge directory: ${acmeError.message}. The webroot directory is not writable by the Node.js user.`);
+          }
+        }
+        
+        // Test write permissions by creating a test file
+        const testFilePath = path.join(acmeChallengePath, '.write-test');
+        try {
+          await fs.writeFile(testFilePath, 'test');
+          await fs.unlink(testFilePath);
+          console.log(`✅ Webroot directory is writable`);
+        } catch (writeError) {
+          throw new Error(`Webroot directory is not writable: ${writeError.message}. The Node.js user cannot write to ${acmeChallengePath}`);
+        }
+        
       } catch (accessError) {
+        // Directory doesn't exist or isn't writable
+        if (accessError.message.includes('not writable') || accessError.message.includes('Cannot create')) {
+          // Directory exists but isn't writable
+          console.error(`❌ Webroot directory exists but is not writable: ${webroot}`);
+          
+          // Get current user info for better error messages
+          const username = process.env.USER || process.env.USERNAME || 'your_user';
+          
+          return {
+            success: false,
+            domain,
+            provider: 'letsencrypt',
+            message: `Webroot directory is not writable: ${webroot}`,
+            error: accessError.message,
+            instructions: [
+              `The webroot directory exists but the Node.js user (${username}) cannot write to it.`,
+              `Certbot needs to write HTTP challenge files to: ${acmeChallengePath}`,
+              ``,
+              `✅ FIX IT (Run these exact commands):`,
+              ``,
+              `1. Create the challenge directory:`,
+              `   sudo mkdir -p ${acmeChallengePath}`,
+              ``,
+              `2. Give ownership to your Node.js user:`,
+              `   sudo chown -R ${username}:${username} ${webroot}`,
+              ``,
+              `3. Set permissions (755 for base, 775 for challenge dir to allow writes):`,
+              `   sudo chmod -R 755 ${webroot}`,
+              `   sudo chmod -R 775 ${acmeChallengePath}`,
+              ``,
+              `4. Test write access (as ${username}):`,
+              `   echo "OK" > ${acmeChallengePath}/test.txt`,
+              `   curl -i http://${domain}/.well-known/acme-challenge/test.txt`,
+              `   # Should return "OK" and HTTP 200. If 403/404, fix Apache config.`,
+              `   rm ${acmeChallengePath}/test.txt`,
+              ``,
+              `5. Configure Apache to serve the challenge directory (see apacheConfig below)`,
+              ``,
+              `Alternative Options:`,
+              `- Use a webroot in your home directory: Set SSL_WEBROOT_PATH=/home/${username}/letsencrypt-webroot in .env`,
+              `- Use standalone mode: Set SSL_USE_STANDALONE=true in .env (requires port 80 free)`,
+              `- Use sudo: Set SSL_USE_SUDO=true in .env (not recommended for SaaS)`
+            ],
+            apacheConfig: `# Add this to your Apache configuration (e.g., /etc/apache2/conf.d/letsencrypt.conf or your vhost):
+# For the current webroot:
+Alias /.well-known/acme-challenge/ "${acmeChallengePath}/"
+
+<Directory "${acmeChallengePath}/">
+    AllowOverride None
+    Options None
+    Require all granted
+</Directory>
+
+# Then test and restart:
+# sudo apachectl configtest
+# sudo systemctl restart httpd  # or: sudo systemctl restart apache2
+
+# Alternative: If using home directory webroot:
+# Alias /.well-known/acme-challenge/ "/home/${username}/letsencrypt-webroot/.well-known/acme-challenge/"
+# <Directory "/home/${username}/letsencrypt-webroot/.well-known/acme-challenge/">
+#     AllowOverride None
+#     Options None
+#     Require all granted
+# </Directory>`,
+            webroot: webroot,
+            acmeChallengePath: acmeChallengePath,
+            webrootPath: this.sharedWebrootPath,
+            onlineStoreUsername: onlineStoreUsername,
+            currentUser: username
+          };
+        }
+        
         // Directory doesn't exist, try to create it
         console.log(`⚠️  Webroot directory does not exist: ${webroot}. Attempting to create...`);
         try {
           await fs.mkdir(webroot, { recursive: true });
           console.log(`✅ Created webroot directory: ${webroot}`);
           
-          // Create .well-known/acme-challenge directory for Let's Encrypt verification
-          const acmeChallengePath = path.join(webroot, '.well-known', 'acme-challenge');
+          // Create .well-known/acme-challenge directory
           await fs.mkdir(acmeChallengePath, { recursive: true });
-          console.log(`✅ Created acme-challenge directory: ${acmeChallengePath}`);
+          console.log(`✅ Created ACME challenge directory: ${acmeChallengePath}`);
           
           // Create a simple index.html to ensure directory is web-accessible
           const indexPath = path.join(webroot, 'index.html');
@@ -185,8 +286,9 @@ class SSLService {
         } catch (mkdirError) {
           console.error(`❌ Failed to create webroot directory: ${webroot}`, mkdirError);
           
-          // Return detailed error with instructions instead of throwing
-          // This allows the error to be properly returned in the response
+          const username = process.env.USER || process.env.USERNAME || 'your_user';
+          
+          // Return detailed error with instructions
           return {
             success: false,
             domain,
@@ -195,23 +297,32 @@ class SSLService {
             error: mkdirError.message,
             instructions: [
               `Create the webroot directory manually: sudo mkdir -p ${webroot}`,
-              `Create acme-challenge directory: sudo mkdir -p ${webroot}/.well-known/acme-challenge`,
-              `Set permissions for Apache: sudo chown -R www-data:www-data ${webroot}`,
+              `Create acme-challenge directory: sudo mkdir -p ${acmeChallengePath}`,
+              `Set ownership: sudo chown -R ${username}:${username} ${webroot}`,
               `Set permissions: sudo chmod -R 755 ${webroot}`,
-              `Configure Apache to serve this directory (see Apache configuration below)`,
+              `Make acme-challenge writable: sudo chmod -R 775 ${acmeChallengePath}`,
+              `Configure Apache to serve this directory (see apacheConfig below)`,
+              ``,
               `OR use standalone mode: Set SSL_USE_STANDALONE=true in .env (requires port 80 free)`,
-              `OR use a different webroot: Set SSL_WEBROOT_PATH=/path/to/webroot in .env`
+              `OR use a webroot in home directory: Set SSL_WEBROOT_PATH=/home/${username}/letsencrypt-webroot in .env`
             ],
-            apacheConfig: `# Add this to your Apache virtual host configuration:
-Alias /.well-known/acme-challenge ${webroot}/.well-known/acme-challenge
-<Directory "${webroot}/.well-known/acme-challenge">
-    Options None
+            apacheConfig: `# Add this to your Apache configuration (e.g., /etc/apache2/conf.d/letsencrypt.conf or your vhost):
+Alias /.well-known/acme-challenge/ "${acmeChallengePath}/"
+
+<Directory "${acmeChallengePath}/">
     AllowOverride None
+    Options None
     Require all granted
-</Directory>`,
+</Directory>
+
+# Then test and restart:
+# sudo apachectl configtest
+# sudo systemctl restart httpd  # or: sudo systemctl restart apache2`,
             webroot: webroot,
+            acmeChallengePath: acmeChallengePath,
             webrootPath: this.sharedWebrootPath,
-            onlineStoreUsername: onlineStoreUsername
+            onlineStoreUsername: onlineStoreUsername,
+            currentUser: username
           };
         }
       }
