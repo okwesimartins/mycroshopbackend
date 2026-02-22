@@ -27,6 +27,23 @@ class SSLService {
     
     // Use standalone mode if SSL_USE_STANDALONE is true (doesn't require webroot)
     this.useStandalone = process.env.SSL_USE_STANDALONE === 'true';
+    
+    // Certbot directories (writable by Node.js user, avoids permission issues)
+    // BEST PRACTICE: Use home directory with organized subdirectories
+    // This is the correct architecture for SaaS on cPanel
+    // Default: /home/{username}/letsencrypt/{config,work,logs}
+    // Can be overridden via CERTBOT_BASE_PATH env var
+    const username = process.env.USER || process.env.USERNAME || 'legithairng'; // cPanel username
+    const certbotBasePath = process.env.CERTBOT_BASE_PATH || `/home/${username}/letsencrypt`;
+    
+    this.certbotBasePath = certbotBasePath;
+    this.certbotConfigDir = process.env.CERTBOT_CONFIG_DIR || `${certbotBasePath}/config`;
+    this.certbotWorkDir = process.env.CERTBOT_WORK_DIR || `${certbotBasePath}/work`;
+    this.certbotLogsDir = process.env.CERTBOT_LOGS_DIR || `${certbotBasePath}/logs`;
+    
+    // Use sudo if SSL_USE_SUDO is true (requires passwordless sudo for certbot)
+    // Default: false (use writable directories - recommended for SaaS)
+    this.useSudo = process.env.SSL_USE_SUDO === 'true';
   }
 
   /**
@@ -66,12 +83,39 @@ class SSLService {
       // Use standalone mode if configured (doesn't require webroot)
       if (this.useStandalone) {
         console.log(`🔒 Using standalone mode for SSL provisioning (no webroot required)`);
-        const command = `certbot certonly --standalone -d ${domain} -d www.${domain} --email ${this.certbotEmail} --agree-tos --non-interactive --quiet`;
+        
+        // Build certbot command with writable directories to avoid permission issues
+        // Use organized structure: config/, work/, logs/ subdirectories
+        let command = `certbot certonly --standalone -d ${domain} -d www.${domain} --email ${this.certbotEmail} --agree-tos --non-interactive --quiet`;
+        
+        // Determine certificate base path
+        const certBasePath = this.useSudo ? '/etc/letsencrypt' : this.certbotConfigDir;
+        
+        // Add writable directories if not using sudo
+        if (!this.useSudo) {
+          // Ensure base directory and subdirectories exist
+          await fs.mkdir(this.certbotConfigDir, { recursive: true });
+          await fs.mkdir(this.certbotWorkDir, { recursive: true });
+          await fs.mkdir(this.certbotLogsDir, { recursive: true });
+          
+          command += ` --config-dir ${this.certbotConfigDir} --work-dir ${this.certbotWorkDir} --logs-dir ${this.certbotLogsDir}`;
+          console.log(`   Using writable certbot directories (base: ${this.certbotBasePath})`);
+          console.log(`     Config: ${this.certbotConfigDir}`);
+          console.log(`     Work: ${this.certbotWorkDir}`);
+          console.log(`     Logs: ${this.certbotLogsDir}`);
+        } else {
+          command = `sudo ${command}`;
+          console.log(`   Using sudo for certbot (requires passwordless sudo)`);
+        }
         
         console.log(`🔒 Provisioning SSL certificate for ${domain} using Let's Encrypt (standalone mode)...`);
         console.log(`   Command: ${command}`);
         
         const { stdout, stderr } = await execPromise(command);
+        
+        // Determine certificate paths
+        const certificatePath = `${certBasePath}/live/${domain}/fullchain.pem`;
+        const keyPath = `${certBasePath}/live/${domain}/privkey.pem`;
         
         if (stderr && !stderr.includes('Congratulations') && !stderr.includes('Successfully received certificate')) {
           // Check if certificate already exists
@@ -81,8 +125,9 @@ class SSLService {
               domain,
               provider: 'letsencrypt',
               message: 'SSL certificate already exists or is valid',
-              certificatePath: `/etc/letsencrypt/live/${domain}/fullchain.pem`,
-              keyPath: `/etc/letsencrypt/live/${domain}/privkey.pem`
+              certificatePath: certificatePath,
+              keyPath: keyPath,
+              certBasePath: certBasePath
             };
           }
           throw new Error(`Certbot error: ${stderr}`);
@@ -93,9 +138,10 @@ class SSLService {
           domain,
           provider: 'letsencrypt',
           message: 'SSL certificate provisioned successfully (standalone mode)',
-          certificatePath: `/etc/letsencrypt/live/${domain}/fullchain.pem`,
-          keyPath: `/etc/letsencrypt/live/${domain}/privkey.pem`,
-          expiresAt: await this.getCertificateExpiry(domain)
+          certificatePath: certificatePath,
+          keyPath: keyPath,
+          certBasePath: certBasePath,
+          expiresAt: await this.getCertificateExpiry(domain, certBasePath)
         };
       }
 
@@ -170,11 +216,38 @@ Alias /.well-known/acme-challenge ${webroot}/.well-known/acme-challenge
         }
       }
 
-      const command = `certbot certonly --webroot -w ${webroot} -d ${domain} -d www.${domain} --email ${this.certbotEmail} --agree-tos --non-interactive --quiet`;
+      // Build certbot command with writable directories to avoid permission issues
+      let command = `certbot certonly --webroot -w ${webroot} -d ${domain} -d www.${domain} --email ${this.certbotEmail} --agree-tos --non-interactive --quiet`;
+      
+      // Add writable directories if not using sudo
+      if (!this.useSudo) {
+        // Ensure directories exist
+        try {
+          await fs.mkdir(this.certbotConfigDir, { recursive: true });
+          await fs.mkdir(this.certbotWorkDir, { recursive: true });
+          await fs.mkdir(this.certbotLogsDir, { recursive: true });
+          console.log(`✅ Created writable certbot directories`);
+        } catch (dirError) {
+          console.warn(`⚠️  Could not create certbot directories: ${dirError.message}`);
+        }
+        
+        command += ` --config-dir ${this.certbotConfigDir} --work-dir ${this.certbotWorkDir} --logs-dir ${this.certbotLogsDir}`;
+        console.log(`   Using writable certbot directories:`);
+        console.log(`     Config: ${this.certbotConfigDir}`);
+        console.log(`     Work: ${this.certbotWorkDir}`);
+        console.log(`     Logs: ${this.certbotLogsDir}`);
+      } else {
+        command = `sudo ${command}`;
+        console.log(`   Using sudo for certbot (requires passwordless sudo)`);
+      }
 
       console.log(`🔒 Provisioning SSL certificate for ${domain} using Let's Encrypt...`);
+      console.log(`   Command: ${command}`);
       
       const { stdout, stderr } = await execPromise(command);
+
+      // Certificate paths are already determined above (certBasePath variable)
+      // Use the same certBasePath that was set for the command
 
       if (stderr && !stderr.includes('Congratulations')) {
         // Check if certificate already exists
@@ -184,8 +257,9 @@ Alias /.well-known/acme-challenge ${webroot}/.well-known/acme-challenge
             domain,
             provider: 'letsencrypt',
             message: 'SSL certificate already exists or is valid',
-            certificatePath: `/etc/letsencrypt/live/${domain}/fullchain.pem`,
-            keyPath: `/etc/letsencrypt/live/${domain}/privkey.pem`
+            certificatePath: certificatePath,
+            keyPath: keyPath,
+            certBasePath: certBasePath
           };
         }
         throw new Error(`Certbot error: ${stderr}`);
@@ -196,25 +270,73 @@ Alias /.well-known/acme-challenge ${webroot}/.well-known/acme-challenge
         domain,
         provider: 'letsencrypt',
         message: 'SSL certificate provisioned successfully',
-        certificatePath: `/etc/letsencrypt/live/${domain}/fullchain.pem`,
-        keyPath: `/etc/letsencrypt/live/${domain}/privkey.pem`,
-        expiresAt: await this.getCertificateExpiry(domain)
+        certificatePath: certificatePath,
+        keyPath: keyPath,
+        certBasePath: certBasePath,
+        expiresAt: await this.getCertificateExpiry(domain, certBasePath)
       };
     } catch (error) {
       // If certbot is not installed, return instructions
-      if (error.message.includes('certbot: command not found')) {
+      if (error.message.includes('certbot: command not found') || error.message.includes('certbot: not found')) {
         return {
           success: false,
           domain,
           provider: 'letsencrypt',
           message: 'Certbot is not installed. Please install certbot to provision SSL certificates.',
           instructions: [
-            'Install certbot: sudo apt-get install certbot python3-certbot-nginx (or python3-certbot-apache)',
-            'Or use standalone mode: certbot certonly --standalone -d ' + domain
+            'Install certbot for Apache: sudo apt-get install certbot python3-certbot-apache',
+            'OR install certbot for Nginx: sudo apt-get install certbot python3-certbot-nginx',
+            'OR use standalone mode: Set SSL_USE_STANDALONE=true in .env'
           ]
         };
       }
-      throw error;
+      
+      // If permission denied error, provide solutions
+      if (error.message.includes('Permission denied') || error.message.includes('Errno 13') || error.message.includes('.certbot.lock')) {
+        return {
+          success: false,
+          domain,
+          provider: 'letsencrypt',
+          message: 'Certbot permission denied. Certbot needs to run as root or use writable directories.',
+          error: error.message,
+          instructions: [
+            'Option 1 (Recommended): Use writable directories (already configured)',
+            `  The code uses: --config-dir ${this.certbotConfigDir} --work-dir ${this.certbotWorkDir} --logs-dir ${this.certbotLogsDir}`,
+            `  Ensure these directories are writable: chmod -R 755 ${this.certbotConfigDir} ${this.certbotWorkDir} ${this.certbotLogsDir}`,
+            '',
+            'Option 2: Use sudo (requires passwordless sudo)',
+            '  Set SSL_USE_SUDO=true in .env',
+            '  Configure passwordless sudo: sudo visudo',
+            '  Add: your_user ALL=(ALL) NOPASSWD: /usr/bin/certbot',
+            '',
+            'Option 3: Run certbot manually as root',
+            `  sudo certbot certonly --webroot -w ${this.sharedWebrootPath} -d ${domain} -d www.${domain} --email ${this.certbotEmail} --agree-tos --non-interactive`
+          ],
+          certbotDirs: {
+            configDir: this.certbotConfigDir,
+            workDir: this.certbotWorkDir,
+            logsDir: this.certbotLogsDir
+          }
+        };
+      }
+      
+      // For other errors, include the full error message
+      return {
+        success: false,
+        domain,
+        provider: 'letsencrypt',
+        message: error.message || 'SSL certificate provisioning failed',
+        error: error.message,
+        stderr: error.stderr || null,
+        stdout: error.stdout || null,
+        instructions: [
+          'Check certbot logs: journalctl -u certbot or check the logs directory',
+          'Verify domain DNS is pointing to this server',
+          'Ensure port 80 is accessible for HTTP-01 challenge',
+          'Check Apache configuration allows serving .well-known directory',
+          `Try running certbot manually to see detailed error: sudo certbot certonly --webroot -w ${this.sharedWebrootPath} -d ${domain}`
+        ]
+      };
     }
   }
 
@@ -251,12 +373,17 @@ Alias /.well-known/acme-challenge ${webroot}/.well-known/acme-challenge
   /**
    * Get certificate expiry date
    */
-  async getCertificateExpiry(domain) {
+  async getCertificateExpiry(domain, certBasePath = null) {
     try {
-      const { stdout } = await execPromise(`openssl x509 -enddate -noout -in /etc/letsencrypt/live/${domain}/cert.pem`);
+      // Use provided certBasePath or determine from config
+      const basePath = certBasePath || (this.useSudo ? '/etc/letsencrypt' : this.certbotConfigDir);
+      const certPath = `${basePath}/live/${domain}/cert.pem`;
+      
+      const { stdout } = await execPromise(`openssl x509 -enddate -noout -in ${certPath}`);
       const expiryMatch = stdout.match(/notAfter=(.+)/);
       return expiryMatch ? expiryMatch[1] : null;
     } catch (error) {
+      console.warn(`Could not get certificate expiry for ${domain}:`, error.message);
       return null;
     }
   }
@@ -266,7 +393,15 @@ Alias /.well-known/acme-challenge ${webroot}/.well-known/acme-challenge
    */
   async renewSSL(domain) {
     try {
-      const command = `certbot renew --cert-name ${domain} --quiet`;
+      // Build renew command with writable directories if not using sudo
+      let command = `certbot renew --cert-name ${domain} --quiet`;
+      
+      if (!this.useSudo) {
+        command += ` --config-dir ${this.certbotConfigDir} --work-dir ${this.certbotWorkDir} --logs-dir ${this.certbotLogsDir}`;
+      } else {
+        command = `sudo ${command}`;
+      }
+      
       const { stdout, stderr } = await execPromise(command);
       
       return {
