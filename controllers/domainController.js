@@ -919,13 +919,13 @@ async function getDomainById(req, res) {
       });
     }
 
-    // Check tenant access
+    // Validate that the domain belongs to the tenant making the request
+    // This ensures only the domain owner can view domain details
     const tenantId = req.user?.tenantId;
-    const isFreePlan = req.user?.tenant?.subscription_plan === 'free';
-    if (isFreePlan && domain.tenant_id !== tenantId) {
+    if (domain.tenant_id !== tenantId) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied'
+        message: 'Access denied. You can only view domains that you own.'
       });
     }
 
@@ -1391,14 +1391,14 @@ async function updateDNSRecords(req, res) {
       });
     }
 
-    // Check tenant access
+    // Validate that the domain belongs to the tenant making the request
+    // This ensures only the domain owner can update DNS records
     const tenantId = req.user?.tenantId;
-    const isFreePlan = req.user?.tenant?.subscription_plan === 'free';
-    if (isFreePlan && domain.tenant_id !== tenantId) {
+    if (domain.tenant_id !== tenantId) {
       await transaction.rollback();
       return res.status(403).json({
         success: false,
-        message: 'Access denied'
+        message: 'Access denied. You can only update DNS records for domains that you own.'
       });
     }
 
@@ -1461,13 +1461,13 @@ async function provisionSSL(req, res) {
       });
     }
 
-    // Check tenant access
+    // Validate that the domain belongs to the tenant making the request
+    // This ensures only the domain owner can provision SSL certificates
     const tenantId = req.user?.tenantId;
-    const isFreePlan = req.user?.tenant?.subscription_plan === 'free';
-    if (isFreePlan && domain.tenant_id !== tenantId) {
+    if (domain.tenant_id !== tenantId) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied'
+        message: 'Access denied. You can only provision SSL certificates for domains that you own.'
       });
     }
 
@@ -1516,13 +1516,13 @@ async function checkSSLStatus(req, res) {
       });
     }
 
-    // Check tenant access
+    // Validate that the domain belongs to the tenant making the request
+    // This ensures only the domain owner can check SSL status
     const tenantId = req.user?.tenantId;
-    const isFreePlan = req.user?.tenant?.subscription_plan === 'free';
-    if (isFreePlan && domain.tenant_id !== tenantId) {
+    if (domain.tenant_id !== tenantId) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied'
+        message: 'Access denied. You can only check SSL status for domains that you own.'
       });
     }
 
