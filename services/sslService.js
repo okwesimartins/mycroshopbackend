@@ -1,457 +1,147 @@
-const axios = require('axios');
 const { exec } = require('child_process');
 const util = require('util');
 const fs = require('fs').promises;
 const path = require('path');
+
 const execPromise = util.promisify(exec);
 
-/**
- * SSL Certificate Service
- * Handles SSL certificate provisioning for custom domains
- */
 class SSLService {
   constructor() {
     this.sslProvider = process.env.SSL_PROVIDER || 'letsencrypt';
     this.certbotEmail = process.env.CERTBOT_EMAIL || process.env.ADMIN_EMAIL;
-    this.serverIp = process.env.MYCROSHOP_SERVER_IP || process.env.SERVER_IP;
-    
-    // Webroot path for ACME challenges (defaults to cPanel public_html)
+
     this.webrootPath = process.env.SSL_WEBROOT_PATH || '/home/legithairng/public_html';
-    
-    // Certbot base directory (defaults to home directory)
+
     this.certbotBase = process.env.CERTBOT_BASE_PATH || '/home/legithairng/letsencrypt';
-    
-    // Certbot subdirectories
-    this.configDir = `${this.certbotBase}/config`;
-    this.workDir = `${this.certbotBase}/work`;
-    this.logsDir = `${this.certbotBase}/logs`;
-    
-    // Use standalone mode if SSL_USE_STANDALONE is true (doesn't require webroot)
+    this.configDir = process.env.CERTBOT_CONFIG_DIR || `${this.certbotBase}/config`;
+    this.workDir = process.env.CERTBOT_WORK_DIR || `${this.certbotBase}/work`;
+    this.logsDir = process.env.CERTBOT_LOGS_DIR || `${this.certbotBase}/logs`;
+
     this.useStandalone = process.env.SSL_USE_STANDALONE === 'true';
+    this.certbotQuiet = process.env.CERTBOT_QUIET !== 'false'; // default true
   }
 
-  /**
-   * Provision SSL certificate for a domain
-   * @param {string} domain - Domain name
-   * @param {string} onlineStoreUsername - Optional online store username (for logging)
-   * @returns {Promise<Object>} SSL provisioning result
-   */
-  async provisionSSL(domain, onlineStoreUsername = null) {
+  async provisionSSL(domain) {
     if (this.sslProvider !== 'letsencrypt') {
-      throw new Error('Only letsencrypt is supported in this build.');
+      throw new Error('Only letsencrypt is supported.');
     }
-
     if (!this.certbotEmail) {
-      throw new Error('CERTBOT_EMAIL or ADMIN_EMAIL must be set for Let\'s Encrypt SSL');
+      throw new Error("CERTBOT_EMAIL (or ADMIN_EMAIL) must be set.");
     }
-
-    return this.provisionLetsEncrypt(domain, onlineStoreUsername);
+    return this.provisionLetsEncrypt(domain);
   }
 
-  /**
-   * Provision SSL using Let's Encrypt (certbot)
-   */
-  async provisionLetsEncrypt(domain, onlineStoreUsername = null) {
+  async provisionLetsEncrypt(domain) {
+    // 1) Ensure certbot dirs
+    await fs.mkdir(this.configDir, { recursive: true });
+    await fs.mkdir(this.workDir, { recursive: true });
+    await fs.mkdir(this.logsDir, { recursive: true });
+
+    // 2) Ensure ACME dir exists inside webroot
+    const acmePath = path.join(this.webrootPath, '.well-known', 'acme-challenge');
+    await fs.mkdir(acmePath, { recursive: true });
+
+    // 3) Write test file to confirm app can write
+    const testFile = path.join(acmePath, '.write-test');
+    await fs.writeFile(testFile, 'ok');
+    await fs.unlink(testFile);
+
+    // 4) Build certbot command
+    const quietFlag = this.certbotQuiet ? '--quiet' : '';
+    const baseFlags = [
+      'certbot certonly',
+      this.useStandalone ? '--standalone' : `--webroot -w ${this.webrootPath}`,
+      `-d ${domain}`,
+      `-d www.${domain}`,
+      `--email ${this.certbotEmail}`,
+      '--agree-tos',
+      '--non-interactive',
+      quietFlag,
+      `--config-dir ${this.configDir}`,
+      `--work-dir ${this.workDir}`,
+      `--logs-dir ${this.logsDir}`,
+    ].filter(Boolean).join(' ');
+
+    console.log('🔒 Certbot command:', baseFlags);
+
     try {
-      // Ensure writable certbot directories
-      await fs.mkdir(this.configDir, { recursive: true });
-      await fs.mkdir(this.workDir, { recursive: true });
-      await fs.mkdir(this.logsDir, { recursive: true });
-      console.log(`✅ Created certbot directories (base: ${this.certbotBase})`);
+      const { stdout, stderr } = await execPromise(baseFlags);
 
-      // Use standalone mode if configured (doesn't require webroot)
-      if (this.useStandalone) {
-        console.log(`🔒 Using standalone mode for SSL provisioning (no webroot required)`);
-        
-        const command = `certbot certonly --standalone -d ${domain} -d www.${domain} --email ${this.certbotEmail} --agree-tos --non-interactive --quiet --config-dir ${this.configDir} --work-dir ${this.workDir} --logs-dir ${this.logsDir}`;
-        
-        console.log(`🔒 Provisioning SSL certificate for ${domain} using Let's Encrypt (standalone mode)...`);
-        console.log(`   Command: ${command}`);
-        
-        const { stdout, stderr } = await execPromise(command);
-        
-        // Determine certificate paths
-        const certBasePath = this.configDir;
-        const certificatePath = `${certBasePath}/live/${domain}/fullchain.pem`;
-        const keyPath = `${certBasePath}/live/${domain}/privkey.pem`;
-        
-        if (stderr && !stderr.includes('Congratulations') && !stderr.includes('Successfully received certificate')) {
-          // Check if certificate already exists
-          if (stderr.includes('already exists') || stderr.includes('Certificate not yet due for renewal')) {
-            return {
-              success: true,
-              domain,
-              provider: 'letsencrypt',
-              message: 'SSL certificate already exists or is valid',
-              certificatePath: certificatePath,
-              keyPath: keyPath,
-              certBasePath: certBasePath
-            };
-          }
-          throw new Error(`Certbot error: ${stderr}`);
+      // certbot often prints normal info to stderr; only fail if obvious error keywords
+      const combined = `${stdout || ''}\n${stderr || ''}`.toLowerCase();
+      if (combined.includes('error') || combined.includes('failed') || combined.includes('unauthorized')) {
+        // If cert already exists, treat as success
+        if (combined.includes('certificate not yet due') || combined.includes('already exists')) {
+          return this._success(domain);
         }
-
-        return {
-          success: true,
-          domain,
-          provider: 'letsencrypt',
-          message: 'SSL certificate provisioned successfully (standalone mode)',
-          certificatePath: certificatePath,
-          keyPath: keyPath,
-          certBasePath: certBasePath,
-          expiresAt: await this.getCertificateExpiry(domain, certBasePath)
-        };
+        // Return useful diagnostics
+        return this._fail(domain, `Certbot challenge failed.`, stdout, stderr);
       }
 
-      // Webroot mode - ensure ACME challenge folder exists and is writable
-      const acmePath = path.join(this.webrootPath, '.well-known', 'acme-challenge');
-      
-      try {
-        // Check if webroot exists
-        await fs.access(this.webrootPath);
-        console.log(`✅ Webroot directory exists: ${this.webrootPath}`);
-        
-        // Check if acme-challenge directory exists, if not create it
-        try {
-          await fs.access(acmePath);
-          console.log(`✅ ACME challenge directory exists: ${acmePath}`);
-        } catch {
-          console.log(`⚠️  ACME challenge directory does not exist. Attempting to create...`);
-          try {
-            await fs.mkdir(acmePath, { recursive: true });
-            console.log(`✅ Created ACME challenge directory: ${acmePath}`);
-          } catch (acmeError) {
-            throw new Error(`Cannot create ACME challenge directory: ${acmeError.message}. The webroot directory is not writable by the Node.js user.`);
-          }
-        }
-        
-        // Test write permissions by creating a test file
-        const testFilePath = path.join(acmePath, '.write-test');
-        try {
-          await fs.writeFile(testFilePath, 'test');
-          await fs.unlink(testFilePath);
-          console.log(`✅ Webroot directory is writable`);
-        } catch (writeError) {
-          throw new Error(`Webroot directory is not writable: ${writeError.message}. The Node.js user cannot write to ${acmePath}`);
-        }
-        
-      } catch (accessError) {
-        // Directory doesn't exist or isn't writable
-        if (accessError.message.includes('not writable') || accessError.message.includes('Cannot create')) {
-          const username = process.env.USER || process.env.USERNAME || 'legithairng';
-          
-          return {
-            success: false,
-            domain,
-            provider: 'letsencrypt',
-            message: `Webroot directory is not writable: ${this.webrootPath}`,
-            error: accessError.message,
-            instructions: [
-              `The webroot directory exists but the Node.js user (${username}) cannot write to it.`,
-              `Certbot needs to write HTTP challenge files to: ${acmePath}`,
-              ``,
-              `✅ FIX IT (Run these exact commands):`,
-              ``,
-              `1. Create the challenge directory:`,
-              `   sudo mkdir -p ${acmePath}`,
-              ``,
-              `2. Give ownership to your Node.js user:`,
-              `   sudo chown -R ${username}:${username} ${this.webrootPath}`,
-              ``,
-              `3. Set permissions (755 for base, 775 for challenge dir):`,
-              `   sudo chmod -R 755 ${this.webrootPath}`,
-              `   sudo chmod -R 775 ${acmePath}`,
-              ``,
-              `4. Test write access:`,
-              `   echo "OK" > ${acmePath}/test.txt`,
-              `   curl -I http://${domain}/.well-known/acme-challenge/test.txt`,
-              `   # Should return HTTP 200, not 403 or 404`,
-              `   rm ${acmePath}/test.txt`,
-              ``,
-              `5. Configure Apache to serve the challenge directory (see apacheConfig below)`
-            ],
-            apacheConfig: `# Add this to your Apache configuration (e.g., /etc/apache2/conf.d/letsencrypt.conf):
-Alias /.well-known/acme-challenge/ "${acmePath}/"
-
-<Directory "${acmePath}/">
-    AllowOverride None
-    Options None
-    Require all granted
-</Directory>
-
-# Test configuration:
-# sudo apachectl configtest
-# sudo systemctl restart httpd  # or: sudo systemctl restart apache2`,
-            webroot: this.webrootPath,
-            acmeChallengePath: acmePath,
-            currentUser: username
-          };
-        }
-        
-        // Directory doesn't exist, try to create it
-        console.log(`⚠️  Webroot directory does not exist: ${this.webrootPath}. Attempting to create...`);
-        try {
-          await fs.mkdir(this.webrootPath, { recursive: true });
-          await fs.mkdir(acmePath, { recursive: true });
-          console.log(`✅ Created webroot and ACME challenge directories`);
-        } catch (mkdirError) {
-          const username = process.env.USER || process.env.USERNAME || 'legithairng';
-          
-          return {
-            success: false,
-            domain,
-            provider: 'letsencrypt',
-            message: `Webroot directory does not exist and could not be created: ${this.webrootPath}`,
-            error: mkdirError.message,
-            instructions: [
-              `✅ FIX IT (Run these exact commands):`,
-              ``,
-              `1. Create the directory structure:`,
-              `   sudo mkdir -p ${acmePath}`,
-              ``,
-              `2. Give ownership to your Node.js user:`,
-              `   sudo chown -R ${username}:${username} ${this.webrootPath}`,
-              ``,
-              `3. Set permissions:`,
-              `   sudo chmod -R 755 ${this.webrootPath}`,
-              `   sudo chmod -R 775 ${acmePath}`,
-              ``,
-              `4. Configure Apache (see apacheConfig below)`,
-              ``,
-              `OR use standalone mode: Set SSL_USE_STANDALONE=true in .env (requires port 80 free)`
-            ],
-            apacheConfig: `# Add this to your Apache configuration:
-Alias /.well-known/acme-challenge/ "${acmePath}/"
-
-<Directory "${acmePath}/">
-    AllowOverride None
-    Options None
-    Require all granted
-</Directory>`,
-            webroot: this.webrootPath,
-            acmeChallengePath: acmePath,
-            currentUser: username
-          };
-        }
-      }
-
-      // Build certbot command (webroot mode)
-      const command = `certbot certonly --webroot -w ${this.webrootPath} -d ${domain} -d www.${domain} --email ${this.certbotEmail} --agree-tos --non-interactive --quiet --config-dir ${this.configDir} --work-dir ${this.workDir} --logs-dir ${this.logsDir}`;
-
-      console.log(`🔒 Provisioning SSL certificate for ${domain} using Let's Encrypt...`);
-      console.log(`   Command: ${command}`);
-      
-      const { stdout, stderr } = await execPromise(command);
-
-      // Determine certificate paths
-      const certBasePath = this.configDir;
-      const certificatePath = `${certBasePath}/live/${domain}/fullchain.pem`;
-      const keyPath = `${certBasePath}/live/${domain}/privkey.pem`;
-
-      // Check for errors in stderr (certbot outputs errors to stderr even on success)
-      if (stderr && !stderr.includes('Congratulations') && !stderr.includes('Successfully received certificate')) {
-        // Check if certificate already exists
-        if (stderr.includes('already exists') || stderr.includes('Certificate not yet due for renewal')) {
-          return {
-            success: true,
-            domain,
-            provider: 'letsencrypt',
-            message: 'SSL certificate already exists or is valid',
-            certificatePath: certificatePath,
-            keyPath: keyPath,
-            certBasePath: certBasePath
-          };
-        }
-        
-        // Check for challenge failures - this means Let's Encrypt cannot access the challenge file via HTTP
-        if (stderr.includes('Some challenges have failed') || stderr.includes('challenge failed') || stderr.includes('Failed authorization procedure')) {
-          // Try to get more details from certbot logs
-          let logDetails = '';
-          try {
-            const logPath = `${this.logsDir}/letsencrypt.log`;
-            const logContent = await fs.readFile(logPath, 'utf8');
-            const logLines = logContent.split('\n').slice(-50).join('\n');
-            logDetails = logLines;
-          } catch (logError) {
-            console.warn('Could not read certbot logs:', logError.message);
-          }
-          
-          return {
-            success: false,
-            domain,
-            provider: 'letsencrypt',
-            message: 'HTTP-01 challenge failed. Let\'s Encrypt cannot access the challenge file via HTTP.',
-            error: stderr.trim(),
-            stderr: stderr.trim(),
-            stdout: stdout ? stdout.trim() : null,
-            logDetails: logDetails,
-            instructions: [
-              `The HTTP-01 challenge failed. This means Let's Encrypt cannot access the challenge file via HTTP.`,
-              ``,
-              `🔍 DIAGNOSTIC STEPS:`,
-              ``,
-              `1. Verify Apache is serving the challenge directory:`,
-              `   echo "OK" > ${acmePath}/test.txt`,
-              `   curl -I http://${domain}/.well-known/acme-challenge/test.txt`,
-              `   # Should return HTTP 200, not 403 or 404`,
-              ``,
-              `2. Verify DNS is pointing to this server:`,
-              `   dig ${domain} +short`,
-              `   # Should return your server IP: ${this.serverIp || 'YOUR_SERVER_IP'}`,
-              ``,
-              `3. Verify port 80 is accessible:`,
-              `   curl -I http://${domain}`,
-              ``,
-              `4. Check certbot logs:`,
-              `   cat ${this.logsDir}/letsencrypt.log | tail -50`
-            ],
-            apacheConfig: `# Ensure this is in your Apache configuration:
-Alias /.well-known/acme-challenge/ "${acmePath}/"
-
-<Directory "${acmePath}/">
-    AllowOverride None
-    Options None
-    Require all granted
-</Directory>`,
-            webroot: this.webrootPath,
-            acmeChallengePath: acmePath,
-            domain: domain,
-            serverIp: this.serverIp,
-            certbotLogsDir: this.logsDir
-          };
-        }
-        
-        // Other certbot errors
-        throw new Error(`Certbot error: ${stderr}`);
-      }
-
-      return {
-        success: true,
-        domain,
-        provider: 'letsencrypt',
-        message: 'SSL certificate provisioned successfully',
-        certificatePath: certificatePath,
-        keyPath: keyPath,
-        certBasePath: certBasePath,
-        expiresAt: await this.getCertificateExpiry(domain, certBasePath)
-      };
-    } catch (error) {
-      // If certbot is not installed, return instructions
-      if (error.message.includes('certbot: command not found') || error.message.includes('certbot: not found')) {
-        return {
-          success: false,
-          domain,
-          provider: 'letsencrypt',
-          message: 'Certbot is not installed. Please install certbot to provision SSL certificates.',
-          error: error.message,
-          instructions: [
-            'Install certbot for Apache: sudo apt-get install certbot python3-certbot-apache',
-            'OR install certbot for Nginx: sudo apt-get install certbot python3-certbot-nginx',
-            'OR use standalone mode: Set SSL_USE_STANDALONE=true in .env'
-          ]
-        };
-      }
-      
-      // If permission denied error, provide solutions
-      if (error.message.includes('Permission denied') || error.message.includes('Errno 13') || error.message.includes('.certbot.lock')) {
-        return {
-          success: false,
-          domain,
-          provider: 'letsencrypt',
-          message: 'Certbot permission denied. Certbot needs to run as root or use writable directories.',
-          error: error.message,
-          instructions: [
-            'The code uses writable directories (already configured)',
-            `Config: ${this.configDir}`,
-            `Work: ${this.workDir}`,
-            `Logs: ${this.logsDir}`,
-            `Ensure these directories are writable: chmod -R 755 ${this.configDir} ${this.workDir} ${this.logsDir}`
-          ],
-          certbotDirs: {
-            configDir: this.configDir,
-            workDir: this.workDir,
-            logsDir: this.logsDir
-          }
-        };
-      }
-      
-      // For other errors, include the full error message
-      return {
-        success: false,
-        domain,
-        provider: 'letsencrypt',
-        message: error.message || 'SSL certificate provisioning failed',
-        error: error.message,
-        stderr: error.stderr || null,
-        stdout: error.stdout || null,
-        instructions: [
-          'Check certbot logs: journalctl -u certbot or check the logs directory',
-          'Verify domain DNS is pointing to this server',
-          'Ensure port 80 is accessible for HTTP-01 challenge',
-          'Check Apache configuration allows serving .well-known directory',
-          `Try running certbot manually: certbot certonly --webroot -w ${this.webrootPath} -d ${domain} --config-dir ${this.configDir} --work-dir ${this.workDir} --logs-dir ${this.logsDir}`
-        ]
-      };
+      return this._success(domain);
+    } catch (err) {
+      // Capture full output
+      return this._fail(domain, `Certbot execution failed: ${err.message}`, err.stdout, err.stderr);
     }
   }
 
-  /**
-   * Get certificate expiry date
-   */
-  async getCertificateExpiry(domain, certBasePath = null) {
+  _success(domain) {
+    const certBasePath = this.configDir;
+    return {
+      success: true,
+      domain,
+      provider: 'letsencrypt',
+      message: 'SSL certificate provisioned successfully',
+      certificatePath: `${certBasePath}/live/${domain}/fullchain.pem`,
+      keyPath: `${certBasePath}/live/${domain}/privkey.pem`,
+      certBasePath,
+    };
+  }
+
+  async _fail(domain, message, stdout, stderr) {
+    // Tail certbot log for details (very helpful)
+    let logTail = '';
     try {
-      const basePath = certBasePath || this.configDir;
-      const certPath = `${basePath}/live/${domain}/cert.pem`;
-      
-      const { stdout } = await execPromise(`openssl x509 -enddate -noout -in ${certPath}`);
-      const expiryMatch = stdout.match(/notAfter=(.+)/);
-      return expiryMatch ? expiryMatch[1] : null;
-    } catch (error) {
-      console.warn(`Could not get certificate expiry for ${domain}:`, error.message);
-      return null;
-    }
+      const logPath = path.join(this.logsDir, 'letsencrypt.log');
+      const log = await fs.readFile(logPath, 'utf8');
+      logTail = log.split('\n').slice(-120).join('\n');
+    } catch (_) {}
+
+    return {
+      success: false,
+      domain,
+      provider: 'letsencrypt',
+      message,
+      stdout: stdout ? String(stdout) : null,
+      stderr: stderr ? String(stderr) : null,
+      logTail: logTail || null,
+      instructions: [
+        '1) Confirm DNS for domain + www points to this VPS IP.',
+        '2) Confirm port 80 is reachable publicly (HTTP).',
+        '3) Confirm Apache serves /.well-known/acme-challenge/ from SSL_WEBROOT_PATH.',
+        `Test: echo OK > ${this.webrootPath}/.well-known/acme-challenge/test.txt`,
+        `Then: curl -i http://${domain}/.well-known/acme-challenge/test.txt  (must be 200 + OK)`,
+      ],
+    };
   }
 
-  /**
-   * Check SSL certificate status
-   */
   async checkSSLStatus(domain) {
     try {
       const certPath = `${this.configDir}/live/${domain}/cert.pem`;
       const { stdout } = await execPromise(`openssl x509 -in ${certPath} -noout -dates`);
-      
-      return {
-        exists: true,
-        details: stdout
-      };
-    } catch (error) {
-      return { 
-        exists: false,
-        error: error.message
-      };
+      return { exists: true, details: stdout };
+    } catch (e) {
+      return { exists: false, error: e.message };
     }
   }
 
-  /**
-   * Renew SSL certificate (for Let's Encrypt)
-   */
   async renewSSL(domain) {
     try {
-      const command = `certbot renew --cert-name ${domain} --quiet --config-dir ${this.configDir} --work-dir ${this.workDir} --logs-dir ${this.logsDir}`;
-      
-      const { stdout, stderr } = await execPromise(command);
-      
-      return {
-        success: true,
-        domain,
-        message: 'SSL certificate renewed successfully'
-      };
-    } catch (error) {
-      return {
-        success: false,
-        domain,
-        error: error.message
-      };
+      const command = `certbot renew --cert-name ${domain} ${this.certbotQuiet ? '--quiet' : ''} --config-dir ${this.configDir} --work-dir ${this.workDir} --logs-dir ${this.logsDir}`;
+      await execPromise(command);
+      return { success: true, domain, message: 'Renewal attempted' };
+    } catch (e) {
+      return { success: false, domain, error: e.message };
     }
   }
 }
