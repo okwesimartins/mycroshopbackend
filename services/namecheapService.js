@@ -478,9 +478,29 @@ class NamecheapService {
    */
   async getDNSHostRecords(domain) {
     try {
+      // Namecheap API requires SLD (Second Level Domain) and TLD (Top Level Domain) separately
+      // Example: "example.com" -> SLD: "example", TLD: "COM"
+      const domainParts = domain.split('.');
+      if (domainParts.length < 2) {
+        throw new Error(`Invalid domain format: ${domain}`);
+      }
+      
+      // Extract TLD (last part, e.g., "com")
+      const tld = domainParts.pop().toUpperCase();
+      
+      // Extract SLD (second-level domain, e.g., "example" from "example.com")
+      // If domain is "sub.example.com", we want SLD="example" (not "sub.example")
+      const sld = domainParts.length > 0 ? domainParts[domainParts.length - 1] : domainParts[0];
+      
+      if (!sld || !tld) {
+        throw new Error(`Could not extract SLD and TLD from domain: ${domain}`);
+      }
+      
+      console.log(`🔍 Domain parsing for DNS get: ${domain} -> SLD: ${sld}, TLD: ${tld}`);
+      
       const response = await this.makeRequest('namecheap.domains.dns.getHosts', {
-        DomainName: domain,
-        Tld: domain.split('.').pop()
+        SLD: sld, // Second Level Domain (required by Namecheap API)
+        TLD: tld  // Top Level Domain (required by Namecheap API, uppercase)
       });
 
       const hosts = response.CommandResponse?.DomainDNSGetHostsResult?.Host;

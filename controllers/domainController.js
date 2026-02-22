@@ -1280,13 +1280,12 @@ async function getDNSRecords(req, res) {
       });
     }
 
-    // Check tenant access
+    // Validate that the domain belongs to the tenant making the request
     const tenantId = req.user?.tenantId;
-    const isFreePlan = req.user?.tenant?.subscription_plan === 'free';
-    if (isFreePlan && domain.tenant_id !== tenantId) {
+    if (domain.tenant_id !== tenantId) {
       return res.status(403).json({
         success: false,
-        message: 'Access denied'
+        message: 'Access denied. You can only view DNS records for domains that you own.'
       });
     }
 
