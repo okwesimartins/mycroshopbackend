@@ -281,6 +281,53 @@ async function setupOnlineStore(req, res) {
 }
 
 /**
+ * Get default and storefront URLs for an online store (dedicated API).
+ * GET /api/v1/stores/online/:id/urls
+ * Returns only URL fields so the client can get the store link without loading full store data.
+ */
+async function getOnlineStoreUrls(req, res) {
+  try {
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const onlineStore = await findTenantOnlineStoreById(req, models, req.params.id, {
+      attributes: ['id', 'username', 'custom_domain']
+    });
+
+    if (!onlineStore) {
+      return res.status(404).json({
+        success: false,
+        message: 'Online store not found'
+      });
+    }
+
+    const default_store_url = getDefaultStoreUrl(onlineStore.username);
+    const storefront_url = getStorefrontUrl(onlineStore);
+
+    res.json({
+      success: true,
+      data: {
+        default_store_url,
+        storefront_url,
+        custom_domain: onlineStore.custom_domain || null
+      }
+    });
+  } catch (error) {
+    console.error('Error getting online store URLs:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get store URLs',
+      error: error.message
+    });
+  }
+}
+
+/**
  * Get online store by ID
  */
 async function getOnlineStoreById(req, res) {
@@ -4891,6 +4938,7 @@ async function getPreviewProduct(req, res) {
 module.exports = {
   checkOnlineStoreSetup,
   setupOnlineStore,
+  getOnlineStoreUrls,
   getOnlineStoreById,
   updateStorefront,
   updateStoreInformation,
