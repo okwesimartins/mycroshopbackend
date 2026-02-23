@@ -3,6 +3,30 @@ const path = require('path');
 const fs = require('fs');
 const initModels = require('../models');
 
+/**
+ * Get the default store URL (subdomain on MycroShop: username.mycroshop.com).
+ * This is the always-available URL for every online store, without purchasing a domain.
+ */
+function getDefaultStoreUrl(username) {
+  if (!username) return null;
+  const mainDomain = process.env.MAIN_DOMAIN || 'mycroshop.com';
+  const protocol = process.env.NODE_ENV === 'production' ? 'https' : (process.env.FRONTEND_URL && process.env.FRONTEND_URL.startsWith('https') ? 'https' : 'http');
+  return `${protocol}://${username}.${mainDomain}`;
+}
+
+/**
+ * Get the primary storefront URL: custom domain if linked, otherwise the default subdomain URL.
+ */
+function getStorefrontUrl(onlineStore) {
+  const store = onlineStore && (onlineStore.toJSON ? onlineStore.toJSON() : onlineStore);
+  if (!store) return null;
+  if (store.custom_domain) {
+    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'https';
+    return `${protocol}://${store.custom_domain}`;
+  }
+  return getDefaultStoreUrl(store.username);
+}
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -230,6 +254,7 @@ async function setupOnlineStore(req, res) {
       });
     }
 
+    const defaultStoreUrl = getDefaultStoreUrl(onlineStore.username);
     res.status(201).json({
       success: true,
       message: 'Online store created successfully',
@@ -238,7 +263,9 @@ async function setupOnlineStore(req, res) {
           id: onlineStore.id,
           username: onlineStore.username,
           store_name: onlineStore.store_name,
-          storefront_link: `${process.env.FRONTEND_URL || 'mycroshop.com'}/${onlineStore.username}`
+          default_store_url: defaultStoreUrl,
+          storefront_url: defaultStoreUrl,
+          storefront_link: defaultStoreUrl
         }
       }
     });
@@ -599,7 +626,14 @@ function normalizeOnlineStoreData(req, onlineStore) {
   if (storeData.background_image_url) {
     storeData.background_image_url = getFullUrl(req, storeData.background_image_url);
   }
-  
+
+  // Subdomain is the default domain for MycroShop online stores (e.g. mystore.mycroshop.com)
+  storeData.default_store_url = getDefaultStoreUrl(storeData.username);
+  storeData.storefront_url = getStorefrontUrl(storeData);
+  if (!storeData.storefront_link) {
+    storeData.storefront_link = storeData.storefront_url || storeData.default_store_url;
+  }
+
   return storeData;
 }
 
