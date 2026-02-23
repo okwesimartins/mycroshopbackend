@@ -70,6 +70,9 @@ router.get('/preview/services/:service_id', onlineStoreController.getPreviewServ
 // Create/initialize online store
 router.post('/setup', onlineStoreController.setupOnlineStore);
 
+// Get default and storefront URLs for a store (dedicated API - no full store payload)
+router.get('/:id/urls', onlineStoreController.getOnlineStoreUrls);
+
 // Get online store by ID
 router.get('/:id', onlineStoreController.getOnlineStoreById);
 
