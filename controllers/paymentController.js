@@ -469,14 +469,16 @@ async function initializePayment(req, res) {
     let paymentData;
     const secretKey = decryptSecretKey(gateway.secret_key);
 
-    // Build metadata
+    // Build metadata: tenant_id is required so webhook/verify know which tenant DB to use (free vs enterprise).
     const paymentMetadata = {
-      ...metadata,
+      ...(metadata || {}),
       tenant_id: parsedTenantId,
       transaction_id: paymentTransaction.id
     };
-    
-    // Add online_store_id to metadata if available
+    if (metadata && metadata.service_id && metadata.scheduled_at) {
+      paymentMetadata.is_booking = true;
+      paymentMetadata.booking_type = 'service';
+    }
     if (onlineStore) {
       paymentMetadata.online_store_id = onlineStore.id;
     }
@@ -527,10 +529,13 @@ async function initializePayment(req, res) {
       });
     }
 
-    // Update transaction with gateway response
+    // Update transaction with gateway response and persist metadata so verifyPayment can create booking
     await paymentTransaction.update({
       gateway_transaction_id: paymentData.gateway_transaction_id || paymentData.reference,
-      gateway_response: paymentData
+      gateway_response: {
+        ...paymentData,
+        metadata: paymentMetadata
+      }
     });
 
     res.json({
@@ -624,9 +629,85 @@ async function verifyPayment(req, res) {
       });
     }
 
-    // Check if transaction has already been processed successfully
-    // Prevent duplicate processing and duplicate email sends
+    // If already verified, still try to create booking if this was a booking payment and no booking exists yet
     if (transaction.status === 'success') {
+      let metadata = {};
+      try {
+        const gr = transaction.gateway_response || {};
+        if (gr.metadata) metadata = typeof gr.metadata === 'string' ? JSON.parse(gr.metadata) : gr.metadata;
+        else if (gr.data && gr.data.metadata) metadata = typeof gr.data.metadata === 'string' ? JSON.parse(gr.data.metadata) : gr.data.metadata;
+      } catch (e) { /* ignore */ }
+      const isBookingPayment = metadata.is_booking === true || metadata.booking_type === 'service' || (metadata.service_id && metadata.scheduled_at);
+      const hasRequiredBookingData = isBookingPayment && metadata.service_id && metadata.scheduled_at && (isFreePlan || metadata.store_id);
+      if (hasRequiredBookingData) {
+        const existingBooking = await models.Booking.findOne({
+          where: { payment_transaction_id: transaction.id, ...(isFreePlan && transaction.tenant_id ? { tenant_id: transaction.tenant_id } : {}) }
+        });
+        if (!existingBooking) {
+          try {
+            const bookingData = {
+              tenant_id: isFreePlan ? transaction.tenant_id : null,
+              store_id: metadata.store_id || null,
+              service_id: metadata.service_id,
+              customer_name: transaction.customer_name || metadata.customer_name,
+              customer_email: transaction.customer_email || metadata.customer_email,
+              customer_phone: metadata.customer_phone || null,
+              scheduled_at: metadata.scheduled_at,
+              timezone: metadata.timezone || 'Africa/Lagos',
+              location_type: metadata.location_type || 'in_person',
+              staff_name: metadata.staff_name || null,
+              notes: metadata.notes || null,
+              status: 'confirmed',
+              payment_transaction_id: transaction.id
+            };
+            if (bookingData.customer_email) {
+              let customer = await models.Customer.findOne({ where: isFreePlan && transaction.tenant_id ? { email: bookingData.customer_email, tenant_id: transaction.tenant_id } : { email: bookingData.customer_email } });
+              if (!customer && bookingData.customer_phone) {
+                customer = await models.Customer.findOne({ where: isFreePlan && transaction.tenant_id ? { phone: bookingData.customer_phone, tenant_id: transaction.tenant_id } : { phone: bookingData.customer_phone } });
+              }
+              if (!customer && bookingData.customer_name) {
+                customer = await models.Customer.create({
+                  tenant_id: isFreePlan ? transaction.tenant_id : null,
+                  name: bookingData.customer_name,
+                  email: bookingData.customer_email,
+                  phone: bookingData.customer_phone
+                });
+              }
+              if (customer) bookingData.customer_id = customer.id;
+            }
+            const service = await models.StoreService.findOne({
+              where: metadata.store_id != null ? { id: metadata.service_id, store_id: metadata.store_id } : { id: metadata.service_id }
+            });
+            if (service) {
+              bookingData.service_title = service.service_title;
+              bookingData.description = service.description;
+              bookingData.duration_minutes = service.duration_minutes || 60;
+            }
+            const booking = await models.Booking.create(bookingData);
+            console.log('Booking created for already-verified transaction:', transaction.transaction_reference, 'booking id:', booking.id);
+            return res.json({
+              success: true,
+              message: 'Transaction already verified; booking created',
+              data: {
+                transaction: {
+                  id: transaction.id,
+                  reference: transaction.transaction_reference,
+                  status: transaction.status,
+                  amount: transaction.amount,
+                  platform_fee: transaction.platform_fee,
+                  merchant_amount: transaction.merchant_amount,
+                  paid_at: transaction.paid_at
+                },
+                booking: { id: booking.id, booking_number: booking.booking_number, status: booking.status, scheduled_at: booking.scheduled_at },
+                booking_created: true,
+                already_verified: true
+              }
+            });
+          } catch (bookingErr) {
+            console.error('Error creating booking for already-verified transaction:', bookingErr);
+          }
+        }
+      }
       console.log('Transaction already verified:', transaction.transaction_reference);
       return res.json({
         success: true,
@@ -1336,14 +1417,14 @@ async function verifyPayment(req, res) {
           console.warn('Could not parse metadata:', parseError);
         }
         
-        const isBookingPayment = metadata.is_booking === true || metadata.booking_type === 'service';
+        const isBookingPayment = metadata.is_booking === true ||
+          metadata.booking_type === 'service' ||
+          (metadata.service_id && metadata.scheduled_at);
         
-        // For free users, store_id is optional (services can exist without physical stores)
-        // For enterprise users, store_id is typically required
-        const hasRequiredBookingData = isBookingPayment && 
-          metadata.service_id && 
+        const hasRequiredBookingData = isBookingPayment &&
+          metadata.service_id &&
           metadata.scheduled_at &&
-          (isFreePlan || metadata.store_id); // store_id required for enterprise, optional for free
+          (isFreePlan || metadata.store_id);
         
         if (hasRequiredBookingData) {
           try {
@@ -1989,14 +2070,15 @@ async function handlePaymentWebhook(req, res) {
       }
 
       // Handle booking creation if payment is for a service booking
-      // This handles cases where verifyPayment failed due to network issues
-      if (metadata.is_booking === true || metadata.booking_type === 'service') {
+      // Uses tenant_id from metadata (set at initialize) so we have the correct DB; free vs enterprise via isFreePlan
+      const isBookingPayment = metadata.is_booking === true ||
+        metadata.booking_type === 'service' ||
+        (metadata.service_id && metadata.scheduled_at);
+      if (isBookingPayment) {
         try {
-          // For free users, store_id is optional (services can exist without physical stores)
-          // For enterprise users, store_id is typically required
-          const hasRequiredBookingData = metadata.service_id && 
+          const hasRequiredBookingData = metadata.service_id &&
             metadata.scheduled_at &&
-            (isFreePlan || metadata.store_id); // store_id required for enterprise, optional for free
+            (isFreePlan || metadata.store_id);
           
           if (hasRequiredBookingData) {
             // Check if booking already exists for this transaction
@@ -2062,10 +2144,17 @@ async function handlePaymentWebhook(req, res) {
                 }
               }
 
-              // Get service details
-              const service = await models.StoreService.findOne({
-                where: { id: metadata.service_id, store_id: metadata.store_id }
+              // Get service details (for free plan, store_id can be null)
+              let service = await models.StoreService.findOne({
+                where: metadata.store_id != null
+                  ? { id: metadata.service_id, store_id: metadata.store_id }
+                  : { id: metadata.service_id }
               });
+              if (!service && isFreePlan) {
+                service = await models.StoreService.findOne({
+                  where: { id: metadata.service_id }
+                });
+              }
 
               if (service) {
                 bookingData.service_title = service.service_title;
