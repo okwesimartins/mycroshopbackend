@@ -700,7 +700,8 @@ async function verifyPayment(req, res) {
                 },
                 booking: { id: booking.id, booking_number: booking.booking_number, status: booking.status, scheduled_at: booking.scheduled_at },
                 booking_created: true,
-                already_verified: true
+                already_verified: true,
+                metadata
               }
             });
           } catch (bookingErr) {
@@ -722,7 +723,13 @@ async function verifyPayment(req, res) {
             merchant_amount: transaction.merchant_amount,
             paid_at: transaction.paid_at
           },
-          already_verified: true
+          already_verified: true,
+          metadata: metadata,
+          debug: {
+            has_metadata: Object.keys(metadata).length > 0,
+            has_booking_data: !!(metadata.service_id && metadata.scheduled_at),
+            gateway_response_has_metadata: !!(transaction.gateway_response && (transaction.gateway_response.metadata || transaction.gateway_response.data?.metadata))
+          }
         }
       });
     }
@@ -959,7 +966,12 @@ async function verifyPayment(req, res) {
               merchant_amount: currentTransaction.merchant_amount,
               paid_at: currentTransaction.paid_at
             },
-            already_verified: true
+            already_verified: true,
+            metadata,
+            debug: {
+              has_metadata: metadata && Object.keys(metadata).length > 0,
+              has_booking_data: !!(metadata && metadata.service_id && metadata.scheduled_at)
+            }
           }
         });
       }
@@ -1200,6 +1212,14 @@ async function verifyPayment(req, res) {
           console.warn('Could not parse metadata:', parseError);
           console.warn('Gateway response structure:', JSON.stringify(mergedGatewayResponse, null, 2));
         }
+
+        responseData.metadata = metadata;
+        responseData.debug = {
+          has_metadata: Object.keys(metadata).length > 0,
+          has_booking_data: !!(metadata.service_id && metadata.scheduled_at),
+          has_order_id: !!currentTransaction.order_id,
+          purchase_type: metadata.purchase_type || null
+        };
 
         // Check if this is a domain purchase
         const isDomainPurchase = metadata.purchase_type === 'domain' && metadata.domain_id;
