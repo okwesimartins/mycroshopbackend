@@ -1518,16 +1518,28 @@ async function verifyPayment(req, res) {
                 }
               }
 
-              // Get service details
-              const service = await models.StoreService.findOne({
-                where: { id: metadata.service_id, store_id: metadata.store_id },
+              // Get service details (tolerant of missing store_id, especially for free users)
+              let service = await models.StoreService.findOne({
+                where: metadata.store_id != null
+                  ? { id: metadata.service_id, store_id: metadata.store_id }
+                  : { id: metadata.service_id },
                 transaction: dbTransaction
               });
+
+              if (!service && isFreePlan) {
+                service = await models.StoreService.findOne({
+                  where: { id: metadata.service_id },
+                  transaction: dbTransaction
+                });
+              }
 
               if (service) {
                 bookingData.service_title = service.service_title;
                 bookingData.description = service.description;
                 bookingData.duration_minutes = service.duration_minutes || 60;
+              } else {
+                // Ensure required service_title is always set to avoid DB errors
+                bookingData.service_title = metadata.service_title || 'Service';
               }
 
               const booking = await models.Booking.create(bookingData, { transaction: dbTransaction });
@@ -2180,6 +2192,9 @@ async function handlePaymentWebhook(req, res) {
                 bookingData.service_title = service.service_title;
                 bookingData.description = service.description;
                 bookingData.duration_minutes = service.duration_minutes || 60;
+              } else {
+                // Ensure required service_title is always set to avoid DB errors
+                bookingData.service_title = metadata.service_title || 'Service';
               }
 
               const booking = await models.Booking.create(bookingData);
