@@ -12,27 +12,56 @@ function generateOrderNumber() {
 }
 
 /**
+ * Normalize date string to YYYY-MM-DD so "2026-01-1" becomes "2026-01-01"
+ */
+function normalizeDateString(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  const d = new Date(dateStr.trim());
+  if (Number.isNaN(d.getTime())) return dateStr;
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
  * Get all orders (product orders and booking orders combined)
- * Returns both OnlineStoreOrder (product orders) and Booking (service booking orders)
+ * Returns both OnlineStoreOrder (product orders) and Booking (service booking orders).
+ *
+ * Query params:
+ *   - online_store_id: filter product orders by online store
+ *   - status: filter by order status (e.g. confirmed, pending)
+ *   - payment_status: filter product orders by payment_status (e.g. paid, pending)
+ *   - start_date, end_date: filter by order date (product: created_at, booking: scheduled_at). Format YYYY-MM-DD (e.g. 2026-01-01)
+ *   - order_type: 'product_order' | 'booking_order' | omit (both)
+ *       product_order = product orders only; booking_order = service/booking orders only; omit = both
+ *   - search: global search by customer name or order number (product: order_number; booking: Customer name, BOOK-<id>)
+ *   - store_id: filter by physical store
+ *   - customer_id: filter booking orders by customer
+ *   - service_id: filter booking orders by service
+ *   - page, limit: pagination (default page=1, limit=50)
+ *   - include_items: 'true' | 'false' – include line items for product orders (default true)
  */
 async function getAllOrders(req, res) {
   try {
-    const { 
-      page = 1, 
-      limit = 50, 
-      status, 
-      payment_status, 
-      store_id, 
-      online_store_id, 
-      start_date, 
+    const {
+      page = 1,
+      limit = 50,
+      status,
+      payment_status,
+      store_id,
+      online_store_id,
+      start_date,
       end_date,
-      order_type, // 'product_order', 'booking_order', or undefined (both)
+      order_type,
+      search,
       customer_id,
-      service_id
+      service_id,
+      include_items = 'true'
     } = req.query;
     const offset = (page - 1) * limit;
+    const includeItems = include_items !== 'false' && include_items !== '0';
 
-    // Validate order_type if provided
     if (order_type && !['product_order', 'booking_order'].includes(order_type)) {
       return res.status(400).json({
         success: false,
@@ -40,26 +69,26 @@ async function getAllOrders(req, res) {
       });
     }
 
-    // Get tenant info to determine if free or enterprise
     const tenant = req.tenant || req.user?.tenant;
     const isFreePlan = tenant?.subscription_plan === 'free';
     const tenantId = req.user?.tenantId;
 
-    // Arrays to store both types of orders
+    const normalizedStart = start_date ? normalizeDateString(start_date) : null;
+    const normalizedEnd = end_date ? normalizeDateString(end_date) : null;
+    const searchTerm = (typeof search === 'string' && search.trim()) ? search.trim() : null;
+    const searchLike = searchTerm ? '%' + searchTerm.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%' : null;
+
     let productOrders = [];
     let bookingOrders = [];
     let productOrdersCount = 0;
     let bookingOrdersCount = 0;
 
-    // Fetch product orders (OnlineStoreOrder) if order_type is not 'booking_order'
     if (!order_type || order_type === 'product_order') {
       const productOrderWhere = {};
-      
-      // For free users, filter by tenant_id
+
       if (isFreePlan && tenantId) {
         productOrderWhere.tenant_id = tenantId;
       }
-      
       if (online_store_id) {
         productOrderWhere.online_store_id = online_store_id;
       }
@@ -73,7 +102,26 @@ async function getAllOrders(req, res) {
         productOrderWhere.payment_status = payment_status;
       }
 
-      // Build includes for product orders
+      // Global search: customer name or order number (case-insensitive partial match)
+      if (searchLike) {
+        const term = '%' + searchTerm.toLowerCase().replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
+        productOrderWhere[Sequelize.Op.or] = [
+          Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('customer_name')), { [Sequelize.Op.like]: term }),
+          Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('order_number')), { [Sequelize.Op.like]: term })
+        ];
+      }
+
+      // Date filter: use order created_at (order date), not payment paid_at, so all orders in range are returned
+      if (normalizedStart || normalizedEnd) {
+        productOrderWhere.created_at = {};
+        if (normalizedStart) {
+          productOrderWhere.created_at[Sequelize.Op.gte] = new Date(`${normalizedStart}T00:00:00.000Z`);
+        }
+        if (normalizedEnd) {
+          productOrderWhere.created_at[Sequelize.Op.lte] = new Date(`${normalizedEnd}T23:59:59.999Z`);
+        }
+      }
+
       const productOrderInclude = [
         {
           model: req.db.models.OnlineStore,
@@ -83,9 +131,17 @@ async function getAllOrders(req, res) {
         {
           model: req.db.models.Store,
           attributes: ['id', 'name', 'store_type', 'address', 'city', 'state'],
-          required: false // Optional - free users may not have stores
+          required: false
         },
         {
+          model: req.db.models.PaymentTransaction,
+          attributes: ['id', 'status', 'paid_at'],
+          required: false
+        }
+      ];
+
+      if (includeItems) {
+        productOrderInclude.push({
           model: req.db.models.OnlineStoreOrderItem,
           include: [
             {
@@ -94,33 +150,6 @@ async function getAllOrders(req, res) {
               required: false
             }
           ]
-        }
-      ];
-
-      // Handle date filtering for product orders
-      if (start_date || end_date) {
-        const paymentDateWhere = {};
-        if (start_date) {
-          paymentDateWhere[Sequelize.Op.gte] = new Date(`${start_date}T00:00:00.000Z`);
-        }
-        if (end_date) {
-          paymentDateWhere[Sequelize.Op.lte] = new Date(`${end_date}T23:59:59.999Z`);
-        }
-
-        productOrderInclude.push({
-          model: req.db.models.PaymentTransaction,
-          attributes: ['id', 'status', 'paid_at'],
-          required: true,
-          where: {
-            status: 'success',
-            paid_at: paymentDateWhere
-          }
-        });
-      } else {
-        productOrderInclude.push({
-          model: req.db.models.PaymentTransaction,
-          attributes: ['id', 'status', 'paid_at'],
-          required: false
         });
       }
 
@@ -158,21 +187,35 @@ async function getAllOrders(req, res) {
       if (service_id) {
         bookingWhere.service_id = service_id;
       }
-      if (start_date || end_date) {
+      if (normalizedStart || normalizedEnd) {
         bookingWhere.scheduled_at = {};
-        if (start_date) {
-          bookingWhere.scheduled_at[Sequelize.Op.gte] = new Date(`${start_date}T00:00:00.000Z`);
+        if (normalizedStart) {
+          bookingWhere.scheduled_at[Sequelize.Op.gte] = new Date(`${normalizedStart}T00:00:00.000Z`);
         }
-        if (end_date) {
-          bookingWhere.scheduled_at[Sequelize.Op.lte] = new Date(`${end_date}T23:59:59.999Z`);
+        if (normalizedEnd) {
+          bookingWhere.scheduled_at[Sequelize.Op.lte] = new Date(`${normalizedEnd}T23:59:59.999Z`);
         }
+      }
+
+      // Global search: Customer name, email, or booking "order number" (BOOK-<id>)
+      if (searchLike) {
+        const term = '%' + searchTerm.toLowerCase().replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
+        const bookingSearchOr = [
+          Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('Customer.name')), { [Sequelize.Op.like]: term }),
+          Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('Customer.email')), { [Sequelize.Op.like]: term })
+        ];
+        const bookIdMatch = searchTerm.match(/^BOOK-(\d+)$/i);
+        if (bookIdMatch) {
+          bookingSearchOr.push({ id: parseInt(bookIdMatch[1], 10) });
+        }
+        bookingWhere[Sequelize.Op.or] = bookingSearchOr;
       }
 
       const bookingInclude = [
         {
           model: req.db.models.Store,
           attributes: ['id', 'name', 'store_type'],
-          required: false // Optional - free users may not have stores
+          required: false
         },
         {
           model: req.db.models.StoreService,
@@ -181,7 +224,7 @@ async function getAllOrders(req, res) {
         {
           model: req.db.models.Customer,
           attributes: ['id', 'name', 'email', 'phone'],
-          required: false
+          required: !!searchLike
         }
       ];
 
@@ -199,11 +242,13 @@ async function getAllOrders(req, res) {
     // Combine and format orders
     const allOrders = [];
     
-    // Format product orders
+    // Format product orders: single representation (items + payment_transaction only, no duplicate OnlineStoreOrderItems/PaymentTransactions)
     productOrders.forEach(order => {
       const orderData = order.toJSON();
+      const { OnlineStoreOrderItems, PaymentTransactions, PaymentTransaction, ...rest } = orderData;
+      const paymentTx = (Array.isArray(PaymentTransactions) && PaymentTransactions.length ? PaymentTransactions[0] : null) || PaymentTransaction || null;
       allOrders.push({
-        ...orderData,
+        ...rest,
         order_type: 'product_order',
         order_id: orderData.id,
         order_number: orderData.order_number,
@@ -212,10 +257,10 @@ async function getAllOrders(req, res) {
         customer_phone: orderData.customer_phone,
         total_amount: orderData.total,
         order_date: orderData.created_at,
-        scheduled_at: null, // Product orders don't have scheduled_at
-        items: orderData.OnlineStoreOrderItems || [],
-        service: null, // Product orders don't have service
-        payment_transaction: orderData.PaymentTransaction || null
+        scheduled_at: null,
+        items: includeItems ? (OnlineStoreOrderItems || []) : undefined,
+        service: null,
+        payment_transaction: paymentTx
       });
     });
 
