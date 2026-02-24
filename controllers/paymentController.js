@@ -1629,7 +1629,7 @@ async function verifyPayment(req, res) {
         finalMessage = 'Payment verified and domain registered successfully';
       } else if (responseData.booking_created === false && responseData.booking_error) {
         finalSuccess = false;
-        finalMessage = `Payment verified but booking could not be saved: ${responseData.booking_error}`;
+        finalMessage = responseData.booking_error; // Return the actual save error in the response message
       }
 
       return res.json({
