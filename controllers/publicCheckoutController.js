@@ -1028,13 +1028,21 @@ async function initializePublicPayment(req, res) {
     let paymentData;
     const secretKey = decryptSecretKey(gateway.secret_key);
 
-    // Build metadata
+    // Build metadata: tenant_id required for webhook/verify; include booking fields so verify creates the booking
     const paymentMetadata = {
-      ...metadata,
+      ...(metadata || {}),
       tenant_id: parsedTenantId,
-      transaction_id: paymentTransaction.id
+      transaction_id: paymentTransaction.id,
+      order_id: order_id || null,
+      invoice_id: invoice_id || null,
+      platform_fee: platformFee,
+      merchant_amount: merchantAmount,
+      gateway_name: gateway.gateway_name
     };
-
+    if (metadata && metadata.service_id && metadata.scheduled_at) {
+      paymentMetadata.is_booking = true;
+      paymentMetadata.booking_type = 'service';
+    }
     if (onlineStore) {
       paymentMetadata.online_store_id = onlineStore.id;
     }
@@ -1067,10 +1075,13 @@ async function initializePublicPayment(req, res) {
       });
     }
 
-    // Update transaction with gateway response
+    // Persist metadata in gateway_response so verifyPayment/webhook can create booking
     await paymentTransaction.update({
       gateway_transaction_id: paymentData.gateway_transaction_id || paymentData.reference,
-      gateway_response: paymentData
+      gateway_response: {
+        ...paymentData,
+        metadata: paymentMetadata
+      }
     });
 
     res.json({
