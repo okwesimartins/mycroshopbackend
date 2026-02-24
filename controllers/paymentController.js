@@ -638,7 +638,7 @@ async function verifyPayment(req, res) {
         else if (gr.data && gr.data.metadata) metadata = typeof gr.data.metadata === 'string' ? JSON.parse(gr.data.metadata) : gr.data.metadata;
       } catch (e) { /* ignore */ }
       const isBookingPayment = metadata.is_booking === true || metadata.booking_type === 'service' || (metadata.service_id && metadata.scheduled_at);
-      const hasRequiredBookingData = isBookingPayment && metadata.service_id && metadata.scheduled_at && (isFreePlan || metadata.store_id);
+      const hasRequiredBookingData = isBookingPayment && metadata.service_id && metadata.scheduled_at;
       if (hasRequiredBookingData) {
         const existingBooking = await models.Booking.findOne({
           where: { payment_transaction_id: transaction.id, ...(isFreePlan && transaction.tenant_id ? { tenant_id: transaction.tenant_id } : {}) }
@@ -1443,8 +1443,7 @@ async function verifyPayment(req, res) {
         
         const hasRequiredBookingData = isBookingPayment &&
           metadata.service_id &&
-          metadata.scheduled_at &&
-          (isFreePlan || metadata.store_id);
+          metadata.scheduled_at;
         
         if (hasRequiredBookingData) {
           try {
@@ -2115,8 +2114,7 @@ async function handlePaymentWebhook(req, res) {
       if (isBookingPayment) {
         try {
           const hasRequiredBookingData = metadata.service_id &&
-            metadata.scheduled_at &&
-            (isFreePlan || metadata.store_id);
+            metadata.scheduled_at;
           
           if (hasRequiredBookingData) {
             // Check if booking already exists for this transaction
