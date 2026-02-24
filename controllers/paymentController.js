@@ -8,6 +8,55 @@ const { Sequelize } = require('sequelize');
 const moment = require('moment');
 
 /**
+ * Safely extract metadata for a payment transaction.
+ * Handles cases where gateway_response is stored as a JSON string or object,
+ * and where metadata may live at gateway_response.metadata, gateway_response.data.metadata,
+ * or on the transaction.metadata field.
+ */
+function extractPaymentMetadata(paymentTransaction) {
+  if (!paymentTransaction) return {};
+
+  try {
+    let gr = paymentTransaction.gateway_response;
+
+    // If stored as a JSON string in the DB, parse it
+    if (typeof gr === 'string') {
+      try {
+        gr = JSON.parse(gr);
+      } catch (e) {
+        console.warn('Failed to parse gateway_response string while extracting metadata:', e.message);
+        gr = {};
+      }
+    }
+
+    gr = gr || {};
+
+    // Try common locations for metadata
+    let md = gr.metadata;
+    if (!md && gr.data && gr.data.metadata) {
+      md = gr.data.metadata;
+    }
+    if (!md && paymentTransaction.metadata) {
+      md = paymentTransaction.metadata;
+    }
+
+    // If metadata itself is a JSON string, parse it
+    if (typeof md === 'string') {
+      try {
+        md = JSON.parse(md);
+      } catch (e) {
+        console.warn('Failed to parse metadata string while extracting metadata:', e.message);
+      }
+    }
+
+    return md || {};
+  } catch (e) {
+    console.error('Error extracting payment metadata:', e);
+    return {};
+  }
+}
+
+/**
  * Initialize payment (create payment link/transaction)
  */
 async function initializePayment(req, res) {
@@ -631,14 +680,13 @@ async function verifyPayment(req, res) {
 
     // If already verified, still try to create booking if this was a booking payment and no booking exists yet
     if (transaction.status === 'success') {
-      let metadata = {};
-      try {
-        const gr = transaction.gateway_response || {};
-        if (gr.metadata) metadata = typeof gr.metadata === 'string' ? JSON.parse(gr.metadata) : gr.metadata;
-        else if (gr.data && gr.data.metadata) metadata = typeof gr.data.metadata === 'string' ? JSON.parse(gr.data.metadata) : gr.data.metadata;
-      } catch (e) { /* ignore */ }
-      const isBookingPayment = metadata.is_booking === true || metadata.booking_type === 'service' || (metadata.service_id && metadata.scheduled_at);
-      const hasRequiredBookingData = isBookingPayment && metadata.service_id && metadata.scheduled_at;
+      const metadata = extractPaymentMetadata(transaction);
+      const isBookingPayment = metadata.is_booking === true ||
+        metadata.booking_type === 'service' ||
+        (metadata.service_id && metadata.scheduled_at);
+      const hasRequiredBookingData = isBookingPayment &&
+        metadata.service_id &&
+        metadata.scheduled_at;
       if (hasRequiredBookingData) {
         const existingBooking = await models.Booking.findOne({
           where: { payment_transaction_id: transaction.id, ...(isFreePlan && transaction.tenant_id ? { tenant_id: transaction.tenant_id } : {}) }
@@ -1420,22 +1468,22 @@ async function verifyPayment(req, res) {
       // Check metadata for booking information (from transaction gateway_response or metadata field)
       let bookingCreated = false;
       if (newStatus === 'success' && !domainPurchased) {
-        // Get metadata again (already parsed above, but re-parse if needed)
-        let metadata = {};
-        try {
-          const gatewayResponse = currentTransaction.gateway_response || {};
-          if (gatewayResponse.metadata) {
-            metadata = typeof gatewayResponse.metadata === 'string' 
-              ? JSON.parse(gatewayResponse.metadata) 
-              : gatewayResponse.metadata;
-          } else if (currentTransaction.metadata) {
-            metadata = typeof currentTransaction.metadata === 'string'
-              ? JSON.parse(currentTransaction.metadata)
-              : currentTransaction.metadata;
-          }
-        } catch (parseError) {
-          console.warn('Could not parse metadata:', parseError);
-        }
+        // Re-use metadata we already exposed in the response when possible,
+        // otherwise safely extract it from the transaction/gateway_response
+        const metadata = responseData.metadata && Object.keys(responseData.metadata).length
+          ? responseData.metadata
+          : extractPaymentMetadata(currentTransaction);
+
+        console.log('📅 BOOKING META CHECK (verifyPayment main flow)', {
+          transactionId: currentTransaction.id,
+          isFreePlan,
+          isBookingPayment: metadata && (metadata.is_booking === true ||
+            metadata.booking_type === 'service' ||
+            (metadata.service_id && metadata.scheduled_at)),
+          service_id: metadata?.service_id,
+          scheduled_at: metadata?.scheduled_at,
+          metadataKeys: Object.keys(metadata || {})
+        });
         
         const isBookingPayment = metadata.is_booking === true ||
           metadata.booking_type === 'service' ||
