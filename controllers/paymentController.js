@@ -1581,7 +1581,9 @@ async function verifyPayment(req, res) {
             }
           } catch (bookingError) {
             console.error('Error creating booking from payment verification:', bookingError);
-            // Don't fail payment verification if booking creation fails
+            responseData.booking_created = false;
+            const errMsg = bookingError?.message || (bookingError?.parent?.message) || String(bookingError);
+            responseData.booking_error = errMsg;
           }
         }
       }
@@ -1625,11 +1627,15 @@ async function verifyPayment(req, res) {
         finalMessage = `Payment verified but domain purchase failed: ${responseData.domain_purchase_error?.message || 'Unknown error'}`;
       } else if (responseData.domain_purchase_status === 'success') {
         finalMessage = 'Payment verified and domain registered successfully';
+      } else if (responseData.booking_created === false && responseData.booking_error) {
+        finalSuccess = false;
+        finalMessage = `Payment verified but booking could not be saved: ${responseData.booking_error}`;
       }
 
       return res.json({
         success: finalSuccess,
         message: finalMessage,
+        ...(responseData.booking_error && { error: responseData.booking_error }),
         data: responseData
       });
     } catch (dbError) {

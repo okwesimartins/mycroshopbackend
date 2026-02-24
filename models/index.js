@@ -862,6 +862,11 @@ function initializeModels(sequelize) {
       primaryKey: true,
       autoIncrement: true
     },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Required for free users (shared DB); NULL for enterprise (separate DB)'
+    },
     store_id: {
       type: DataTypes.INTEGER,
       allowNull: true,
@@ -941,6 +946,11 @@ function initializeModels(sequelize) {
     notes: {
       type: DataTypes.TEXT,
       allowNull: true
+    },
+    payment_transaction_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Links booking to payment when paid via online store'
     }
   }, {
     tableName: 'bookings',
