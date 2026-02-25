@@ -10,8 +10,11 @@ const moment = require('moment');
 /**
  * Safely extract metadata for a payment transaction.
  * Handles cases where gateway_response is stored as a JSON string or object,
- * and where metadata may live at gateway_response.metadata, gateway_response.data.metadata,
- * or on the transaction.metadata field.
+ * where gateway_response.data may itself be a JSON string,
+ * and where metadata may live at:
+ *   - gateway_response.metadata
+ *   - gateway_response.data.metadata
+ *   - transaction.metadata
  */
 function extractPaymentMetadata(paymentTransaction) {
   if (!paymentTransaction) return {};
@@ -30,6 +33,15 @@ function extractPaymentMetadata(paymentTransaction) {
     }
 
     gr = gr || {};
+
+    // Sometimes gr.data itself is a JSON string
+    if (typeof gr.data === 'string') {
+      try {
+        gr.data = JSON.parse(gr.data);
+      } catch (e) {
+        console.warn('Failed to parse gateway_response.data string while extracting metadata:', e.message);
+      }
+    }
 
     // Try common locations for metadata
     let md = gr.metadata;
@@ -760,6 +772,25 @@ async function verifyPayment(req, res) {
             });
           } catch (bookingErr) {
             console.error('Error creating booking for already-verified transaction:', bookingErr);
+            const errMsg = bookingErr?.message || bookingErr?.parent?.message || String(bookingErr);
+            return res.status(500).json({
+              success: false,
+              message: 'Transaction already verified but booking creation failed',
+              error: errMsg,
+              data: {
+                transaction: {
+                  id: transaction.id,
+                  reference: transaction.transaction_reference,
+                  status: transaction.status,
+                  amount: transaction.amount,
+                  platform_fee: transaction.platform_fee,
+                  merchant_amount: transaction.merchant_amount,
+                  paid_at: transaction.paid_at
+                },
+                booking_created: false,
+                metadata
+              }
+            });
           }
         }
       }
@@ -2295,7 +2326,18 @@ async function handlePaymentWebhook(req, res) {
           }
         } catch (bookingError) {
           console.error('Error creating booking from webhook:', bookingError);
-          // Don't fail webhook processing if booking creation fails
+          const errMsg = bookingError?.message || bookingError?.parent?.message || String(bookingError);
+          // Do not fail webhook (Paystack will retry), but include error info for debugging
+          return res.status(200).json({
+            success: false,
+            message: 'Webhook processed but booking creation failed',
+            error: errMsg,
+            data: {
+              transaction_id: transaction.id,
+              tenant_id: transaction.tenant_id,
+              metadata
+            }
+          });
         }
       }
 
