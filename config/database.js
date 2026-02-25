@@ -630,6 +630,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       status ENUM('pending', 'confirmed', 'completed', 'cancelled', 'no_show') DEFAULT 'pending',
       cancellation_reason TEXT,
       notes TEXT,
+      payment_transaction_id INT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       ${bookingTenantIndex}
