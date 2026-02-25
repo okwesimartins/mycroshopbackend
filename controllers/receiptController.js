@@ -755,6 +755,78 @@ async function getReceiptsByInvoice(req, res) {
 }
 
 /**
+ * Get all receipts for the current tenant (paginated)
+ * GET /api/v1/receipts?page=1&limit=20
+ */
+async function getAllReceipts(req, res) {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+
+    const pageNum = Math.max(parseInt(page) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit) || 20, 1), 100);
+    const offset = (pageNum - 1) * limitNum;
+
+    // Get tenant info
+    const tenant = req.tenant || req.user?.tenant;
+    const isFreePlan = tenant?.subscription_plan === 'free';
+    const tenantId = isFreePlan ? tenant?.id : null;
+
+    // Build WHERE + params
+    const whereClause = isFreePlan && tenantId ? 'WHERE tenant_id = ?' : '';
+    const baseParams = isFreePlan && tenantId ? [tenantId] : [];
+
+    // Total count for pagination
+    const countQuery = `SELECT COUNT(*) AS count FROM receipts ${whereClause}`;
+    const [countRows] = await req.db.query(countQuery, {
+      replacements: baseParams
+    });
+    const total = (countRows && countRows[0] && Number(countRows[0].count)) || 0;
+
+    // Fetch paginated receipts
+    const dataQuery = `SELECT * FROM receipts ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    const dataParams = [...baseParams, limitNum, offset];
+
+    const [rows] = await req.db.query(dataQuery, {
+      replacements: dataParams
+    });
+
+    const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
+    const normalizeUrl = (url) => {
+      if (!url) return null;
+      if (url.startsWith('http')) return url;
+      return `${baseUrl}${url}`;
+    };
+
+    return res.json({
+      success: true,
+      data: {
+        receipts: rows.map(r => ({
+          id: r.id,
+          receipt_number: r.receipt_number,
+          invoice_id: r.invoice_id,
+          preview_url: normalizeUrl(r.preview_url),
+          pdf_url: normalizeUrl(r.pdf_url),
+          created_at: r.created_at
+        })),
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          total_pages: limitNum > 0 ? Math.ceil(total / limitNum) : 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching all receipts:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch receipts',
+      error: error.message
+    });
+  }
+}
+
+/**
  * Sync receipt from offline client
  * POST /api/v1/receipts/sync
  * 
@@ -947,29 +1019,29 @@ async function syncReceipt(req, res) {
 
       if (tables && tables.length > 0) {
         // Save receipt (duplicate check already done above, so this is always a new insert)
-        const receiptInsertQuery = isFreePlan && tenantId
-          ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?, NOW())`
-          : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
-             VALUES (?, ?, ?, ?, ?, NOW())`;
+    const receiptInsertQuery = isFreePlan && tenantId
+      ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`
+      : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
+         VALUES (?, ?, ?, ?, ?, NOW())`;
 
-        const receiptParams = isFreePlan && tenantId
-          ? [tenantId, null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64]
-          : [null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64];
+    const receiptParams = isFreePlan && tenantId
+      ? [tenantId, null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64]
+      : [null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64];
 
-        await req.db.query(receiptInsertQuery, {
-          replacements: receiptParams
-        });
+    await req.db.query(receiptInsertQuery, {
+      replacements: receiptParams
+    });
 
-        // Fetch saved receipt
-        const [savedReceipts] = await req.db.query(
-          isFreePlan && tenantId
-            ? `SELECT * FROM receipts WHERE tenant_id = ? AND receipt_number = ? ORDER BY id DESC LIMIT 1`
-            : `SELECT * FROM receipts WHERE receipt_number = ? ORDER BY id DESC LIMIT 1`,
-          {
-            replacements: isFreePlan && tenantId ? [tenantId, receipt_number] : [receipt_number]
-          }
-        );
+    // Fetch saved receipt
+    const [savedReceipts] = await req.db.query(
+      isFreePlan && tenantId
+        ? `SELECT * FROM receipts WHERE tenant_id = ? AND receipt_number = ? ORDER BY id DESC LIMIT 1`
+        : `SELECT * FROM receipts WHERE receipt_number = ? ORDER BY id DESC LIMIT 1`,
+      {
+        replacements: isFreePlan && tenantId ? [tenantId, receipt_number] : [receipt_number]
+      }
+    );
 
         savedReceipt = savedReceipts && savedReceipts.length > 0 ? savedReceipts[0] : null;
       }
@@ -1017,5 +1089,6 @@ module.exports = {
   generateStandaloneReceipt,
   getReceiptById,
   getReceiptsByInvoice,
+  getAllReceipts,
   syncReceipt
 };
