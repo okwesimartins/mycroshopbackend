@@ -33,7 +33,11 @@ async function getPublicStore(req, res) {
     const { username } = req.params;
     const { tenant_id, preview_limit = 5 } = req.query;
 
-    if (!tenant_id) {
+    // Allow tenant resolution either from query (?tenant_id=) or from middleware (req.tenantId)
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
         message: 'tenant_id query parameter is required'
@@ -45,7 +49,7 @@ async function getPublicStore(req, res) {
 
     // Get tenant database connection
     const { getTenantById } = require('../config/tenant');
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -53,7 +57,7 @@ async function getPublicStore(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
     const { Sequelize, Op } = require('sequelize');
 
@@ -64,7 +68,7 @@ async function getPublicStore(req, res) {
     // For free users: don't include OnlineStoreLocation (they don't have physical stores)
     const onlineStore = await models.OnlineStore.findOne({
       where: { 
-        username: username.toLowerCase(), 
+        username: effectiveUsername, 
         is_published: true 
       },
       include: isFreePlan 
@@ -718,7 +722,10 @@ async function getPublicCollectionProducts(req, res) {
     const { username, collection_id } = req.params;
     const { tenant_id, page = 1, limit = 20 } = req.query;
 
-    if (!tenant_id) {
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
         message: 'tenant_id query parameter is required'
@@ -731,7 +738,7 @@ async function getPublicCollectionProducts(req, res) {
     const offset = (pageNum - 1) * limitNum;
 
     const { getTenantById } = require('../config/tenant');
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -739,13 +746,13 @@ async function getPublicCollectionProducts(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
     // Find online store
     const onlineStore = await models.OnlineStore.findOne({
       where: { 
-        username: username.toLowerCase(), 
+        username: effectiveUsername, 
         is_published: true 
       }
     });
@@ -943,7 +950,10 @@ async function getPublicServices(req, res) {
     const { username } = req.params;
     const { tenant_id, collection_id, search, page = 1, limit = 20 } = req.query;
 
-    if (!tenant_id) {
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
         message: 'tenant_id query parameter is required'
@@ -956,7 +966,7 @@ async function getPublicServices(req, res) {
     const offset = (pageNum - 1) * limitNum;
 
     const { getTenantById } = require('../config/tenant');
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -964,13 +974,13 @@ async function getPublicServices(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
     // Find online store
     const onlineStore = await models.OnlineStore.findOne({
       where: { 
-        username: username.toLowerCase(), 
+        username: effectiveUsername, 
         is_published: true 
       },
       attributes: ['id']
@@ -1094,7 +1104,10 @@ async function getPublicService(req, res) {
     const { username, service_id } = req.params;
     const { tenant_id } = req.query;
 
-    if (!tenant_id) {
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
         message: 'tenant_id query parameter is required'
@@ -1102,7 +1115,7 @@ async function getPublicService(req, res) {
     }
 
     const { getTenantById } = require('../config/tenant');
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -1110,13 +1123,13 @@ async function getPublicService(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
     // Find online store
     const onlineStore = await models.OnlineStore.findOne({
       where: { 
-        username: username.toLowerCase(), 
+        username: effectiveUsername, 
         is_published: true 
       }
     });
@@ -1213,7 +1226,10 @@ async function getPublicProducts(req, res) {
     const { username } = req.params;
     const { tenant_id, collection_id, search, category, store_id, page = 1, limit = 20 } = req.query;
 
-    if (!tenant_id) {
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
         message: 'tenant_id query parameter is required'
@@ -1226,7 +1242,7 @@ async function getPublicProducts(req, res) {
     const offset = (pageNum - 1) * limitNum;
 
     const { getTenantById } = require('../config/tenant');
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -1234,7 +1250,7 @@ async function getPublicProducts(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
     const { Sequelize, Op } = require('sequelize');
 
@@ -1248,7 +1264,7 @@ async function getPublicProducts(req, res) {
     // Log for debugging (remove in production if needed)
     if (process.env.NODE_ENV === 'development') {
       console.log('[getPublicProducts] Plan detection:', {
-        tenant_id,
+        tenant_id: effectiveTenantId,
         subscription_plan: tenant.subscription_plan,
         subscriptionPlan,
         isFreePlan
@@ -1505,7 +1521,10 @@ async function getPublicProduct(req, res) {
     const { username, product_id } = req.params;
     const { tenant_id } = req.query;
 
-    if (!tenant_id) {
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
         message: 'tenant_id query parameter is required'
@@ -1513,7 +1532,7 @@ async function getPublicProduct(req, res) {
     }
 
     const { getTenantById } = require('../config/tenant');
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -1521,7 +1540,7 @@ async function getPublicProduct(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
     const { Sequelize } = require('sequelize');
 
@@ -1534,7 +1553,7 @@ async function getPublicProduct(req, res) {
     // Find online store
     const onlineStore = await models.OnlineStore.findOne({
       where: { 
-        username: username.toLowerCase(), 
+        username: effectiveUsername, 
         is_published: true 
       },
       attributes: ['id']
