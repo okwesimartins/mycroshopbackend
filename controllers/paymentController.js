@@ -616,6 +616,10 @@ async function initializePayment(req, res) {
  * Public endpoint - requires tenant_id query parameter
  */
 async function verifyPayment(req, res) {
+  // Expose which database we're querying (for debugging e.g. Unknown column errors)
+  let databaseUsed = null;
+  let subscriptionPlanUsed = null;
+
   try {
     const { reference } = req.query; // For Paystack
     const { tx_ref } = req.query; // For Flutterwave
@@ -656,6 +660,8 @@ async function verifyPayment(req, res) {
     }
 
     const sequelize = await getTenantConnection(parsedTenantId, tenant.subscription_plan || 'enterprise');
+    databaseUsed = (sequelize.config && sequelize.config.database) ? sequelize.config.database : null;
+    subscriptionPlanUsed = tenant.subscription_plan || 'enterprise';
     const models = initModels(sequelize);
 
     // Find transaction
@@ -1694,6 +1700,7 @@ async function verifyPayment(req, res) {
   } catch (error) {
     console.error('Error verifying payment:', error);
     console.error('Error stack:', error.stack);
+    const isUnknownColumn = error.message && String(error.message).includes('Unknown column');
     res.status(500).json({
       success: false,
       message: 'Failed to verify payment',
@@ -1701,7 +1708,14 @@ async function verifyPayment(req, res) {
       errorDetails: process.env.NODE_ENV === 'development' ? {
         stack: error.stack,
         name: error.name
-      } : undefined
+      } : undefined,
+      // So you can confirm which DB was queried (compare with DB where you added the column)
+      database: databaseUsed,
+      subscription_plan: subscriptionPlanUsed,
+      tenant_id: req.query?.tenant_id,
+      ...(isUnknownColumn && {
+        debug_note: 'Unknown column means that column is missing in the table in this database. Not caused by missing foreign key.'
+      })
     });
   }
 }
