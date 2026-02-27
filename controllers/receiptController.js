@@ -662,6 +662,29 @@ async function getReceiptById(req, res) {
 
     const receipt = receipts[0];
 
+    // If this receipt is linked to an invoice, also load the invoice items
+    let items = [];
+    if (receipt.invoice_id) {
+      try {
+        const invoiceItems = await req.db.models.InvoiceItem.findAll({
+          where: {
+            invoice_id: receipt.invoice_id,
+            ...(isFreePlan && tenantId ? { tenant_id: tenantId } : {})
+          },
+          order: [['id', 'ASC']]
+        });
+        items = invoiceItems.map(item => ({
+          id: item.id,
+          item_name: item.item_name,
+          quantity: Number(item.quantity || 0),
+          unit_price: Number(item.unit_price || item.price || 0),
+          total: Number(item.total || 0)
+        }));
+      } catch (itemError) {
+        console.warn('Error loading invoice items for receipt:', itemError.message);
+      }
+    }
+
     // Add base URL to preview_url and pdf_url if they exist
     const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
     let previewUrl = receipt.preview_url || null;
@@ -684,7 +707,8 @@ async function getReceiptById(req, res) {
           preview_url: previewUrl,
           pdf_url: pdfUrl,
           esc_pos_commands: receipt.esc_pos_commands,
-          created_at: receipt.created_at
+          created_at: receipt.created_at,
+          items
         }
       }
     });
