@@ -137,10 +137,11 @@ async function generateReceiptFromInvoice(req, res) {
     // For free users, they don't have physical stores, so use tenant info or empty store
     const store = invoice.Store || {};
     
-    // Receipts shouldn't contain logos - use default brand colors
+    // Receipts shouldn't contain tenant logos - use MycroShop branding
     const brandColors = {
       primary: '#2563EB'
     };
+    const mycroshopLogoUrl = process.env.MYCROSHOP_LOGO_URL || null;
 
     // Prepare receipt data
     const receiptData = {
@@ -166,12 +167,12 @@ async function generateReceiptFromInvoice(req, res) {
     };
 
     // Generate receipt HTML
-    // Receipts don't include logos - pass null for logoUrl
+    // Receipts use MycroShop logo (platform branding), not tenant/store logo
     const receiptHtml = generateReceiptTemplate({
       receipt: receiptData,
       store: store,
       items: invoiceItems,
-      logoUrl: null, // Receipts don't contain logos
+      logoUrl: mycroshopLogoUrl,
       colors: brandColors,
       digitalStamp: include_stamp ? {
         company_name: store.name || 'Business',
@@ -256,16 +257,16 @@ async function generateReceiptFromInvoice(req, res) {
       `);
 
       if (tables && tables.length > 0) {
-        // Save receipt
+        // Save receipt (including full receipt_data JSON)
         const receiptInsertQuery = isFreePlan && tenantId
-          ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?, NOW())`
-          : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
-             VALUES (?, ?, ?, ?, ?, NOW())`;
+          ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, receipt_data, created_at) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`
+          : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, receipt_data, created_at) 
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`;
 
         const receiptParams = isFreePlan && tenantId
-          ? [tenantId, invoice.id, receiptNumber, previewUrl, pdfUrl, escPosCommandsBase64]
-          : [invoice.id, receiptNumber, previewUrl, pdfUrl, escPosCommandsBase64];
+          ? [tenantId, invoice.id, receiptNumber, previewUrl, pdfUrl, escPosCommandsBase64, JSON.stringify(receiptData)]
+          : [invoice.id, receiptNumber, previewUrl, pdfUrl, escPosCommandsBase64, JSON.stringify(receiptData)];
 
         await req.db.query(receiptInsertQuery, {
           replacements: receiptParams
@@ -384,8 +385,8 @@ async function generateStandaloneReceipt(req, res) {
       logoUrl = store.logo_url || tenant.logo_url || null;
       companyName = store.name || tenant.name || 'Business';
     } else {
-      // Free users OR no store_id provided: use tenant information for branding
-      logoUrl = tenant.logo_url || null;
+      // Free users OR no store_id provided: use MycroShop logo for branding (not tenant logo)
+      logoUrl = process.env.MYCROSHOP_LOGO_URL || null;
       companyName = tenant.name || 'Business';
       // Set store object to have tenant info for consistency
       store = {
@@ -569,14 +570,14 @@ async function generateStandaloneReceipt(req, res) {
 
       if (tables && tables.length > 0) {
         const receiptInsertQuery = isFreePlan && tenantId
-          ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?, NOW())`
-          : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
-             VALUES (?, ?, ?, ?, ?, NOW())`;
+          ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, receipt_data, created_at) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`
+          : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, receipt_data, created_at) 
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`;
 
         const receiptParams = isFreePlan && tenantId
-          ? [tenantId, null, receiptNumber, previewUrl, pdfUrl, escPosCommandsBase64]
-          : [null, receiptNumber, previewUrl, pdfUrl, escPosCommandsBase64];
+          ? [tenantId, null, receiptNumber, previewUrl, pdfUrl, escPosCommandsBase64, JSON.stringify(receiptData)]
+          : [null, receiptNumber, previewUrl, pdfUrl, escPosCommandsBase64, JSON.stringify(receiptData)];
 
         await req.db.query(receiptInsertQuery, {
           replacements: receiptParams
@@ -988,11 +989,13 @@ async function syncReceipt(req, res) {
     try {
       // Try to generate PDF/preview from receipt_data
       // This uses the same logic as generateStandaloneReceipt
+      const mycroshopLogoUrl = process.env.MYCROSHOP_LOGO_URL || null;
       const result = await generateInvoicePdfAndPreview({
         html: generateReceiptTemplate({
           receipt: receipt_data,
           store: store,
-          items: receipt_data.items || []
+          items: receipt_data.items || [],
+          logoUrl: mycroshopLogoUrl
         }),
         filename: `receipt-${receipt_number}`,
         type: 'receipt'
@@ -1044,14 +1047,14 @@ async function syncReceipt(req, res) {
       if (tables && tables.length > 0) {
         // Save receipt (duplicate check already done above, so this is always a new insert)
     const receiptInsertQuery = isFreePlan && tenantId
-      ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
-         VALUES (?, ?, ?, ?, ?, ?, NOW())`
-      : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, created_at) 
-         VALUES (?, ?, ?, ?, ?, NOW())`;
+      ? `INSERT INTO receipts (tenant_id, invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, receipt_data, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`
+      : `INSERT INTO receipts (invoice_id, receipt_number, preview_url, pdf_url, esc_pos_commands, receipt_data, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`;
 
     const receiptParams = isFreePlan && tenantId
-      ? [tenantId, null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64]
-      : [null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64];
+      ? [tenantId, null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64, JSON.stringify(receipt_data)]
+      : [null, receipt_number, previewUrl, pdfUrl, escPosCommandsBase64, JSON.stringify(receipt_data)];
 
     await req.db.query(receiptInsertQuery, {
       replacements: receiptParams

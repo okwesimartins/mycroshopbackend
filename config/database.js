@@ -1165,6 +1165,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       preview_url VARCHAR(500),
       pdf_url VARCHAR(500),
       esc_pos_commands LONGTEXT,
+      receipt_data JSON NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       ${receiptTenantIndex}
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,

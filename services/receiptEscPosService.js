@@ -4,6 +4,10 @@
  */
 
 const { generateStampImage, convertImageToEscPos } = require('./receiptStampService');
+const axios = require('axios');
+
+// Preload MycroShop logo URL from environment (optional)
+const MYCROSHOP_LOGO_URL = process.env.MYCROSHOP_LOGO_URL || null;
 
 /**
  * Generate ESC/POS commands for receipt
@@ -24,7 +28,24 @@ async function generateEscPosReceipt(receiptData, options = {}) {
   // Initialize printer
   commands.push(Buffer.from([0x1B, 0x40])); // ESC @ (Initialize)
 
-  // Center align for header
+  // Try to print MycroShop logo at top if configured
+  if (MYCROSHOP_LOGO_URL) {
+    try {
+      const response = await axios.get(MYCROSHOP_LOGO_URL, { responseType: 'arraybuffer' });
+      const logoBuffer = Buffer.from(response.data);
+      const logoEscPos = await convertImageToEscPos(logoBuffer, maxWidth);
+      // Center align logo
+      commands.push(Buffer.from([0x1B, 0x61, 0x01])); // ESC a 1 (Center)
+      commands.push(logoEscPos);
+      commands.push(Buffer.from('\n', 'ascii'));
+      // Reset alignment
+      commands.push(Buffer.from([0x1B, 0x61, 0x00])); // ESC a 0 (Left)
+    } catch (logoError) {
+      console.warn('Could not render MycroShop logo in ESC/POS receipt:', logoError.message);
+    }
+  }
+
+  // Center align for header text
   commands.push(Buffer.from([0x1B, 0x61, 0x01])); // ESC a 1 (Center)
 
   // Double size for header
