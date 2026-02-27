@@ -715,6 +715,12 @@ async function getReceiptById(req, res) {
       }
     }
 
+    // Determine total from receipt_data first, fall back to 0
+    const total =
+      (receiptData && typeof receiptData.total !== 'undefined'
+        ? Number(receiptData.total || 0)
+        : 0);
+
     // Add base URL to preview_url and pdf_url if they exist
     const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
     let previewUrl = receipt.preview_url || null;
@@ -738,6 +744,7 @@ async function getReceiptById(req, res) {
           pdf_url: pdfUrl,
           esc_pos_commands: receipt.esc_pos_commands,
           created_at: receipt.created_at,
+          total,
           items
         }
       }
