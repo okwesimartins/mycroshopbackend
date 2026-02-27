@@ -663,9 +663,38 @@ async function getReceiptById(req, res) {
 
     const receipt = receipts[0];
 
-    // If this receipt is linked to an invoice, also load the invoice items
+    // Prefer items saved on the receipts table (receipt_data JSON),
+    // fall back to invoice items only if receipt_data is missing.
     let items = [];
-    if (receipt.invoice_id) {
+    let receiptData = null;
+
+    if (receipt.receipt_data) {
+      try {
+        if (typeof receipt.receipt_data === 'string') {
+          receiptData = JSON.parse(receipt.receipt_data);
+        } else if (typeof receipt.receipt_data === 'object') {
+          receiptData = receipt.receipt_data;
+        }
+      } catch (parseErr) {
+        console.warn('Error parsing receipt_data JSON for receipt:', parseErr.message);
+      }
+    }
+
+    if (receiptData && Array.isArray(receiptData.items)) {
+      items = receiptData.items.map((item, idx) => {
+        const qty = Number(item.quantity || 0);
+        const unitPrice = Number(item.unit_price || item.price || 0);
+        const total = Number(item.total || qty * unitPrice);
+        return {
+          id: item.id || idx + 1,
+          item_name: item.item_name || item.name || 'Item',
+          quantity: qty,
+          unit_price: unitPrice,
+          total
+        };
+      });
+    } else if (receipt.invoice_id) {
+      // Backward compatibility: load from InvoiceItem if no receipt_data was stored
       try {
         const invoiceItems = await req.db.models.InvoiceItem.findAll({
           where: {
@@ -682,7 +711,7 @@ async function getReceiptById(req, res) {
           total: Number(item.total || 0)
         }));
       } catch (itemError) {
-        console.warn('Error loading invoice items for receipt:', itemError.message);
+        console.warn('Error loading invoice items for receipt (fallback):', itemError.message);
       }
     }
 
