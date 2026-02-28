@@ -44,6 +44,12 @@ function generateReceiptTemplate(data) {
   const transactionTime = receipt?.transaction_time || new Date().toLocaleTimeString();
   const currency = receipt?.currency_symbol || (receipt?.currency === 'USD' ? '$' : receipt?.currency === 'GBP' ? '£' : receipt?.currency === 'EUR' ? '€' : receipt?.currency === 'NGN' ? '₦' : '$');
 
+  // Customer / Issued to (optional)
+  const customerName = receipt?.customer_name || null;
+  const customerPhone = receipt?.customer_phone || null;
+  const customerEmail = receipt?.customer_email || null;
+  const hasCustomerInfo = customerName || customerPhone || customerEmail;
+
   // Totals
   const subtotal = Number(receipt?.subtotal || 0);
   const tax = Number(receipt?.tax_amount || 0);
@@ -108,10 +114,23 @@ function generateReceiptTemplate(data) {
 
     .receipt-container {
       max-width: 300px;
+      width: 100%;
       margin: 0 auto;
       background: #ffffff;
       padding: 20px;
       border: 1px solid ${border};
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 12px; }
+      .receipt-container {
+        max-width: 100%;
+        width: 100%;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+      .receipt-info-row, .totals-row { font-size: 12px !important; }
+      table, tbody td { font-size: 12px !important; }
     }
 
     /* Header */
@@ -355,6 +374,14 @@ function generateReceiptTemplate(data) {
         <span class="receipt-info-label">Time:</span>
         <span class="receipt-info-value">${escapeHtml(transactionTime)}</span>
       </div>
+      ${hasCustomerInfo ? `
+      <div class="issued-to" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed ${border};">
+        <div class="receipt-info-label" style="margin-bottom: 6px;">Issued to:</div>
+        ${customerName ? `<div class="receipt-info-value" style="font-weight: 600;">${escapeHtml(customerName)}</div>` : ''}
+        ${customerPhone ? `<div class="receipt-info-value" style="font-size: 10px;">Tel: ${escapeHtml(customerPhone)}</div>` : ''}
+        ${customerEmail ? `<div class="receipt-info-value" style="font-size: 10px;">${escapeHtml(customerEmail)}</div>` : ''}
+      </div>
+      ` : ''}
     </div>
 
     <!-- Items Table -->

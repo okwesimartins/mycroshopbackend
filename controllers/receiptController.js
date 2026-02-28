@@ -733,6 +733,12 @@ async function getReceiptById(req, res) {
       pdfUrl = `${baseUrl}${pdfUrl}`;
     }
 
+    // Extract customer info from receipt_data (for standalone receipts)
+    const customer_name = receiptData?.customer_name || null;
+    const customer_phone = receiptData?.customer_phone || null;
+    const customer_email = receiptData?.customer_email || null;
+    const notes = receiptData?.notes || null;
+
     return res.json({
       success: true,
       data: {
@@ -745,7 +751,11 @@ async function getReceiptById(req, res) {
           esc_pos_commands: receipt.esc_pos_commands,
           created_at: receipt.created_at,
           total,
-          items
+          items,
+          customer_name,
+          customer_phone,
+          customer_email,
+          notes
         }
       }
     });
@@ -790,17 +800,31 @@ async function getReceiptsByInvoice(req, res) {
       return `${baseUrl}${url}`;
     };
 
+    const parseReceiptData = (rd) => {
+      if (!rd) return {};
+      try {
+        return typeof rd === 'string' ? JSON.parse(rd) : (rd || {});
+      } catch (_) { return {}; }
+    };
+
     return res.json({
       success: true,
       data: {
-        receipts: receipts.map(r => ({
-          id: r.id,
-          receipt_number: r.receipt_number,
-          invoice_id: r.invoice_id,
-          preview_url: normalizeUrl(r.preview_url),
-          pdf_url: normalizeUrl(r.pdf_url),
-          created_at: r.created_at
-        })),
+        receipts: receipts.map(r => {
+          const rd = parseReceiptData(r.receipt_data);
+          return {
+            id: r.id,
+            receipt_number: r.receipt_number,
+            invoice_id: r.invoice_id,
+            preview_url: normalizeUrl(r.preview_url),
+            pdf_url: normalizeUrl(r.pdf_url),
+            created_at: r.created_at,
+            customer_name: rd.customer_name || null,
+            customer_phone: rd.customer_phone || null,
+            customer_email: rd.customer_email || null,
+            notes: rd.notes || null
+          };
+        }),
         count: receipts.length
       }
     });
@@ -858,17 +882,31 @@ async function getAllReceipts(req, res) {
       return `${baseUrl}${url}`;
     };
 
+    const parseReceiptData = (rd) => {
+      if (!rd) return {};
+      try {
+        return typeof rd === 'string' ? JSON.parse(rd) : (rd || {});
+      } catch (_) { return {}; }
+    };
+
     return res.json({
       success: true,
       data: {
-        receipts: rows.map(r => ({
-          id: r.id,
-          receipt_number: r.receipt_number,
-          invoice_id: r.invoice_id,
-          preview_url: normalizeUrl(r.preview_url),
-          pdf_url: normalizeUrl(r.pdf_url),
-          created_at: r.created_at
-        })),
+        receipts: rows.map(r => {
+          const rd = parseReceiptData(r.receipt_data);
+          return {
+            id: r.id,
+            receipt_number: r.receipt_number,
+            invoice_id: r.invoice_id,
+            preview_url: normalizeUrl(r.preview_url),
+            pdf_url: normalizeUrl(r.pdf_url),
+            created_at: r.created_at,
+            customer_name: rd.customer_name || null,
+            customer_phone: rd.customer_phone || null,
+            customer_email: rd.customer_email || null,
+            notes: rd.notes || null
+          };
+        }),
         pagination: {
           page: pageNum,
           limit: limitNum,

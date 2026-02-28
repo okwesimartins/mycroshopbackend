@@ -104,15 +104,21 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
     page.setDefaultNavigationTimeout(30000);
     page.setDefaultTimeout(30000);
     console.log('[PDF Service] New page created, setting HTML content...');
-    
+
+    const isReceipt = safeTemplateId && String(safeTemplateId).toLowerCase().includes('receipt');
+
+    // For receipt templates: use mobile viewport so receipt fills screen (responsive design)
+    if (isReceipt) {
+      await page.setViewport({ width: 414, height: 800, deviceScaleFactor: 2 });
+    }
+
     // Use a faster, more reliable event than networkidle0 to avoid hanging
     // on external fonts/images; DOMContentLoaded is enough for our static HTML.
     await page.setContent(html, { waitUntil: 'domcontentloaded' });
     console.log('[PDF Service] HTML content loaded, generating PDF...');
 
-    await page.pdf({
+    const pdfOptions = {
       path: pdfPath,
-      format: 'A4',
       printBackground: true,
       margin: {
         top: '10mm',
@@ -122,12 +128,22 @@ async function generateInvoicePdfAndPreview({ html, invoiceId, templateId }) {
       },
       preferCSSPageSize: false,
       displayHeaderFooter: false
-    });
+    };
+    if (isReceipt) {
+      pdfOptions.width = '414px';
+      pdfOptions.height = '800px';
+    } else {
+      pdfOptions.format = 'A4';
+    }
+    await page.pdf(pdfOptions);
     console.log(`[PDF Service] PDF generated: ${pdfPath}`);
     console.log(`[PDF Service] PDF file exists: ${fs.existsSync(pdfPath)}`);
     console.log(`[PDF Service] PDF file size: ${fs.existsSync(pdfPath) ? fs.statSync(pdfPath).size : 0} bytes`);
 
-    await page.setViewport({ width: 1200, height: 1700, deviceScaleFactor: 2 });
+    // Use mobile viewport for receipts (already set), desktop for invoices
+    if (!isReceipt) {
+      await page.setViewport({ width: 1200, height: 1700, deviceScaleFactor: 2 });
+    }
     console.log('[PDF Service] Viewport set, taking screenshot...');
     
     await page.screenshot({
