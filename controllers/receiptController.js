@@ -841,11 +841,17 @@ async function getReceiptsByInvoice(req, res) {
 
 /**
  * Get all receipts for the current tenant (paginated)
- * GET /api/v1/receipts?page=1&limit=20
+ * GET /api/v1/receipts?page=1&limit=20&search=...&date=...&date_from=...&date_to=...
+ *
+ * Search params:
+ *   - search: searches receipt_number OR customer_name (from receipt_data)
+ *   - date: filter by created_at date (YYYY-MM-DD)
+ *   - date_from: filter receipts from this date (YYYY-MM-DD)
+ *   - date_to: filter receipts up to this date (YYYY-MM-DD)
  */
 async function getAllReceipts(req, res) {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, search, date, date_from, date_to } = req.query;
 
     const pageNum = Math.max(parseInt(page) || 1, 1);
     const limitNum = Math.min(Math.max(parseInt(limit) || 20, 1), 100);
@@ -856,20 +862,50 @@ async function getAllReceipts(req, res) {
     const isFreePlan = tenant?.subscription_plan === 'free';
     const tenantId = isFreePlan ? tenant?.id : null;
 
-    // Build WHERE + params
-    const whereClause = isFreePlan && tenantId ? 'WHERE tenant_id = ?' : '';
-    const baseParams = isFreePlan && tenantId ? [tenantId] : [];
+    // Build WHERE conditions
+    const conditions = [];
+    const replacements = [];
+
+    if (isFreePlan && tenantId) {
+      conditions.push('tenant_id = ?');
+      replacements.push(tenantId);
+    }
+
+    // Search: receipt_number OR customer_name (from receipt_data JSON)
+    if (search && String(search).trim()) {
+      const searchTerm = `%${String(search).trim()}%`;
+      conditions.push(`(receipt_number LIKE ? OR JSON_UNQUOTE(JSON_EXTRACT(receipt_data, '$.customer_name')) LIKE ?)`);
+      replacements.push(searchTerm, searchTerm);
+    }
+
+    // Single date filter (created_at)
+    if (date && String(date).trim()) {
+      conditions.push('DATE(created_at) = ?');
+      replacements.push(String(date).trim());
+    }
+
+    // Date range
+    if (date_from && String(date_from).trim()) {
+      conditions.push('DATE(created_at) >= ?');
+      replacements.push(String(date_from).trim());
+    }
+    if (date_to && String(date_to).trim()) {
+      conditions.push('DATE(created_at) <= ?');
+      replacements.push(String(date_to).trim());
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Total count for pagination
     const countQuery = `SELECT COUNT(*) AS count FROM receipts ${whereClause}`;
     const [countRows] = await req.db.query(countQuery, {
-      replacements: baseParams
+      replacements: [...replacements]
     });
     const total = (countRows && countRows[0] && Number(countRows[0].count)) || 0;
 
     // Fetch paginated receipts
     const dataQuery = `SELECT * FROM receipts ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-    const dataParams = [...baseParams, limitNum, offset];
+    const dataParams = [...replacements, limitNum, offset];
 
     const [rows] = await req.db.query(dataQuery, {
       replacements: dataParams
@@ -894,10 +930,12 @@ async function getAllReceipts(req, res) {
       data: {
         receipts: rows.map(r => {
           const rd = parseReceiptData(r.receipt_data);
+          const amount = typeof rd.total !== 'undefined' ? Number(rd.total || 0) : 0;
           return {
             id: r.id,
             receipt_number: r.receipt_number,
             invoice_id: r.invoice_id,
+            amount,
             preview_url: normalizeUrl(r.preview_url),
             pdf_url: normalizeUrl(r.pdf_url),
             created_at: r.created_at,
