@@ -1,6 +1,6 @@
 const { Sequelize } = require('sequelize');
 const moment = require('moment');
-const { calculateTax, getTaxInfo } = require('../services/taxCalculator');
+// Tax: only manual tax_rate is used when creating invoices (no automatic country-based tax)
 const { getTenantById } = require('../config/tenant');
 const { extractColorsFromLogo, generateColorPalette } = require('../services/colorExtractionService');
 const { generateTemplateOptions } = require('../services/invoiceTemplateGenerator');
@@ -1114,18 +1114,31 @@ async function getInvoiceById(req, res) {
 
     // Add preview URL and PDF URL to invoice object
     const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
-    // Normalize tax_breakdown to object (MySQL may return it as JSON string)
-    if (invoiceJson.tax_breakdown && typeof invoiceJson.tax_breakdown === 'string') {
-      try {
-        invoiceJson.tax_breakdown = JSON.parse(invoiceJson.tax_breakdown);
-      } catch {
-        // ignore parse errors, leave raw value
-      }
-    }
+    // Normalize associations (Sequelize may use PascalCase)
+    const customer = invoiceJson.Customer || invoiceJson.customer || null;
+    const items = invoiceJson.InvoiceItems || invoiceJson.InvoiceItem || invoiceJson.items || [];
+    // Build invoice_details (dates, amounts, no tax breakdown - tax breakdown removed for clarity)
+    const invoice_details = {
+      issue_date: invoiceJson.issue_date,
+      due_date: invoiceJson.due_date,
+      subtotal: invoiceJson.subtotal,
+      tax_amount: invoiceJson.tax_amount,
+      discount_amount: invoiceJson.discount_amount,
+      total: invoiceJson.total,
+      currency: invoiceJson.currency,
+      currency_symbol: invoiceJson.currency_symbol,
+      status: invoiceJson.status,
+      tax_rate: invoiceJson.tax_rate
+    };
+    // Omit tax_breakdown and duplicate association keys; we return customer + items + invoice_details explicitly
+    const { tax_breakdown: _tb, Customer: _C, InvoiceItems: _I, InvoiceItem: _Ii, ...invoiceRest } = invoiceJson;
     const invoiceWithPreview = {
-      ...invoiceJson,
+      ...invoiceRest,
       preview_url: previewUrl,
       pdf_url: pdfUrl,
+      customer: customer,
+      items: items,
+      invoice_details,
       ...(urlError ? { 
         url_error: urlError,
         error_message: urlError 
@@ -1369,48 +1382,28 @@ async function createInvoice(req, res) {
       });
     }
 
-    // Tenant already fetched above, reuse it
+    // Tax: only calculated when tax_rate is explicitly passed and > 0. Otherwise no tax.
+    // (Automatic country-based tax e.g. VAT/development levy is disabled for now.)
     let taxBreakdown = null;
     let calculatedTax = 0;
-    let taxCalculationMethod = 'automatic';
+    const taxRateNum = parseFloat(tax_rate);
+    const hasManualTaxRate = !isNaN(taxRateNum) && taxRateNum > 0;
 
-    // Calculate taxes automatically if tenant country is set, otherwise use manual tax_rate
-    if (tenant && tenant.country && tax_rate === 0) {
-      // Automatic tax calculation based on country
-      taxBreakdown = calculateTax({
-        country: tenant.country,
-        subtotal: subtotal,
-        businessType: tenant.business_type || 'company',
-        annualTurnover: tenant.annual_turnover ? parseFloat(tenant.annual_turnover) : null,
-        totalFixedAssets: tenant.total_fixed_assets ? parseFloat(tenant.total_fixed_assets) : null
-      });
-
-      calculatedTax = taxBreakdown.total_tax;
-      taxCalculationMethod = 'automatic';
-    } else if (tax_rate > 0) {
-      // Manual tax calculation
-      calculatedTax = subtotal * (tax_rate / 100);
-      taxCalculationMethod = 'manual';
+    if (hasManualTaxRate) {
+      calculatedTax = subtotal * (taxRateNum / 100);
       taxBreakdown = {
         vat: 0,
         development_levy: 0,
         total_tax: calculatedTax,
-        tax_details: {
-          message: 'Manual tax calculation',
-          tax_rate: `${tax_rate}%`
-        }
+        tax_details: { message: 'Manual tax calculation', tax_rate: `${taxRateNum}%` }
       };
     } else {
-      // No tax
       calculatedTax = 0;
-      taxCalculationMethod = 'manual';
       taxBreakdown = {
         vat: 0,
         development_levy: 0,
         total_tax: 0,
-        tax_details: {
-          message: 'No tax applied'
-        }
+        tax_details: { message: 'No tax applied (pass tax_rate to apply tax)' }
       };
     }
 
@@ -1449,8 +1442,8 @@ async function createInvoice(req, res) {
       tax_breakdown: taxBreakdown,
       discount_amount,
       total,
-      tax_calculation_method: taxCalculationMethod,
-      tax_rate: tax_rate || 0,
+      tax_calculation_method: hasManualTaxRate ? 'manual' : 'none',
+      tax_rate: hasManualTaxRate ? taxRateNum : 0,
       status: 'draft',
       notes: notes || null
     }, { transaction });
