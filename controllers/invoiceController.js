@@ -1190,7 +1190,15 @@ async function createInvoice(req, res) {
   try {
     const {
       store_id,
-      customer_id, // This is optional - can be null, undefined, or a valid integer
+      customer_id, // Optional: use existing customer by ID
+      // Optional: pass customer info to create/link a customer (used when customer_id is not provided)
+      customer_name,
+      customer_email,
+      customer_phone,
+      customer_address,
+      customer_city,
+      customer_state,
+      customer_country,
       issue_date,
       due_date,
       items,
@@ -1216,53 +1224,86 @@ async function createInvoice(req, res) {
       });
     }
 
-    // Validate customer_id only if it's explicitly provided (not null/undefined/empty)
-    // customer_id is optional, so null/undefined is valid
-    let validCustomerId = null;
-    if (customer_id !== undefined && customer_id !== null && customer_id !== '') {
-      const parsedCustomerId = parseInt(customer_id);
-      if (isNaN(parsedCustomerId) || parsedCustomerId < 1) {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: 'customer_id must be a positive integer if provided',
-          error_details: `Received customer_id: ${customer_id} (type: ${typeof customer_id})`
-        });
-      }
-
-      // Verify customer exists if customer_id is provided
-      try {
-        const customer = await req.db.models.Customer.findByPk(parsedCustomerId);
-        if (!customer) {
-          await transaction.rollback();
-          return res.status(404).json({
-            success: false,
-            message: `Customer with ID ${parsedCustomerId} not found`
-          });
-        }
-        validCustomerId = parsedCustomerId;
-      } catch (customerError) {
-        await transaction.rollback();
-        console.error('Error validating customer:', customerError);
-        return res.status(500).json({
-          success: false,
-          message: 'Error validating customer',
-          error: customerError.message,
-          error_details: process.env.NODE_ENV === 'development' ? {
-            stack: customerError.stack?.split('\n').slice(0, 5).join('\n'),
-            customer_id: parsedCustomerId
-          } : undefined
-        });
-      }
-    }
-
-    // Get tenant to check subscription plan
+    // Get tenant first (needed for customer find/create with tenant_id)
     const tenantId = req.user.tenantId;
     let tenant = null;
     try {
       tenant = await getTenantById(tenantId);
     } catch (error) {
       console.warn('Could not fetch tenant:', error);
+    }
+    const isFreePlan = tenant && tenant.subscription_plan === 'free';
+
+    // Resolve customer: either use customer_id or find/create from customer info
+    let validCustomerId = null;
+
+    if (customer_id !== undefined && customer_id !== null && customer_id !== '') {
+      const parsedCustomerId = parseInt(customer_id);
+      if (isNaN(parsedCustomerId) || parsedCustomerId < 1) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'customer_id must be a positive integer if provided'
+        });
+      }
+      const customer = await req.db.models.Customer.findByPk(parsedCustomerId, { transaction });
+      if (!customer) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: `Customer with ID ${parsedCustomerId} not found`
+        });
+      }
+      if (isFreePlan && customer.tenant_id !== null && customer.tenant_id !== tenantId) {
+        await transaction.rollback();
+        return res.status(403).json({
+          success: false,
+          message: 'Customer does not belong to your account'
+        });
+      }
+      validCustomerId = parsedCustomerId;
+    } else {
+      // No customer_id: optionally create/find customer from customer info
+      const hasCustomerInfo = [customer_name, customer_email, customer_phone].some(
+        v => v !== undefined && v !== null && String(v).trim() !== ''
+      );
+      if (hasCustomerInfo) {
+        const name = (customer_name != null && String(customer_name).trim()) ? String(customer_name).trim() : null;
+        const email = (customer_email != null && String(customer_email).trim()) ? String(customer_email).trim() : null;
+        const phone = (customer_phone != null && String(customer_phone).trim()) ? String(customer_phone).trim() : null;
+        if (!name && !email && !phone) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'When passing customer info, provide at least one of customer_name, customer_email, or customer_phone'
+          });
+        }
+        let customer = null;
+        const customerWhere = {};
+        if (isFreePlan) customerWhere.tenant_id = tenantId;
+        if (email) {
+          customerWhere.email = email;
+          customer = await req.db.models.Customer.findOne({ where: customerWhere, transaction });
+        }
+        if (!customer && phone) {
+          const phoneWhere = { phone };
+          if (isFreePlan) phoneWhere.tenant_id = tenantId;
+          customer = await req.db.models.Customer.findOne({ where: phoneWhere, transaction });
+        }
+        if (!customer) {
+          customer = await req.db.models.Customer.create({
+            tenant_id: isFreePlan ? tenantId : null,
+            name: name || email || phone || 'Customer',
+            email: email || null,
+            phone: phone || null,
+            address: (customer_address != null && String(customer_address).trim()) ? String(customer_address).trim() : null,
+            city: (customer_city != null && String(customer_city).trim()) ? String(customer_city).trim() : null,
+            state: (customer_state != null && String(customer_state).trim()) ? String(customer_state).trim() : null,
+            country: (customer_country != null && String(customer_country).trim()) ? String(customer_country).trim() : null
+          }, { transaction });
+        }
+        validCustomerId = customer.id;
+      }
     }
 
     // For free users, store_id is optional (they don't have physical stores)
@@ -1409,8 +1450,7 @@ async function createInvoice(req, res) {
 
     const total = subtotal + calculatedTax - discount_amount;
 
-    // Create invoice
-    const isFreePlan = tenant && tenant.subscription_plan === 'free';
+    // Create invoice (isFreePlan already set above)
     // Get currency and currency_symbol from request body
     // Normalize and derive currency + symbol server-side (ignore any bad client symbol)
     const currencyRaw = req.body.currency || 'NGN';
