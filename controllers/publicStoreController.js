@@ -974,15 +974,18 @@ async function getPublicServices(req, res) {
       });
     }
 
+    const isFreePlan = tenant.subscription_plan === 'free';
+
     const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
-    // Find online store
+    // Find online store – for free plan, scope by tenant_id as well
+    const onlineStoreWhere = isFreePlan
+      ? { username: effectiveUsername, is_published: true, tenant_id: effectiveTenantId }
+      : { username: effectiveUsername, is_published: true };
+
     const onlineStore = await models.OnlineStore.findOne({
-      where: { 
-        username: effectiveUsername, 
-        is_published: true 
-      },
+      where: onlineStoreWhere,
       attributes: ['id']
     });
 
@@ -999,6 +1002,11 @@ async function getPublicServices(req, res) {
       is_active: true
     };
 
+    // For free-plan tenants (shared DB), restrict services by tenant_id
+    if (isFreePlan) {
+      where.tenant_id = effectiveTenantId;
+    }
+
     if (search) {
       where[Op.or] = [
         { service_title: { [Op.like]: `%${search}%` } },
@@ -1011,7 +1019,8 @@ async function getPublicServices(req, res) {
       model: models.OnlineStoreService,
       where: { 
         online_store_id: onlineStore.id,
-        is_visible: true
+        is_visible: true,
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
       },
       required: true,
       attributes: []
@@ -1021,7 +1030,9 @@ async function getPublicServices(req, res) {
     if (collection_id) {
       includeClause.push({
         model: models.StoreCollectionService,
-        where: { collection_id },
+        where: isFreePlan
+          ? { collection_id, tenant_id: effectiveTenantId }
+          : { collection_id },
         required: true,
         attributes: []
       });
