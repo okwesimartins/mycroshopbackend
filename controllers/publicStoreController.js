@@ -2,14 +2,18 @@
  * Public Store Controller
  * Handles public-facing endpoints for customers viewing online stores
  * No authentication required
+ *
+ * Store resolution (two ways):
+ * 1) Via store domain: When the request Host is the store's subdomain (e.g. comfort.mycroshop.com)
+ *    or custom domain, middleware sets req.tenantId and req.onlineStoreUsername. Use paths
+ *    without :username (e.g. GET /api/v1/public-store/services). No tenant_id or username in URL.
+ * 2) Direct API: When calling from a non-store domain, use paths with :username and pass
+ *    tenant_id in query (e.g. GET /api/v1/public-store/comfort/services?tenant_id=21).
  */
 
 const { getTenantConnection } = require('../config/database');
 const { getTenantBySubdomain } = require('../config/tenant');
 const initModels = require('../models');
-
-// Note: All public store endpoints require tenant_id as query parameter
-// This is because we need to know which tenant database to query
 
 /**
  * Get public online store by username
@@ -40,7 +44,13 @@ async function getPublicStore(req, res) {
     if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id query parameter is required'
+        message: 'tenant_id query parameter is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined. Use the store\'s domain (e.g. mystore.mycroshop.com) or use the path /public-store/:username with tenant_id in query.'
       });
     }
 
@@ -728,7 +738,13 @@ async function getPublicCollectionProducts(req, res) {
     if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id query parameter is required'
+        message: 'tenant_id query parameter is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined. Use the store\'s domain or use the path /public-store/:username with tenant_id in query.'
       });
     }
 
@@ -956,7 +972,13 @@ async function getPublicServices(req, res) {
     if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id query parameter is required'
+        message: 'tenant_id query parameter is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined. Use the store\'s domain or use the path /public-store/:username with tenant_id in query.'
       });
     }
 
@@ -1121,7 +1143,13 @@ async function getPublicService(req, res) {
     if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id query parameter is required'
+        message: 'tenant_id query parameter is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined. Use the store\'s domain or use the path /public-store/:username with tenant_id in query.'
       });
     }
 
@@ -1243,7 +1271,13 @@ async function getPublicProducts(req, res) {
     if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id query parameter is required'
+        message: 'tenant_id query parameter is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined. Use the store\'s domain or use the path /public-store/:username with tenant_id in query.'
       });
     }
 
@@ -1538,7 +1572,13 @@ async function getPublicProduct(req, res) {
     if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id query parameter is required'
+        message: 'tenant_id query parameter is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined. Use the store\'s domain or use the path /public-store/:username with tenant_id in query.'
       });
     }
 
