@@ -7,7 +7,34 @@ const { getTenantById } = require('../config/tenant');
 async function authenticate(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
-    
+    const apiKeyHeader = req.headers['x-api-key'];
+
+    // Option 1: API key authentication (for AI sales agent and server-to-server calls)
+    const aiAgentApiKey = process.env.AI_AGENT_API_KEY;
+    if (aiAgentApiKey && apiKeyHeader && apiKeyHeader === aiAgentApiKey) {
+      const tenantIdFromRequest = req.body?.tenant_id || req.query?.tenant_id;
+      const tenantId = tenantIdFromRequest ? parseInt(tenantIdFromRequest, 10) : null;
+
+      if (!tenantId || Number.isNaN(tenantId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'tenant_id is required for API key authentication'
+        });
+      }
+
+      // Treat this as an AI agent user associated with the provided tenant
+      req.user = {
+        id: null,
+        email: null,
+        role: 'ai_agent',
+        tenantId,
+        is_ai_agent: true
+      };
+
+      return next();
+    }
+
+    // Option 2: Regular JWT authentication
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         success: false,
