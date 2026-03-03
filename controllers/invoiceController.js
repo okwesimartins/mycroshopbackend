@@ -1155,6 +1155,9 @@ async function getInvoiceById(req, res) {
             receiptPdfUrl = `${baseUrl}${receiptPdfUrl}`;
           }
 
+          const escPosBase64 = existingReceipt.esc_pos_commands || null;
+          const escPosLength = escPosBase64 ? Buffer.from(escPosBase64, 'base64').length : 0;
+
           receipt = {
             id: existingReceipt.id,
             receipt_number: existingReceipt.receipt_number,
@@ -1164,7 +1167,9 @@ async function getInvoiceById(req, res) {
             currency: invoice.currency || 'NGN',
             payment_method: invoice.payment_method || 'Cash',
             preview_url: receiptPreviewUrl,
-            pdf_url: receiptPdfUrl
+            pdf_url: receiptPdfUrl,
+            esc_pos_commands: escPosBase64,
+            esc_pos_commands_length: escPosLength
           };
         }
       }
