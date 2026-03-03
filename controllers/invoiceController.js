@@ -1112,7 +1112,67 @@ async function getInvoiceById(req, res) {
       });
     }
 
-    // Add preview URL and PDF URL to invoice object
+    // Try to fetch receipt attached to this invoice (if receipts table exists)
+    let receipt = null;
+    try {
+      const tenantIdForReceipt = req.user.tenantId;
+      let isFreePlanForReceipt = false;
+
+      try {
+        const tenantForReceipt = await getTenantById(tenantIdForReceipt);
+        isFreePlanForReceipt = tenantForReceipt && tenantForReceipt.subscription_plan === 'free';
+      } catch (tenantErr) {
+        console.warn('Could not determine subscription plan for receipts lookup:', tenantErr.message);
+      }
+
+      const [receiptTables] = await req.db.query(`
+        SELECT TABLE_NAME 
+        FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = 'receipts'
+      `);
+
+      if (receiptTables && receiptTables.length > 0) {
+        const receiptQuery = isFreePlanForReceipt && tenantIdForReceipt
+          ? `SELECT * FROM receipts WHERE tenant_id = ? AND invoice_id = ? ORDER BY id DESC LIMIT 1`
+          : `SELECT * FROM receipts WHERE invoice_id = ? ORDER BY id DESC LIMIT 1`;
+
+        const [receiptRows] = await req.db.query(receiptQuery, {
+          replacements: isFreePlanForReceipt && tenantIdForReceipt ? [tenantIdForReceipt, invoice.id] : [invoice.id]
+        });
+
+        if (receiptRows && receiptRows.length > 0) {
+          const existingReceipt = receiptRows[0];
+          const baseUrl = process.env.BASE_URL || 'https://backend.mycroshop.com';
+
+          let receiptPreviewUrl = existingReceipt.preview_url || null;
+          let receiptPdfUrl = existingReceipt.pdf_url || null;
+
+          if (receiptPreviewUrl && !receiptPreviewUrl.startsWith('http')) {
+            receiptPreviewUrl = `${baseUrl}${receiptPreviewUrl}`;
+          }
+          if (receiptPdfUrl && !receiptPdfUrl.startsWith('http')) {
+            receiptPdfUrl = `${baseUrl}${receiptPdfUrl}`;
+          }
+
+          receipt = {
+            id: existingReceipt.id,
+            receipt_number: existingReceipt.receipt_number,
+            invoice_id: existingReceipt.invoice_id,
+            transaction_date: existingReceipt.transaction_date || invoice.issue_date || new Date().toISOString().split('T')[0],
+            total: Number(invoice.total || 0),
+            currency: invoice.currency || 'NGN',
+            payment_method: invoice.payment_method || 'Cash',
+            preview_url: receiptPreviewUrl,
+            pdf_url: receiptPdfUrl
+          };
+        }
+      }
+    } catch (receiptError) {
+      console.warn('Error fetching receipt for invoice', invoice.id, receiptError.message);
+    }
+
+    // Add preview URL, PDF URL, and receipt (if any) to invoice object
     const invoiceJson = invoice.toJSON ? invoice.toJSON() : invoice;
     // Normalize associations (Sequelize may use PascalCase)
     const customer = invoiceJson.Customer || invoiceJson.customer || null;
@@ -1139,6 +1199,7 @@ async function getInvoiceById(req, res) {
       customer: customer,
       items: items,
       invoice_details,
+      receipt: receipt,
       ...(urlError ? { 
         url_error: urlError,
         error_message: urlError 
