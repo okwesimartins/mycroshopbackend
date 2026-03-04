@@ -1,5 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const { getTenantById } = require('../config/tenant');
+const { mainSequelize, getTenantConnection } = require('../config/database');
 
 /**
  * Verify webhook signature from Meta
@@ -305,7 +307,7 @@ async function checkProduct(req, res) {
       });
     }
 
-    const { name, tenant_id } = req.query;
+    const { name, tenant_id, subscription_plan } = req.query;
 
     if (!name || !tenant_id) {
       return res.status(400).json({
@@ -314,9 +316,8 @@ async function checkProduct(req, res) {
       });
     }
 
-    // Get tenant database connection
     const { getTenantConnection } = require('../config/database');
-    const sequelize = await getTenantConnection(tenant_id);
+    const sequelize = await getTenantConnection(tenant_id, subscription_plan || 'enterprise');
     const models = require('../models')(sequelize);
 
     // Search for product
@@ -346,6 +347,7 @@ async function checkProduct(req, res) {
         name: product.name,
         price: product.price,
         stock: product.stock,
+        image_url: product.image_url || null,
         available: product.stock > 0
       }
     });
@@ -372,7 +374,7 @@ async function getProductInfo(req, res) {
       });
     }
 
-    const { product_id, tenant_id } = req.query;
+    const { product_id, tenant_id, subscription_plan } = req.query;
 
     if (!product_id || !tenant_id) {
       return res.status(400).json({
@@ -381,9 +383,8 @@ async function getProductInfo(req, res) {
       });
     }
 
-    // Get tenant database connection
     const { getTenantConnection } = require('../config/database');
-    const sequelize = await getTenantConnection(tenant_id);
+    const sequelize = await getTenantConnection(tenant_id, subscription_plan || 'enterprise');
     const models = require('../models')(sequelize);
 
     const product = await models.Product.findByPk(product_id);
@@ -403,7 +404,8 @@ async function getProductInfo(req, res) {
         description: product.description,
         price: product.price,
         stock: product.stock,
-        category: product.category
+        category: product.category,
+        image_url: product.image_url || null
       }
     });
   } catch (error) {
@@ -415,11 +417,151 @@ async function getProductInfo(req, res) {
   }
 }
 
+/**
+ * List products for AI agent (inventory/catalog with optional search, returns image_url for media)
+ */
+async function listProducts(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { tenant_id, subscription_plan, search, limit } = req.query;
+    if (!tenant_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id is required'
+      });
+    }
+
+    const { getTenantConnection } = require('../config/database');
+    const sequelize = await getTenantConnection(tenant_id, subscription_plan || 'enterprise');
+    const models = require('../models')(sequelize);
+    const { Op } = require('sequelize');
+
+    const where = { is_active: true };
+    if (search && String(search).trim()) {
+      const term = `%${String(search).trim()}%`;
+      where[Op.or] = [
+        { name: { [Op.like]: term } },
+        { sku: { [Op.like]: term } },
+        { category: { [Op.like]: term } }
+      ];
+    }
+
+    const limitNum = Math.min(parseInt(limit, 10) || 20, 50);
+
+    const products = await models.Product.findAll({
+      where,
+      attributes: ['id', 'name', 'price', 'stock', 'category', 'image_url', 'description'],
+      order: [['name', 'ASC']],
+      limit: limitNum
+    });
+
+    res.json({
+      success: true,
+      products: products.map(p => ({
+        id: p.id,
+        name: p.name,
+        price: p.price,
+        stock: p.stock,
+        category: p.category,
+        image_url: p.image_url || null,
+        description: p.description ? String(p.description).slice(0, 200) : null
+      }))
+    });
+  } catch (error) {
+    console.error('Error listing products:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to list products'
+    });
+  }
+}
+
+/**
+ * Resolve tenant and WhatsApp token from phone_number_id (for Google Cloud AI agent)
+ * Called by Cloud with x-api-key. Returns tenant_id, access_token, store_name, subscription_plan.
+ */
+async function resolveTenant(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const phoneNumberId = req.query.phone_number_id || req.body?.phone_number_id;
+    if (!phoneNumberId) {
+      return res.status(400).json({
+        success: false,
+        message: 'phone_number_id is required'
+      });
+    }
+
+    const [rows] = await mainSequelize.query(
+      'SELECT tenant_id, access_token FROM whatsapp_connections WHERE phone_number_id = ? LIMIT 1',
+      { replacements: [phoneNumberId] }
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No WhatsApp connection found for this phone number ID'
+      });
+    }
+
+    const { tenant_id, access_token } = rows[0];
+    const tenant = await getTenantById(tenant_id);
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant not found'
+      });
+    }
+
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+    let default_online_store_id = null;
+    try {
+      const sequelize = await getTenantConnection(tenant_id, subscriptionPlan);
+      const models = require('../models')(sequelize);
+      const where = subscriptionPlan === 'free' ? { tenant_id } : {};
+      const firstStore = await models.OnlineStore.findOne({
+        where,
+        order: [['id', 'ASC']],
+        attributes: ['id']
+      });
+      default_online_store_id = firstStore?.id ?? null;
+    } catch (e) {
+      // ignore
+    }
+
+    res.json({
+      success: true,
+      data: {
+        tenant_id,
+        access_token,
+        store_name: tenant.name || 'our store',
+        subscription_plan: subscriptionPlan,
+        default_online_store_id
+      }
+    });
+  } catch (error) {
+    console.error('resolveTenant error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to resolve tenant'
+    });
+  }
+}
+
 module.exports = {
   handleWebhook,
   getConfig,
   updateConfig,
   checkProduct,
-  getProductInfo
+  getProductInfo,
+  listProducts,
+  resolveTenant
 };
 
