@@ -6,6 +6,10 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+const whatsappClient = require('./ai-sales-agent/lib/whatsapp');
+const { mainSequelize } = require('./config/database');
+const { processMessage: processAiSalesMessage } = require('./ai-sales-agent/functions/process-message');
+
 const app = express();
 
 // Middleware
@@ -16,7 +20,13 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN?.split(',') || '*',
   credentials: true
 }));
-app.use(express.json());
+
+// Capture raw body for webhook signature verification (e.g., WhatsApp)
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // Serve static files (uploads)
@@ -105,6 +115,112 @@ app.use('/api/v1/public-checkout', require('./routes/publicCheckout'));
 
 // Public booking routes (no authentication required - for customers)
 app.use('/api/v1/public-bookings', require('./routes/publicBookings'));
+
+// WhatsApp webhook (directly from Meta to backend)
+app.get('/whatsappWebhook', (req, res) => {
+  try {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
+      console.log('WhatsApp webhook verified (backend)');
+      return res.status(200).send(challenge);
+    }
+
+    console.warn('WhatsApp webhook verification failed (backend)', {
+      mode,
+      tokenProvided: !!token
+    });
+    return res.status(403).send('Forbidden');
+  } catch (error) {
+    console.error('Error in WhatsApp webhook verification (backend):', error);
+    return res.status(500).send('Internal server error');
+  }
+});
+
+app.post('/whatsappWebhook', async (req, res) => {
+  try {
+    console.log('Incoming WhatsApp webhook (backend)', {
+      method: req.method,
+      path: req.path,
+      headers: {
+        'x-hub-signature-256': req.headers['x-hub-signature-256'],
+        'user-agent': req.headers['user-agent']
+      }
+    });
+
+    const rawPayload = req.rawBody
+      ? req.rawBody.toString('utf8')
+      : JSON.stringify(req.body || {});
+
+    const skipSignatureCheck = process.env.META_SKIP_SIGNATURE_CHECK === 'true';
+
+    if (!skipSignatureCheck) {
+      const signature = req.headers['x-hub-signature-256'];
+      const isValid = whatsappClient.verifyWebhookSignature(
+        signature,
+        rawPayload,
+        process.env.META_APP_SECRET
+      );
+
+      if (!isValid) {
+        console.error('Invalid WhatsApp webhook signature (backend)');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+    } else {
+      console.warn('Skipping WhatsApp webhook signature verification on backend because META_SKIP_SIGNATURE_CHECK=true');
+    }
+
+    const payload = req.body || {};
+    const messageData = whatsappClient.parseWebhook(payload);
+
+    if (!messageData) {
+      console.log('WhatsApp webhook (backend): no message data in payload');
+      return res.status(200).json({ status: 'ok' });
+    }
+
+    console.log('WhatsApp message received (backend):', messageData);
+
+    // Look up tenant for this phone number ID from main database
+    const [rows] = await mainSequelize.query(
+      'SELECT tenant_id FROM whatsapp_connections WHERE phone_number_id = ? LIMIT 1',
+      {
+        replacements: [messageData.phoneNumberId]
+      }
+    );
+
+    if (!rows || rows.length === 0) {
+      console.error('No WhatsApp connection found for phone number ID (backend):', messageData.phoneNumberId);
+      // Return 200 so Meta does not retry
+      return res.status(200).json({ status: 'ok' });
+    }
+
+    const tenantId = rows[0].tenant_id;
+
+    // Hand off to AI sales agent pipeline (Gemini + inventory + orders).
+    // This function will handle:
+    // - Reading tenant info and store name
+    // - Checking inventory / orders / payments
+    // - Generating a natural, human-like reply
+    // - Sending the WhatsApp response via the Cloud API
+    processAiSalesMessage({
+      tenantId,
+      customerPhone: messageData.from,
+      message: messageData.text,
+      messageId: messageData.messageId,
+      phoneNumberId: messageData.phoneNumberId
+    }).catch(error => {
+      console.error('Error in AI sales message processing (backend):', error);
+    });
+
+    // Immediately acknowledge to Meta; reply is sent asynchronously by the AI pipeline
+    return res.status(200).json({ status: 'ok' });
+  } catch (error) {
+    console.error('WhatsApp webhook handler error (backend):', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Health check
 app.get('/health', (req, res) => {
