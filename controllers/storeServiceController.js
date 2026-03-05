@@ -619,7 +619,23 @@ async function updateStoreService(req, res) {
       ]
     });
 
+    // If this service is linked to an online store, expose visibility info
+    let onlineStoreLink = null;
+    try {
+      onlineStoreLink = await models.OnlineStoreService.findOne({
+        where: { service_id: service.id },
+        order: [['id', 'ASC']]
+      });
+    } catch (e) {
+      console.warn('Warning: failed to load OnlineStoreService link for service', service.id, e.message);
+    }
+
     const normalizedService = normalizeServiceData(updatedService);
+    if (onlineStoreLink) {
+      normalizedService.is_visible = onlineStoreLink.is_visible;
+      normalizedService.online_store_id = onlineStoreLink.online_store_id;
+      normalizedService.online_store_service_id = onlineStoreLink.id;
+    }
     
     // Convert service_image_url to full URL if it's a relative path
     if (normalizedService.service_image_url && normalizedService.service_image_url.startsWith('/uploads/')) {
@@ -815,14 +831,14 @@ async function getServiceAvailability(req, res) {
       // Return the availability from the JSON field as fallback
       const serviceData = normalizeServiceData(service);
       const jsonAvailability = serviceData.availability;
-      
-      res.json({
-        success: true,
-        data: {
-          service: {
-            id: service.id,
-            service_title: service.service_title
-          },
+
+    res.json({
+      success: true,
+      data: {
+        service: {
+          id: service.id,
+          service_title: service.service_title
+        },
           availability: jsonAvailability || null,
           availability_type: jsonAvailability ? 'json_field' : 'none',
           message: jsonAvailability 
@@ -907,9 +923,9 @@ async function getOnlineStoreServices(req, res) {
         const serviceData = normalizeServiceData(oss.StoreService);
         return {
           ...serviceData,
-          is_visible: oss.is_visible,
-          sort_order: oss.sort_order,
-          online_store_service_id: oss.id
+        is_visible: oss.is_visible,
+        sort_order: oss.sort_order,
+        online_store_service_id: oss.id
         };
       });
 
@@ -992,7 +1008,7 @@ async function createOnlineStoreService(req, res) {
         }
       }
 
-      if (!service_title) {
+    if (!service_title) {
       return res.status(400).json({
         success: false,
         message: 'service_title is required'

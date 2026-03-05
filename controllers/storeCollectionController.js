@@ -1091,7 +1091,9 @@ async function getCollectionServices(req, res) {
         ...normalizedService,
         is_pinned: cs.is_pinned,
         sort_order: cs.sort_order,
-        collection_service_id: cs.id
+        collection_service_id: cs.id,
+        // Visibility of the service inside this collection
+        is_visible: cs.is_visible
       };
     });
 
