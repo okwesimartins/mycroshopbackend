@@ -1091,9 +1091,7 @@ async function getCollectionServices(req, res) {
         ...normalizedService,
         is_pinned: cs.is_pinned,
         sort_order: cs.sort_order,
-        collection_service_id: cs.id,
-        // Visibility of the service inside this collection
-        is_visible: cs.is_visible
+        collection_service_id: cs.id
       };
     });
 
@@ -1102,7 +1100,10 @@ async function getCollectionServices(req, res) {
       data: {
         collection: {
           id: collection.id,
-          collection_name: collection.collection_name
+          collection_name: collection.collection_name,
+          // Visibility flag from store_collections table
+          is_visible: collection.is_visible,
+          online_store_id: collection.online_store_id
         },
         services
       }
