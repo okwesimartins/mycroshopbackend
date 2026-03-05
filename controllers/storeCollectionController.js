@@ -1084,14 +1084,53 @@ async function getCollectionServices(req, res) {
       order: [['sort_order', 'ASC'], ['created_at', 'ASC']]
     });
 
-    // Normalize service data (parse availability from string to JSON)
+    // Load visibility for each service in this collection from OnlineStoreService
+    let visibilityByServiceId = {};
+    try {
+      if (collection.online_store_id) {
+        const serviceIds = collectionServices
+          .map(cs => cs.service_id)
+          .filter((id, idx, arr) => id && arr.indexOf(id) === idx);
+
+        if (serviceIds.length > 0) {
+          const onlineStoreServices = await models.OnlineStoreService.findAll({
+            where: {
+              online_store_id: collection.online_store_id,
+              service_id: serviceIds
+            }
+          });
+
+          visibilityByServiceId = onlineStoreServices.reduce((acc, oss) => {
+            // If multiple links somehow exist, prefer the first one we see
+            if (!acc[oss.service_id]) {
+              acc[oss.service_id] = oss.is_visible;
+            }
+            return acc;
+          }, {});
+        }
+      }
+    } catch (e) {
+      console.warn(
+        'Warning: failed to load OnlineStoreService visibility for collection services',
+        collection_id,
+        e.message
+      );
+    }
+
+    // Normalize service data (parse availability from string to JSON) and attach per‑service visibility
     const services = collectionServices.map(cs => {
       const normalizedService = normalizeServiceData(cs.StoreService);
+      const serviceVisibility =
+        visibilityByServiceId[cs.service_id] !== undefined
+          ? visibilityByServiceId[cs.service_id]
+          : true; // default visible when no explicit link found
+
       return {
         ...normalizedService,
         is_pinned: cs.is_pinned,
         sort_order: cs.sort_order,
-        collection_service_id: cs.id
+        collection_service_id: cs.id,
+        is_visible: serviceVisibility
       };
     });
 
