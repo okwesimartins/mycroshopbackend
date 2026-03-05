@@ -493,7 +493,10 @@ async function updateStoreService(req, res) {
       location_type,
       availability,
       is_active,
-      sort_order
+      sort_order,
+      // Optional: visibility for online store link(s)
+      is_visible,
+      online_store_id // optional hint: which online store link to update
     } = req.body;
 
     // Determine service image URL: prioritize uploaded file over URL
@@ -609,6 +612,26 @@ async function updateStoreService(req, res) {
     if (sort_order !== undefined) updateData.sort_order = sort_order;
 
     await service.update(updateData);
+
+    // If is_visible was provided, update OnlineStoreService link(s) for this service
+    if (is_visible !== undefined) {
+      try {
+        const ossWhere = { service_id: service.id };
+        if (online_store_id !== undefined && online_store_id !== null) {
+          ossWhere.online_store_id = online_store_id;
+        }
+        const linksToUpdate = await models.OnlineStoreService.findAll({ where: ossWhere });
+        for (const link of linksToUpdate) {
+          await link.update({ is_visible });
+        }
+      } catch (e) {
+        console.warn(
+          'Warning: failed to update OnlineStoreService visibility for service',
+          service.id,
+          e.message
+        );
+      }
+    }
 
     const updatedService = await models.StoreService.findByPk(service.id, {
       include: [
