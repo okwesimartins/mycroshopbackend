@@ -513,7 +513,8 @@ async function resolveTenant(req, res) {
       console.error('resolveTenant main DB query error:', mainErr.message);
       return res.status(500).json({
         success: false,
-        message: 'Failed to resolve tenant'
+        message: 'Failed to resolve tenant',
+        error: mainErr.message
       });
     }
 
@@ -580,7 +581,8 @@ async function resolveTenant(req, res) {
     console.error('resolveTenant error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to resolve tenant'
+      message: 'Failed to resolve tenant',
+      error: error.message
     });
   }
 }
