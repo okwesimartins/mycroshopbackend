@@ -12,6 +12,14 @@ async function authenticate(req, res, next) {
     // Option 1: API key authentication (for AI sales agent and server-to-server calls)
     const aiAgentApiKey = process.env.AI_AGENT_API_KEY;
     if (aiAgentApiKey && apiKeyHeader && apiKeyHeader === aiAgentApiKey) {
+      // Resolve endpoints get tenant_id from phone_number_id; don't require tenant_id in request
+      const path = (req.baseUrl || '') + (req.path || '');
+      const isResolveEndpoint = /resolve-tenant|resolve-phone-number-id/.test(path);
+      if (isResolveEndpoint) {
+        req.user = { id: null, email: null, role: 'ai_agent', is_ai_agent: true };
+        return next();
+      }
+
       const tenantIdFromRequest = req.body?.tenant_id || req.query?.tenant_id;
       const tenantId = tenantIdFromRequest ? parseInt(tenantIdFromRequest, 10) : null;
 
