@@ -101,8 +101,8 @@ async function initiateWhatsAppConnection(req, res) {
     const state = crypto.randomBytes(32).toString('hex');
     const stateWithTenant = `${state}:${req.user.tenantId}`;
     
-    // Meta OAuth URL with required permissions
-    const redirectUri = 'https://mycroshop.com';
+    // Meta OAuth redirect (must match Meta dashboard: Valid OAuth Redirect URIs)
+    const redirectUri = process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
     const appId = process.env.META_APP_ID;
     
     // OAuth URL with business_management permission (required for WABA discovery)
@@ -152,6 +152,20 @@ async function handleWhatsAppCallback(req, res) {
           error_description
         },
         note: 'If you see this error with Embedded Signup, you may need Solution Partner/Tech Provider status. Try using OAuth flow instead.'
+      });
+    }
+
+    // Meta OAuth requires valid app credentials (used by both Embedded and OAuth flows)
+    if (!process.env.META_APP_ID || !process.env.META_APP_SECRET) {
+      return res.status(500).json({
+        success: false,
+        message: 'Meta app credentials are not configured',
+        error: 'meta_credentials_missing',
+        details: {
+          META_APP_ID_set: !!process.env.META_APP_ID,
+          META_APP_SECRET_set: !!process.env.META_APP_SECRET
+        },
+        note: 'Set META_APP_ID and META_APP_SECRET in your .env (from Meta Developer Console → Your App → Settings → Basic). Restart the server after changing .env.'
       });
     }
     
@@ -322,8 +336,8 @@ async function handleWhatsAppCallback(req, res) {
         });
       }
     
-    // Exchange code for access token
-      const redirectUri = 'https://mycroshop.com';
+    // Exchange code for access token (redirect_uri must match Meta dashboard exactly)
+      const redirectUri = process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
       
       let tokenResponse;
       try {
@@ -635,7 +649,7 @@ async function initiateInstagramConnection(req, res) {
     const state = crypto.randomBytes(32).toString('hex');
     const stateWithTenant = `${state}:${req.user.tenantId}`;
     
-    const redirectUri = 'https://mycroshop.com';
+    const redirectUri = process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
     const appId = process.env.META_APP_ID;
     
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
@@ -708,7 +722,8 @@ async function handleInstagramCallback(req, res) {
       });
     }
     
-    const redirectUri = 'https://mycroshop.com';
+    // Must match Meta dashboard: Valid OAuth Redirect URIs
+    const redirectUri = process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
     
     let tokenResponse;
     try {
@@ -977,7 +992,8 @@ async function verifyOAuthToken(req, res) {
     // If code is provided (either as 'code' param or detected in 'access_token'), exchange it
     if (providedCode) {
       try {
-        const redirectUri = 'https://mycroshop.com/';
+        // redirect_uri must match Meta dashboard exactly
+        const redirectUri = process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
         const tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
           params: {
             client_id: process.env.META_APP_ID,
