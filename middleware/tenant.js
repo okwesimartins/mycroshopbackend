@@ -7,6 +7,11 @@ const { getTenantById } = require('../config/tenant');
  */
 async function attachTenantDb(req, res, next) {
   try {
+    // Resolve endpoints get tenant_id from phone_number_id; they don't need req.db/tenant
+    const path = (req.baseUrl || '') + (req.path || '');
+    if (/resolve-tenant|resolve-phone-number-id/.test(path)) {
+      return next();
+    }
     if (!req.user || !req.user.tenantId) {
       return res.status(401).json({
         success: false,
