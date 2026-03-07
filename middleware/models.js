@@ -6,6 +6,11 @@ const initializeModels = require('../models');
  */
 function initializeTenantModels(req, res, next) {
   try {
+    // Resolve endpoints use main DB only (phone_number_id -> tenant_id); they don't need req.db/tenant models
+    const path = (req.baseUrl || '') + (req.path || '');
+    if (/resolve-tenant|resolve-phone-number-id/.test(path)) {
+      return next();
+    }
     if (!req.db) {
       return res.status(500).json({
         success: false,
