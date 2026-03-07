@@ -158,7 +158,7 @@ async function handleWhatsAppCallback(req, res) {
     // EMBEDDED SIGNUP FLOW - Returns waba_id and phone_number_id directly!
     // This only works if you're a Solution Partner or Tech Provider
     if (waba_id && phone_number_id) {
-      // Extract tenant_id from state
+    // Extract tenant_id from state
       const stateString = Array.isArray(state) ? state[0] : String(state);
       const stateParts = stateString.split(':');
       
@@ -232,16 +232,22 @@ async function handleWhatsAppCallback(req, res) {
         // Encryption utility not available
       }
       
-      // Store connection in tenant database
-      await models.WhatsAppConnection.upsert({
-        ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
-        phone_number_id: phone_number_id,
-        waba_id: waba_id,
-        access_token: encryptedToken,
-        token_expires_at: expiresAt
+      // Store in main DB only (single source of truth for resolve-tenant; same as domains)
+      const { mainSequelize } = require('../config/database');
+      await mainSequelize.query(`
+        INSERT INTO whatsapp_connections 
+        (tenant_id, phone_number_id, waba_id, access_token, token_expires_at, connected_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+        waba_id = VALUES(waba_id),
+        access_token = VALUES(access_token),
+        token_expires_at = VALUES(token_expires_at),
+        updated_at = NOW()
+      `, {
+        replacements: [tenantId, phone_number_id, waba_id, encryptedToken, expiresAt]
       });
-      
-      // Update AI agent config
+
+      // Update AI agent config in tenant DB (for getConnectionStatus / dashboard)
       const configWhereEmbedded = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
       let config = await models.AIAgentConfig.findOne({
         where: configWhereEmbedded,
@@ -265,25 +271,6 @@ async function handleWhatsAppCallback(req, res) {
           whatsapp_access_token: encryptedToken,
           whatsapp_token_expires_at: expiresAt
         });
-      }
-      
-      // Also store in main database for AI agent lookup
-      try {
-        const { mainSequelize } = require('../config/database');
-        await mainSequelize.query(`
-          INSERT INTO whatsapp_connections 
-          (tenant_id, phone_number_id, waba_id, access_token, token_expires_at, connected_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, NOW(), NOW())
-          ON DUPLICATE KEY UPDATE
-          waba_id = VALUES(waba_id),
-          access_token = VALUES(access_token),
-          token_expires_at = VALUES(token_expires_at),
-          updated_at = NOW()
-        `, {
-          replacements: [tenantId, phone_number_id, waba_id, encryptedToken, expiresAt]
-        });
-      } catch (error) {
-        // Don't fail if this fails - it's for AI agent lookup only
       }
       
       return res.json({
@@ -334,20 +321,20 @@ async function handleWhatsAppCallback(req, res) {
           error: 'invalid_state'
         });
       }
-      
-      // Exchange code for access token
-      const redirectUri = 'https://mycroshop.com/';
+    
+    // Exchange code for access token
+      const redirectUri = 'https://mycroshop.com';
       
       let tokenResponse;
       try {
         tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-          params: {
-            client_id: process.env.META_APP_ID,
-            client_secret: process.env.META_APP_SECRET,
-            redirect_uri: redirectUri,
-            code: code
-          }
-        });
+      params: {
+        client_id: process.env.META_APP_ID,
+        client_secret: process.env.META_APP_SECRET,
+        redirect_uri: redirectUri,
+        code: code
+      }
+    });
       } catch (error) {
         return res.status(400).json({
           success: false,
@@ -388,11 +375,11 @@ async function handleWhatsAppCallback(req, res) {
       let tokenInfo = null;
       try {
         const debugTokenResponse = await axios.get('https://graph.facebook.com/v18.0/debug_token', {
-          params: {
+      params: {
             input_token: accessToken,
             access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`
-          }
-        });
+      }
+    });
         tokenInfo = debugTokenResponse.data.data;
         tokenPermissions = tokenInfo?.scopes || [];
       } catch (debugError) {
@@ -410,12 +397,12 @@ async function handleWhatsAppCallback(req, res) {
         // Step 1: Get businesses the user manages
         discoverySteps.push('Step 1: GET /me/businesses');
         const businessesResponse = await axios.get('https://graph.facebook.com/v18.0/me/businesses', {
-          params: {
+      params: {
             access_token: accessToken,
             fields: 'id,name'
-          }
-        });
-        
+      }
+    });
+
         discoverySteps.push(`Step 1: Found ${businessesResponse.data.data?.length || 0} businesses`);
         
         if (businessesResponse.data.data && businessesResponse.data.data.length > 0) {
@@ -500,7 +487,7 @@ async function handleWhatsAppCallback(req, res) {
               phoneNumber = waba.phone_numbers.data[0];
               phoneNumberId = phoneNumber.id;
               discoverySteps.push(`Fallback SUCCESS: Found WABA ${wabaId} and phone number ${phoneNumberId} via app-level access`);
-            }
+    }
           }
         } catch (fallbackError) {
           const fallbackErrorDetails = fallbackError.response?.data || { message: fallbackError.message };
@@ -550,13 +537,13 @@ async function handleWhatsAppCallback(req, res) {
       }
       
       const subscriptionPlan = tenant.subscription_plan || 'enterprise';
-      
-      // Get tenant database connection
-      const { getTenantConnection } = require('../config/database');
+
+    // Get tenant database connection
+    const { getTenantConnection } = require('../config/database');
       const sequelize = await getTenantConnection(parsedTenantId, subscriptionPlan);
-      const initializeModels = require('../models');
-      const models = initializeModels(sequelize);
-      
+    const initializeModels = require('../models');
+    const models = initializeModels(sequelize);
+
       // Encrypt access token before storing
       let encryptedToken = accessToken;
       try {
@@ -568,58 +555,46 @@ async function handleWhatsAppCallback(req, res) {
         // Encryption utility not available
       }
       
-      // Store connection in tenant database
-      await models.WhatsAppConnection.upsert({
-        ...(subscriptionPlan === 'free' && { tenant_id: parsedTenantId }),
-        phone_number_id: phoneNumberId,
-        waba_id: wabaId,
-        access_token: encryptedToken,
-        token_expires_at: expiresAt
+      // Store in main DB only (single source of truth for resolve-tenant)
+      const { mainSequelize } = require('../config/database');
+      await mainSequelize.query(`
+        INSERT INTO whatsapp_connections 
+        (tenant_id, phone_number_id, waba_id, access_token, token_expires_at, connected_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+        waba_id = VALUES(waba_id),
+        access_token = VALUES(access_token),
+        token_expires_at = VALUES(token_expires_at),
+        updated_at = NOW()
+      `, {
+        replacements: [parsedTenantId, phoneNumberId, wabaId, encryptedToken, expiresAt]
       });
-      
-      // Update AI agent config
+
+      // Update AI agent config in tenant DB (for getConnectionStatus / dashboard)
       const configWhere = subscriptionPlan === 'free' ? { tenant_id: parsedTenantId } : {};
-      let config = await models.AIAgentConfig.findOne({
+    let config = await models.AIAgentConfig.findOne({
         where: configWhere,
-        order: [['created_at', 'DESC']]
-      });
-      
-      if (!config) {
-        config = await models.AIAgentConfig.create({
+      order: [['created_at', 'DESC']]
+    });
+
+    if (!config) {
+      config = await models.AIAgentConfig.create({
           ...(subscriptionPlan === 'free' && { tenant_id: parsedTenantId }),
-          whatsapp_enabled: true,
-          whatsapp_phone_number_id: phoneNumberId,
+        whatsapp_enabled: true,
+        whatsapp_phone_number_id: phoneNumberId,
           whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
           whatsapp_access_token: encryptedToken,
           whatsapp_token_expires_at: expiresAt
-        });
-      } else {
-        await config.update({
-          whatsapp_enabled: true,
-          whatsapp_phone_number_id: phoneNumberId,
+      });
+    } else {
+      await config.update({
+        whatsapp_enabled: true,
+        whatsapp_phone_number_id: phoneNumberId,
           whatsapp_phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
           whatsapp_access_token: encryptedToken,
           whatsapp_token_expires_at: expiresAt
-        });
-      }
-      
-      // Also store in main database for AI agent lookup
-      try {
-        const { mainSequelize } = require('../config/database');
-        await mainSequelize.query(`
-          INSERT INTO whatsapp_connections 
-          (tenant_id, phone_number_id, waba_id, access_token, connected_at, updated_at)
-          VALUES (?, ?, ?, ?, NOW(), NOW())
-          ON DUPLICATE KEY UPDATE
-          waba_id = VALUES(waba_id),
-          access_token = VALUES(access_token),
-          updated_at = NOW()
-        `, {
-          replacements: [parsedTenantId, phoneNumberId, wabaId, encryptedToken]
-        });
-      } catch (error) {
-        // Don't fail if this fails - it's for AI agent lookup only
-      }
+      });
+    }
       
       return res.json({
         success: true,
@@ -738,13 +713,13 @@ async function handleInstagramCallback(req, res) {
     let tokenResponse;
     try {
       tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-        params: {
-          client_id: process.env.META_APP_ID,
-          client_secret: process.env.META_APP_SECRET,
-          redirect_uri: redirectUri,
-          code: code
-        }
-      });
+      params: {
+        client_id: process.env.META_APP_ID,
+        client_secret: process.env.META_APP_SECRET,
+        redirect_uri: redirectUri,
+        code: code
+      }
+    });
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -781,10 +756,10 @@ async function handleInstagramCallback(req, res) {
     let pagesResponse;
     try {
       pagesResponse = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
-        params: {
-          access_token: accessToken
-        }
-      });
+      params: {
+        access_token: accessToken
+      }
+    });
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -797,18 +772,18 @@ async function handleInstagramCallback(req, res) {
     // Find Instagram account connected to page
     let instagramAccountId = null;
     try {
-      for (const page of pagesResponse.data.data || []) {
-        const instagramResponse = await axios.get(`https://graph.facebook.com/v18.0/${page.id}`, {
-          params: {
-            fields: 'instagram_business_account',
-            access_token: accessToken
-          }
-        });
-        
-        if (instagramResponse.data.instagram_business_account) {
-          instagramAccountId = instagramResponse.data.instagram_business_account.id;
-          break;
+    for (const page of pagesResponse.data.data || []) {
+      const instagramResponse = await axios.get(`https://graph.facebook.com/v18.0/${page.id}`, {
+        params: {
+          fields: 'instagram_business_account',
+          access_token: accessToken
         }
+      });
+      
+      if (instagramResponse.data.instagram_business_account) {
+        instagramAccountId = instagramResponse.data.instagram_business_account.id;
+        break;
+      }
       }
     } catch (error) {
       return res.status(400).json({
@@ -1456,35 +1431,20 @@ async function manuallyConnectWhatsApp(req, res) {
       });
     }
 
-    // Store in tenant database whatsapp_connections table
-    await models.WhatsAppConnection.upsert({
-      ...(subscriptionPlan === 'free' && { tenant_id: tenantId }),
-      phone_number_id: phone_number_id,
-      waba_id: waba_id || null,
-      access_token: encryptedToken,
-      token_expires_at: expiresAt
+    // Store in main DB only (single source of truth for resolve-tenant)
+    const { mainSequelize } = require('../config/database');
+    await mainSequelize.query(`
+      INSERT INTO whatsapp_connections 
+      (tenant_id, phone_number_id, waba_id, access_token, token_expires_at, connected_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+      ON DUPLICATE KEY UPDATE
+      waba_id = VALUES(waba_id),
+      access_token = VALUES(access_token),
+      token_expires_at = VALUES(token_expires_at),
+      updated_at = NOW()
+    `, {
+      replacements: [tenantId, phone_number_id, waba_id || null, encryptedToken, expiresAt]
     });
-
-    // Also store in main database for AI agent lookup
-    try {
-      const { mainSequelize } = require('../config/database');
-      
-      await mainSequelize.query(`
-        INSERT INTO whatsapp_connections 
-        (tenant_id, phone_number_id, waba_id, access_token, token_expires_at, connected_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, NOW(), NOW())
-        ON DUPLICATE KEY UPDATE
-        waba_id = VALUES(waba_id),
-        access_token = VALUES(access_token),
-        token_expires_at = VALUES(token_expires_at),
-        updated_at = NOW()
-      `, {
-        replacements: [tenantId, phone_number_id, waba_id || null, encryptedToken, expiresAt]
-      });
-      
-    } catch (error) {
-      // Don't fail if this fails - it's for AI agent lookup only
-    }
 
     return res.json({
       success: true,
@@ -1619,18 +1579,18 @@ async function refreshExpiringTokens(daysBeforeExpiration = 7) {
           // Encryption not available
         }
         
-        // Update tenant database
-        await models.WhatsAppConnection.update(
-          {
-            access_token: encryptedToken,
-            token_expires_at: newExpiresAt
-          },
-          {
-            where: { phone_number_id: connection.phone_number_id }
-          }
-        );
+        // Update main database (single source of truth)
+        await mainSequelize.query(`
+          UPDATE whatsapp_connections
+          SET access_token = ?,
+              token_expires_at = ?,
+              updated_at = NOW()
+          WHERE tenant_id = ? AND phone_number_id = ?
+        `, {
+          replacements: [encryptedToken, newExpiresAt, connection.tenant_id, connection.phone_number_id]
+        });
         
-        // Update AI agent config
+        // Update AI agent config in tenant DB (for dashboard)
         const configWhere = subscriptionPlan === 'free' ? { tenant_id: connection.tenant_id } : {};
         await models.AIAgentConfig.update(
           {
@@ -1641,17 +1601,6 @@ async function refreshExpiringTokens(daysBeforeExpiration = 7) {
             where: configWhere
           }
         );
-        
-        // Update main database
-        await mainSequelize.query(`
-          UPDATE whatsapp_connections
-          SET access_token = ?,
-              token_expires_at = ?,
-              updated_at = NOW()
-          WHERE tenant_id = ? AND phone_number_id = ?
-        `, {
-          replacements: [encryptedToken, newExpiresAt, connection.tenant_id, connection.phone_number_id]
-        });
         
         results.refreshed++;
       } catch (error) {

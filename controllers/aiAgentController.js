@@ -1,7 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const { getTenantById } = require('../config/tenant');
-const { mainSequelize, getTenantConnection, getSharedFreeDatabase } = require('../config/database');
+const { mainSequelize, getTenantConnection } = require('../config/database');
 
 /**
  * Verify webhook signature from Meta
@@ -482,9 +482,8 @@ async function listProducts(req, res) {
 
 /**
  * Resolve tenant and WhatsApp token from phone_number_id (for Google Cloud AI agent).
- * Supports both FREE and ENTERPRISE users:
- * - Enterprise: connections are stored in main DB (synced on connect).
- * - Free: connections may be only in shared free-users DB; we fall back to that if not in main.
+ * Single source of truth: main DB only (same pattern as domain resolution).
+ * All WhatsApp connections (free + enterprise) are stored in main DB; one indexed lookup, fast at scale.
  * Called by Cloud with x-api-key. Returns tenant_id, access_token, store_name, subscription_plan, default_online_store_id.
  */
 async function resolveTenant(req, res) {
@@ -502,37 +501,10 @@ async function resolveTenant(req, res) {
       });
     }
 
-    // 1) Try main DB first (enterprise connections + any free users synced there)
-    let rows;
-    try {
-      [rows] = await mainSequelize.query(
-        'SELECT tenant_id, access_token FROM whatsapp_connections WHERE phone_number_id = ? LIMIT 1',
-        { replacements: [phoneNumberId] }
-      );
-    } catch (mainErr) {
-      console.error('resolveTenant main DB query error:', mainErr.message);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to resolve tenant',
-        error: mainErr.message
-      });
-    }
-
-    // 2) Fallback for FREE users: shared free-users DB (whatsapp_connections may exist only there)
-    if (!rows || rows.length === 0) {
-      try {
-        const freeDb = await getSharedFreeDatabase();
-        const [freeRows] = await freeDb.query(
-          'SELECT tenant_id, access_token FROM whatsapp_connections WHERE phone_number_id = ? LIMIT 1',
-          { replacements: [phoneNumberId] }
-        );
-        if (freeRows && freeRows.length > 0) {
-          rows = freeRows;
-        }
-      } catch (freeErr) {
-        console.warn('resolveTenant shared free DB fallback:', freeErr.message);
-      }
-    }
+    const [rows] = await mainSequelize.query(
+      'SELECT tenant_id, access_token FROM whatsapp_connections WHERE phone_number_id = ? LIMIT 1',
+      { replacements: [phoneNumberId] }
+    );
 
     if (!rows || rows.length === 0) {
       return res.status(404).json({
