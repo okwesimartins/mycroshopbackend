@@ -78,6 +78,11 @@ const Tenant = mainSequelize.define('Tenant', {
     defaultValue: 3.00,
     comment: 'Transaction fee percentage for free tier (e.g., 3.00 = 3%)'
   },
+  business_bio: {
+    type: require('sequelize').DataTypes.TEXT,
+    allowNull: true,
+    comment: 'Business info for AI sales agent: what the business does, delivery timeline, max discount/last-price rules. If no pricing instruction, AI sticks to exact product prices.'
+  },
   created_at: {
     type: require('sequelize').DataTypes.DATE,
     defaultValue: require('sequelize').DataTypes.NOW
@@ -242,6 +247,20 @@ async function initializeMainDatabase() {
     // Create tables if they don't exist
     await Tenant.sync({ alter: false });
     await User.sync({ alter: false });
+
+    // Add business_bio to Tenant if missing (for AI sales agent context)
+    try {
+      const [cols] = await mainSequelize.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Tenant' AND COLUMN_NAME = 'business_bio'
+      `);
+      if (!cols || cols.length === 0) {
+        await mainSequelize.query(`ALTER TABLE Tenant ADD COLUMN business_bio TEXT NULL COMMENT 'Business info for AI: what we do, delivery, discount/last-price rules' AFTER transaction_fee_percentage`);
+        console.log('Added business_bio column to Tenant table.');
+      }
+    } catch (e) {
+      console.warn('Tenant business_bio migration:', e.message);
+    }
 
     // Create tenant_configs table if needed
     await mainSequelize.query(`

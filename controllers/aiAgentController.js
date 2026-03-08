@@ -456,20 +456,55 @@ async function listProducts(req, res) {
       where,
       attributes: ['id', 'name', 'price', 'stock', 'category', 'image_url', 'description'],
       order: [['name', 'ASC']],
-      limit: limitNum
+      limit: limitNum,
+      include: [
+        {
+          model: models.ProductVariation,
+          required: false,
+          attributes: ['id', 'variation_name', 'variation_type'],
+          include: [{
+            model: models.ProductVariationOption,
+            required: false,
+            attributes: ['id', 'option_value', 'option_display_name', 'price_adjustment', 'stock', 'is_available']
+          }]
+        }
+      ]
     });
+
+    const baseUrl = (process.env.BACKEND_BASE_URL || process.env.MYCROSHOP_API_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+    const toFullImageUrl = (url) => {
+      if (!url) return null;
+      if (url.startsWith('http')) return url;
+      return `${baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+    };
 
     res.json({
       success: true,
-      products: products.map(p => ({
-        id: p.id,
-        name: p.name,
-        price: p.price,
-        stock: p.stock,
-        category: p.category,
-        image_url: p.image_url || null,
-        description: p.description ? String(p.description).slice(0, 200) : null
-      }))
+      products: products.map(p => {
+        const variations = (p.ProductVariations || []).map(v => ({
+          id: v.id,
+          variation_name: v.variation_name,
+          variation_type: v.variation_type,
+          options: (v.ProductVariationOptions || []).map(o => ({
+            id: o.id,
+            option_value: o.option_value,
+            option_display_name: o.option_display_name || o.option_value,
+            price_adjustment: parseFloat(o.price_adjustment || 0),
+            stock: o.stock,
+            is_available: o.is_available
+          }))
+        }));
+        return {
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          stock: p.stock,
+          category: p.category,
+          image_url: toFullImageUrl(p.image_url) || null,
+          description: p.description ? String(p.description).slice(0, 200) : null,
+          variations: variations.length ? variations : undefined
+        };
+      })
     });
   } catch (error) {
     console.error('Error listing products:', error);
@@ -545,6 +580,7 @@ async function resolveTenant(req, res) {
         tenant_id,
         access_token,
         store_name: tenant.name || 'our store',
+        business_bio: tenant.business_bio || null,
         subscription_plan: subscriptionPlan,
         default_online_store_id
       }
