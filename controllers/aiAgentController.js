@@ -319,19 +319,37 @@ async function checkProduct(req, res) {
       });
     }
 
+    const tenantId = parseInt(tenant_id, 10);
+    if (Number.isNaN(tenantId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant_id'
+      });
+    }
+
+    const subscriptionPlan = subscription_plan || 'enterprise';
     const { getTenantConnection } = require('../config/database');
-    const sequelize = await getTenantConnection(tenant_id, subscription_plan || 'enterprise');
+    const { Op } = require('sequelize');
+
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
     const models = require('../models')(sequelize);
 
-    // Search for product
+    const searchTerm = String(name).trim();
+    const likeTerm = `%${searchTerm}%`;
+
+    const where = {
+      [Op.or]: [
+        { name: { [Op.like]: likeTerm } },
+        { sku: { [Op.like]: likeTerm } }
+      ],
+      is_active: true
+    };
+    if (subscriptionPlan === 'free') {
+      where.tenant_id = tenantId;
+    }
+
     const product = await models.Product.findOne({
-      where: {
-        [sequelize.Sequelize.Op.or]: [
-          { name: { [sequelize.Sequelize.Op.like]: `%${name}%` } },
-          { sku: { [sequelize.Sequelize.Op.like]: `%${name}%` } }
-        ],
-        is_active: true
-      }
+      where
     });
 
     if (!product) {
@@ -355,7 +373,7 @@ async function checkProduct(req, res) {
       }
     });
   } catch (error) {
-    console.error('Error checking product:', error);
+    console.error('Error checking product:', error.message, error.stack);
     res.status(500).json({
       success: false,
       message: 'Failed to check product'
