@@ -349,8 +349,10 @@ async function checkProduct(req, res) {
       where.tenant_id = tenantId;
     }
 
+    // Explicit attributes: shared DB (free) has no store_id; avoid SELECT columns that don't exist
     const product = await models.Product.findOne({
-      where
+      where,
+      attributes: ['id', 'name', 'price', 'stock', 'category', 'image_url', 'description']
     });
 
     if (!product) {
@@ -378,11 +380,9 @@ async function checkProduct(req, res) {
     });
   } catch (error) {
     console.error('Error checking product:', error.message, error.stack);
-    const errMsg = error && error.message ? String(error.message) : '';
     res.status(500).json({
       success: false,
-      message: 'Failed to check product',
-      error: errMsg
+      message: 'Failed to check product'
     });
   }
 }
@@ -410,11 +410,37 @@ async function getProductInfo(req, res) {
       });
     }
 
+    const tenantId = parseInt(tenant_id, 10);
+    if (Number.isNaN(tenantId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant_id'
+      });
+    }
+
+    const subscriptionPlan = subscription_plan || 'enterprise';
     const { getTenantConnection } = require('../config/database');
-    const sequelize = await getTenantConnection(tenant_id, subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
     const models = require('../models')(sequelize);
 
-    const product = await models.Product.findByPk(product_id);
+    const productId = parseInt(product_id, 10);
+    if (Number.isNaN(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid product_id'
+      });
+    }
+
+    const where = { id: productId };
+    if (subscriptionPlan === 'free') {
+      where.tenant_id = tenantId;
+    }
+
+    // Explicit attributes: shared DB has no store_id
+    const product = await models.Product.findOne({
+      where,
+      attributes: ['id', 'name', 'description', 'price', 'stock', 'category', 'image_url']
+    });
 
     if (!product) {
       return res.status(404).json({
@@ -462,12 +488,24 @@ async function listProducts(req, res) {
       });
     }
 
+    const tenantId = parseInt(tenant_id, 10);
+    if (Number.isNaN(tenantId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant_id'
+      });
+    }
+
+    const subscriptionPlan = subscription_plan || 'enterprise';
     const { getTenantConnection } = require('../config/database');
-    const sequelize = await getTenantConnection(tenant_id, subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
     const models = require('../models')(sequelize);
     const { Op } = require('sequelize');
 
     const where = { is_active: true };
+    if (subscriptionPlan === 'free') {
+      where.tenant_id = tenantId;
+    }
     if (search && String(search).trim()) {
       const term = `%${String(search).trim()}%`;
       where[Op.or] = [
