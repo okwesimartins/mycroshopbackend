@@ -344,13 +344,9 @@ async function checkProduct(req, res) {
       ],
       is_active: true
     };
-    // For free plan (shared DB): only scope by tenant_id if the column exists in the DB.
-    // list-products does not filter by tenant_id; if the shared DB has no tenant_id on products, adding it here causes "Failed to check product".
+    // Free users: scope by tenant_id in shared DB (required for correct store)
     if (subscriptionPlan === 'free') {
-      const tableHasTenantId = await sequelize.getQueryInterface().describeTable('products').then(cols => Object.prototype.hasOwnProperty.call(cols || {}, 'tenant_id')).catch(() => false);
-      if (tableHasTenantId) {
-        where.tenant_id = tenantId;
-      }
+      where.tenant_id = tenantId;
     }
 
     const product = await models.Product.findOne({
@@ -365,6 +361,9 @@ async function checkProduct(req, res) {
       });
     }
 
+    const stock = product.get('stock');
+    const available = stock != null ? Number(stock) > 0 : false;
+
     res.json({
       success: true,
       exists: true,
@@ -374,14 +373,16 @@ async function checkProduct(req, res) {
         price: product.price,
         stock: product.stock,
         image_url: product.image_url || null,
-        available: product.stock > 0
+        available
       }
     });
   } catch (error) {
     console.error('Error checking product:', error.message, error.stack);
+    const errMsg = error && error.message ? String(error.message) : '';
     res.status(500).json({
       success: false,
-      message: 'Failed to check product'
+      message: 'Failed to check product',
+      error: errMsg
     });
   }
 }
