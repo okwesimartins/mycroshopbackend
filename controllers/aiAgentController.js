@@ -2,6 +2,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { getTenantById } = require('../config/tenant');
 const { mainSequelize, getTenantConnection } = require('../config/database');
+const { fetchVariantsForProductIds } = require('./onlineStoreController');
 
 /**
  * Verify webhook signature from Meta
@@ -478,6 +479,9 @@ async function listProducts(req, res) {
       return `${baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
     };
 
+    const productIds = products.map(p => p.id);
+    const variantsByProduct = await fetchVariantsForProductIds(sequelize, productIds, toFullImageUrl);
+
     res.json({
       success: true,
       products: products.map(p => {
@@ -502,7 +506,8 @@ async function listProducts(req, res) {
           category: p.category,
           image_url: toFullImageUrl(p.image_url) || null,
           description: p.description ? String(p.description).slice(0, 200) : null,
-          variations: variations.length ? variations : undefined
+          variations: variations.length ? variations : undefined,
+          variants: variantsByProduct.get(p.id) || []
         };
       })
     });

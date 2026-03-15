@@ -99,6 +99,112 @@ async function findTenantOnlineStoreById(req, models, id, includeOptions) {
   return models.OnlineStore.findByPk(numericId, includeOptions || undefined);
 }
 
+const { QueryTypes: QTypes } = require('sequelize');
+
+/**
+ * Fetch product variants with option labels in a frontend-friendly structure.
+ * Returns array of { id, sku, price, stock, image_url, options: [{ variation_name, option_value, variation_id, option_id }] }.
+ * getFullUrl(path) is optional; if provided, variant image_url is converted to full URL.
+ */
+async function fetchProductVariantsStructured(db, productId, getFullUrl) {
+  if (!db || !productId) return [];
+  const rows = await db.query(
+    `SELECT pv.id AS variant_id, pv.sku, pv.price, pv.stock, pv.image_url,
+       pvo.variation_id, pvo.option_id,
+       pvar.variation_name,
+       pvaropt.option_value, pvaropt.option_display_name
+     FROM product_variants pv
+     LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
+     LEFT JOIN product_variations pvar ON pvo.variation_id = pvar.id
+     LEFT JOIN product_variation_options pvaropt ON pvo.option_id = pvaropt.id
+     WHERE pv.product_id = :productId
+     ORDER BY pv.id, pvar.sort_order ASC`,
+    { replacements: { productId }, type: QTypes.SELECT }
+  );
+  if (!rows || rows.length === 0) return [];
+  const byVariant = new Map();
+  for (const r of rows) {
+    const vid = r.variant_id;
+    if (!byVariant.has(vid)) {
+      let imageUrl = r.image_url || null;
+      if (imageUrl && typeof getFullUrl === 'function') imageUrl = getFullUrl(imageUrl);
+      byVariant.set(vid, {
+        id: vid,
+        sku: r.sku || null,
+        price: parseFloat(r.price) || 0,
+        stock: parseInt(r.stock) || 0,
+        image_url: imageUrl,
+        options: []
+      });
+    }
+    if (r.variation_id && r.option_id != null) {
+      byVariant.get(vid).options.push({
+        variation_name: r.variation_name || null,
+        option_value: r.option_value != null ? String(r.option_value) : null,
+        option_display_name: r.option_display_name || r.option_value || null,
+        variation_id: r.variation_id,
+        option_id: r.option_id
+      });
+    }
+  }
+  return Array.from(byVariant.values());
+}
+
+/**
+ * Fetch variants for multiple products. Returns Map<productId, variants[]>. getFullUrl optional.
+ */
+async function fetchVariantsForProductIds(db, productIds, getFullUrl) {
+  if (!db || !productIds || productIds.length === 0) return new Map();
+  const ids = [...new Set(productIds)].filter(Boolean);
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await db.query(
+    `SELECT pv.id AS variant_id, pv.product_id, pv.sku, pv.price, pv.stock, pv.image_url,
+       pvo.variation_id, pvo.option_id,
+       pvar.variation_name,
+       pvaropt.option_value, pvaropt.option_display_name
+     FROM product_variants pv
+     LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
+     LEFT JOIN product_variations pvar ON pvo.variation_id = pvar.id
+     LEFT JOIN product_variation_options pvaropt ON pvo.option_id = pvaropt.id
+     WHERE pv.product_id IN (${placeholders})
+     ORDER BY pv.product_id, pv.id, pvar.sort_order ASC`,
+    { replacements: ids, type: QTypes.SELECT }
+  );
+  const byProduct = new Map();
+  for (const r of rows || []) {
+    const pid = r.product_id;
+    if (!byProduct.has(pid)) byProduct.set(pid, new Map());
+    const byVariant = byProduct.get(pid);
+    const vid = r.variant_id;
+    if (!byVariant.has(vid)) {
+      let imageUrl = r.image_url || null;
+      if (imageUrl && typeof getFullUrl === 'function') imageUrl = getFullUrl(imageUrl);
+      byVariant.set(vid, {
+        id: vid,
+        sku: r.sku || null,
+        price: parseFloat(r.price) || 0,
+        stock: parseInt(r.stock) || 0,
+        image_url: imageUrl,
+        options: []
+      });
+    }
+    if (r.variation_id && r.option_id != null) {
+      byVariant.get(vid).options.push({
+        variation_name: r.variation_name || null,
+        option_value: r.option_value != null ? String(r.option_value) : null,
+        option_display_name: r.option_display_name || r.option_value || null,
+        variation_id: r.variation_id,
+        option_id: r.option_id
+      });
+    }
+  }
+  const result = new Map();
+  for (const pid of ids) {
+    result.set(Number(pid), byProduct.has(pid) ? Array.from(byProduct.get(pid).values()) : []);
+  }
+  return result;
+}
+
 /**
  * Check if online store exists and setup status
  */
@@ -1857,6 +1963,8 @@ async function createOnlineStoreProduct(req, res) {
       });
     }
 
+    productData.variants = await fetchProductVariantsStructured(req.db, productId, (path) => getFullUrl(req, path));
+
     res.status(201).json({
       success: true,
       message: 'Product created and published to online store successfully',
@@ -2635,6 +2743,8 @@ async function updateOnlineStoreProduct(req, res) {
       });
     }
 
+    productData.variants = await fetchProductVariantsStructured(req.db, product_id, (path) => getFullUrl(req, path));
+
     res.json({
       success: true,
       message: 'Product updated successfully',
@@ -3141,6 +3251,8 @@ async function publishOnlineStoreProduct(req, res) {
       });
     }
 
+    productData.variants = await fetchProductVariantsStructured(req.db, product_id, (path) => getFullUrl(req, path));
+
     res.json({
       success: true,
       message: 'Product published to online store successfully',
@@ -3274,7 +3386,10 @@ async function getOnlineStoreProducts(req, res) {
       return `${protocol}://${host}${relativePath}`;
     };
 
-    // Convert image_url to full URL and add publish status for each product
+    const productIds = rows.map(p => p.id);
+    const variantsByProduct = await fetchVariantsForProductIds(req.db, productIds, getFullUrl);
+
+    // Convert image_url to full URL and add publish status and variants for each product
     const products = rows.map(product => {
       const productData = product.toJSON();
       if (productData.image_url) {
@@ -3289,7 +3404,8 @@ async function getOnlineStoreProducts(req, res) {
       productData.is_published = storeProduct ? (storeProduct.is_published || false) : false;
       productData.featured = storeProduct ? (storeProduct.featured || false) : false;
       productData.sort_order = storeProduct ? (storeProduct.sort_order || null) : null;
-      
+      productData.variants = variantsByProduct.get(productData.id) || [];
+
       // Remove nested StoreProduct objects
       delete productData.StoreProduct;
       delete productData.StoreProducts;
@@ -3504,6 +3620,8 @@ async function getOnlineStoreProductDetails(req, res) {
       total_quantity_sold: parseFloat(metrics.total_quantity_sold || 0),
       total_revenue: parseFloat(metrics.total_revenue || 0)
     };
+
+    productData.variants = await fetchProductVariantsStructured(req.db, product_id, getFullUrl);
 
     // Remove nested objects
     delete productData.StoreProducts;
@@ -5211,6 +5329,8 @@ async function getPreviewProduct(req, res) {
       delete productData.StoreProducts;
     }
 
+    productData.variants = await fetchProductVariantsStructured(req.db, product_id, getFullUrl);
+
     res.json({
       success: true,
       data: { product: productData }
@@ -5246,6 +5366,8 @@ module.exports = {
   removeOnlineStoreProduct,
   publishOnlineStoreProduct,
   getOnlineStoreProducts,
-  getOnlineStoreProductDetails
+  getOnlineStoreProductDetails,
+  fetchProductVariantsStructured,
+  fetchVariantsForProductIds
 };
 
