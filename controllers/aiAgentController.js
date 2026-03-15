@@ -349,10 +349,29 @@ async function checkProduct(req, res) {
       where.tenant_id = tenantId;
     }
 
-    // Explicit attributes: shared DB (free) has no store_id; avoid SELECT columns that don't exist
+    const baseUrl = (process.env.BACKEND_BASE_URL || process.env.MYCROSHOP_API_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+    const toFullImageUrl = (url) => {
+      if (!url) return null;
+      if (url.startsWith('http')) return url;
+      return `${baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+    };
+
+    // Explicit attributes: shared DB (free) has no store_id; include variations and options
     const product = await models.Product.findOne({
       where,
-      attributes: ['id', 'name', 'price', 'stock', 'category', 'image_url', 'description']
+      attributes: ['id', 'name', 'price', 'stock', 'category', 'image_url', 'description'],
+      include: [
+        {
+          model: models.ProductVariation,
+          required: false,
+          attributes: ['id', 'variation_name', 'variation_type'],
+          include: [{
+            model: models.ProductVariationOption,
+            required: false,
+            attributes: ['id', 'option_value', 'option_display_name', 'price_adjustment', 'stock', 'is_available', 'image_url']
+          }]
+        }
+      ]
     });
 
     if (!product) {
@@ -366,6 +385,22 @@ async function checkProduct(req, res) {
     const stock = product.get('stock');
     const available = stock != null ? Number(stock) > 0 : false;
 
+    const variantsByProduct = await fetchVariantsForProductIds(sequelize, [product.id], toFullImageUrl);
+    const variations = (product.ProductVariations || []).map(v => ({
+      id: v.id,
+      variation_name: v.variation_name,
+      variation_type: v.variation_type,
+      options: (v.ProductVariationOptions || []).map(o => ({
+        id: o.id,
+        option_value: o.option_value,
+        option_display_name: o.option_display_name || o.option_value,
+        price_adjustment: parseFloat(o.price_adjustment || 0),
+        stock: o.stock,
+        is_available: o.is_available,
+        image_url: toFullImageUrl(o.image_url) || null
+      }))
+    }));
+
     res.json({
       success: true,
       exists: true,
@@ -374,8 +409,12 @@ async function checkProduct(req, res) {
         name: product.name,
         price: product.price,
         stock: product.stock,
-        image_url: product.image_url || null,
-        available
+        category: product.category,
+        description: product.description || null,
+        image_url: toFullImageUrl(product.image_url) || null,
+        available,
+        variations: variations.length ? variations : undefined,
+        variants: variantsByProduct.get(product.id) || []
       }
     });
   } catch (error) {
