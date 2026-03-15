@@ -1105,7 +1105,8 @@ async function createOnlineStoreProduct(req, res) {
       is_published = true, // Auto-publish for free users
       featured = false,
       sort_order,
-      variations // Array of variation objects: [{variation_name, variation_type, is_required, options: [{value, display_name, price_adjustment, stock, sku, barcode, image_url, is_default}]}]
+      variations, // Array of variation objects: [{variation_name, variation_type, is_required, options: [{value, display_name, price_adjustment, stock, sku, barcode, image_url, is_default}]}]
+      variants // OPTIONAL: explicit variant combinations [{ sku, price, stock, image_url, options: [{ variation_name, option_value }] }]
     } = req.body;
 
     // Free users should not have access to advanced inventory management fields:
@@ -1214,6 +1215,29 @@ async function createOnlineStoreProduct(req, res) {
       }
     }
 
+    // Parse variants early (from form-data string or array)
+    let parsedVariants = [];
+    if (variants) {
+      if (typeof variants === 'string') {
+        try {
+          parsedVariants = JSON.parse(variants);
+          if (!Array.isArray(parsedVariants)) {
+            parsedVariants = [];
+          }
+        } catch (parseError) {
+          console.error('Error parsing variants JSON:', parseError);
+          cleanupFiles();
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid variants JSON format. Please ensure variants is a valid JSON array.',
+            error: parseError.message
+          });
+        }
+      } else if (Array.isArray(variants)) {
+        parsedVariants = variants;
+      }
+    }
+
     // Check if variations have options
     const hasVariationOptions = Array.isArray(parsedVariations) && parsedVariations.length > 0 &&
       parsedVariations.some(v => v.options && Array.isArray(v.options) && v.options.length > 0);
@@ -1244,16 +1268,16 @@ async function createOnlineStoreProduct(req, res) {
         cleanupFiles();
         return res.status(400).json({
           success: false,
-          message: 'Products with variations cannot have primary stock. Each variation option manages its own stock level.',
-          suggestion: 'Remove the "stock" parameter from your request. Stock should only be specified in the variation options (e.g., options[0].stock).'
+          message: 'Products with variations cannot have primary stock. Each variation option or variant manages its own stock level.',
+          suggestion: 'Remove the "stock" parameter from your request. Stock should only be specified in the variation options or in the variants array.'
         });
       }
       if (price !== undefined && price !== null && price !== '') {
         cleanupFiles();
         return res.status(400).json({
           success: false,
-          message: 'Products with variations cannot have primary price. Each variation option manages its own price level.',
-          suggestion: 'Remove the "price" parameter from your request. Price should only be specified in the variation options (e.g., options[0].price).'
+          message: 'Products with variations cannot have primary price. Each variation option or variant manages its own price level.',
+          suggestion: 'Remove the "price" parameter from your request. Price should only be specified in the variation options or in the variants array.'
         });
       }
     }
@@ -1426,17 +1450,7 @@ async function createOnlineStoreProduct(req, res) {
       });
     }
 
-    // VALIDATION: Only ONE variation type per product allowed (keep it simple!)
-    if (Array.isArray(parsedVariations) && parsedVariations.length > 1) {
-      cleanupFiles();
-      return res.status(400).json({
-        success: false,
-        message: 'A product can only have ONE variation type. Please choose either Color, Size, Material, etc., but not multiple types together.',
-        suggestion: 'If you need multiple variations (e.g., Color + Size), create separate products like "T-Shirt - Red" (with sizes) and "T-Shirt - Blue" (with sizes).'
-      });
-    }
-
-    // Handle product variations if provided
+    // Handle product variations if provided (support multiple variation types, e.g., Color + Size)
     if (hasVariationOptions && Array.isArray(parsedVariations) && parsedVariations.length > 0) {
       for (let i = 0; i < parsedVariations.length; i++) {
         const variationData = parsedVariations[i];
@@ -1625,6 +1639,112 @@ async function createOnlineStoreProduct(req, res) {
                 isDefault: optionData.is_default ? 1 : 0,
                 isAvailable: optionData.is_available !== false ? 1 : 0,
                 sortOrder: optionData.sort_order !== undefined ? parseInt(optionData.sort_order) : j
+              },
+              type: QueryTypes.INSERT
+            }
+          );
+        }
+      }
+    }
+
+    // After creating variations and options, optionally create explicit product variants
+    if (hasVariationOptions && Array.isArray(parsedVariants) && parsedVariants.length > 0) {
+      // Build lookup maps from fetched variations/options (by variation_name + option_value/display_name)
+      const variationMap = new Map(); // key: variation_name -> { id, optionsByValue }
+      if (fetchedVariations && fetchedVariations.length > 0) {
+        for (const variation of fetchedVariations) {
+          const options = await req.db.query(
+            `SELECT id, option_value, option_display_name 
+             FROM product_variation_options 
+             WHERE variation_id = :variationId`,
+            {
+              replacements: { variationId: variation.id },
+              type: QueryTypes.SELECT
+            }
+          );
+          const optionsByValue = new Map();
+          for (const opt of options || []) {
+            if (opt.option_value) optionsByValue.set(String(opt.option_value).toLowerCase(), opt);
+            if (opt.option_display_name) optionsByValue.set(String(opt.option_display_name).toLowerCase(), opt);
+          }
+          variationMap.set(String(variation.variation_name).toLowerCase(), {
+            id: variation.id,
+            optionsByValue
+          });
+        }
+      }
+
+      for (const variant of parsedVariants) {
+        if (!variant || !Array.isArray(variant.options) || variant.options.length === 0) continue;
+        const variantOptions = [];
+
+        for (const optRef of variant.options) {
+          if (!optRef || !optRef.variation_name || !optRef.option_value) continue;
+          const vKey = String(optRef.variation_name).toLowerCase();
+          const vEntry = variationMap.get(vKey);
+          if (!vEntry) continue;
+          const valueKey = String(optRef.option_value).toLowerCase();
+          const optRow = vEntry.optionsByValue.get(valueKey);
+          if (!optRow) continue;
+          variantOptions.push({
+            variation_id: vEntry.id,
+            option_id: optRow.id
+          });
+        }
+
+        if (!variantOptions.length) continue;
+
+        // Validate variant price/stock
+        if (variant.price === undefined || variant.price === null || variant.price === '') {
+          continue;
+        }
+        if (variant.stock === undefined || variant.stock === null || variant.stock === '') {
+          continue;
+        }
+
+        // Insert into product_variants
+        await req.db.query(
+          `INSERT INTO product_variants (tenant_id, product_id, sku, barcode, price, stock, image_url, is_active, created_at, updated_at)
+           VALUES (:tenantId, :productId, :sku, :barcode, :price, :stock, :imageUrl, 1, NOW(), NOW())`,
+          {
+            replacements: {
+              tenantId: tenantId,
+              productId: productId,
+              sku: variant.sku || null,
+              barcode: null,
+              price: parseFloat(variant.price) || 0,
+              stock: parseInt(variant.stock) || 0,
+              imageUrl: variant.image_url || null
+            },
+            type: QueryTypes.INSERT
+          }
+        );
+
+        const variantIdResults = await req.db.query(
+          `SELECT LAST_INSERT_ID() as id`,
+          {
+            type: QueryTypes.SELECT
+          }
+        );
+        const variantId = variantIdResults && variantIdResults.length > 0 && variantIdResults[0].id
+          ? variantIdResults[0].id
+          : null;
+
+        if (!variantId) {
+          continue;
+        }
+
+        // Link variant to chosen options
+        for (const vo of variantOptions) {
+          await req.db.query(
+            `INSERT INTO product_variant_options (tenant_id, variant_id, variation_id, option_id, created_at)
+             VALUES (:tenantId, :variantId, :variationId, :optionId, NOW())`,
+            {
+              replacements: {
+                tenantId: tenantId,
+                variantId,
+                variationId: vo.variation_id,
+                optionId: vo.option_id
               },
               type: QueryTypes.INSERT
             }

@@ -435,6 +435,102 @@ function initializeModels(sequelize) {
     updatedAt: false
   });
 
+  // Product Variant Model (specific sellable combinations, e.g. Color+Size)
+  const ProductVariant = sequelize.define('ProductVariant', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+    },
+    product_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'products',
+        key: 'id'
+      }
+    },
+    sku: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    barcode: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    price: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00
+    },
+    stock: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    image_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true
+    }
+  }, {
+    tableName: 'product_variants',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  });
+
+  // Product Variant Option Model (links a variant to its chosen variation options)
+  const ProductVariantOption = sequelize.define('ProductVariantOption', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Required for free users (shared DB), NULL for enterprise users (separate DB)'
+    },
+    variant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'product_variants',
+        key: 'id'
+      }
+    },
+    variation_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'product_variations',
+        key: 'id'
+      }
+    },
+    option_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'product_variation_options',
+        key: 'id'
+      }
+    }
+  }, {
+    tableName: 'product_variant_options',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: false
+  });
+
   // Customer Model
   const Customer = sequelize.define('Customer', {
     id: {
@@ -1274,6 +1370,24 @@ function initializeModels(sequelize) {
   ProductVariation.belongsTo(Product, { foreignKey: 'product_id' });
   ProductVariation.hasMany(ProductVariationOption, { foreignKey: 'variation_id', onDelete: 'CASCADE' });
   ProductVariationOption.belongsTo(ProductVariation, { foreignKey: 'variation_id' });
+
+  // Product Variant associations
+  Product.hasMany(ProductVariant, { foreignKey: 'product_id', onDelete: 'CASCADE' });
+  ProductVariant.belongsTo(Product, { foreignKey: 'product_id' });
+
+  ProductVariant.belongsToMany(ProductVariationOption, {
+    through: ProductVariantOption,
+    foreignKey: 'variant_id',
+    otherKey: 'option_id'
+  });
+  ProductVariationOption.belongsToMany(ProductVariant, {
+    through: ProductVariantOption,
+    foreignKey: 'option_id',
+    otherKey: 'variant_id'
+  });
+
+  ProductVariant.hasMany(ProductVariantOption, { foreignKey: 'variant_id', onDelete: 'CASCADE' });
+  ProductVariantOption.belongsTo(ProductVariant, { foreignKey: 'variant_id' });
  
   // Online Store Model (aggregates physical stores)
   const OnlineStore = sequelize.define('OnlineStore', {
@@ -3222,6 +3336,8 @@ function initializeModels(sequelize) {
     ProductStore,
     ProductVariation,
     ProductVariationOption,
+    ProductVariant,
+    ProductVariantOption,
     Customer,
     Invoice,
     InvoiceItem,

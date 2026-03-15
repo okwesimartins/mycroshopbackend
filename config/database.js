@@ -75,7 +75,35 @@ async function getSharedFreeDatabase() {
 
   try {
     await sequelize.authenticate();
-    
+
+    // One-time migrations: SHARED FREE DB ONLY. Add columns that may be missing (shared DB may predate model changes).
+    const sharedFreeMigrations = [
+      {
+        table: 'bookings',
+        column: 'payment_transaction_id',
+        sql: `ALTER TABLE bookings ADD COLUMN payment_transaction_id INT NULL COMMENT 'Links booking to payment' AFTER notes, ADD INDEX idx_payment_transaction_id (payment_transaction_id)`
+      },
+      { table: 'customers', column: 'zip_code', sql: 'ALTER TABLE customers ADD COLUMN zip_code VARCHAR(20) NULL AFTER state' },
+      { table: 'customers', column: 'notes', sql: 'ALTER TABLE customers ADD COLUMN notes TEXT NULL AFTER country' },
+      { table: 'customers', column: 'tags', sql: 'ALTER TABLE customers ADD COLUMN tags JSON NULL AFTER notes' }
+    ];
+    for (const m of sharedFreeMigrations) {
+      try {
+        const tableName = m.table.replace(/[^a-z0-9_]/gi, '');
+        const colName = m.column.replace(/[^a-z0-9_]/gi, '');
+        const [rows] = await sequelize.query(`
+          SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${tableName}' AND COLUMN_NAME = '${colName}'
+        `);
+        if (!rows || rows.length === 0) {
+          await sequelize.query(m.sql);
+          console.log(`✅ Shared free DB: ${m.table}.${m.column} added (one-time migration)`);
+        }
+      } catch (err) {
+        console.warn(`Shared free DB ${m.table}.${m.column} migration (non-fatal):`, err.message);
+      }
+    }
+
     // Ensure modelManager.models is initialized (should be done by Sequelize, but double-check)
     if (!sequelize.modelManager || sequelize.modelManager.models === null || sequelize.modelManager.models === undefined) {
       console.warn('WARNING: New Sequelize instance has null modelManager.models. Initializing...');
@@ -86,7 +114,7 @@ async function getSharedFreeDatabase() {
       sequelize.modelManager.models = {};
       sequelize.models = sequelize.modelManager.models;
     }
-    
+
     tenantConnections.set('shared_free', sequelize);
     return sequelize;
   } catch (error) {
@@ -298,11 +326,11 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       phone VARCHAR(50),
       address TEXT,
       city VARCHAR(100),
-      zip_code VARCHAR(20),
-      notes TEXT,
-      tags  JSON,
       state VARCHAR(100),
+      zip_code VARCHAR(20),
       country VARCHAR(100),
+      notes TEXT,
+      tags JSON,
       customer_type ENUM('individual', 'business') DEFAULT 'individual',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -311,6 +339,26 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       INDEX idx_phone (phone)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  // Migration: add columns to existing customers tables (shared DB may predate these)
+  for (const col of [
+    { name: 'zip_code', def: 'ADD COLUMN zip_code VARCHAR(20) NULL AFTER state' },
+    { name: 'notes', def: 'ADD COLUMN notes TEXT NULL AFTER country' },
+    { name: 'tags', def: 'ADD COLUMN tags JSON NULL AFTER notes' }
+  ]) {
+    try {
+      const [cols] = await connection.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'customers' AND COLUMN_NAME = ?
+      `, [col.name]);
+      if (!cols || cols.length === 0) {
+        await connection.query(`ALTER TABLE customers ${col.def}`);
+        console.log(`✅ customers.${col.name} column added (migration)`);
+      }
+    } catch (e) {
+      console.warn(`Customers ${col.name} migration (non-fatal):`, e.message);
+    }
+  }
 
   // Invoices table
   const invoiceTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
@@ -633,7 +681,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       status ENUM('pending', 'confirmed', 'completed', 'cancelled', 'no_show') DEFAULT 'pending',
       cancellation_reason TEXT,
       notes TEXT,
-      payment_transaction_id INT,
+      payment_transaction_id INT NULL COMMENT 'Links booking to payment when paid via online store',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       ${bookingTenantIndex}
@@ -644,9 +692,27 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       INDEX idx_service_id (service_id),
       INDEX idx_customer_id (customer_id),
       INDEX idx_scheduled_at (scheduled_at),
-      INDEX idx_status (status)
+      INDEX idx_status (status),
+      INDEX idx_payment_transaction_id (payment_transaction_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  // Migration: add payment_transaction_id to existing bookings tables that don't have it (e.g. shared DB already created)
+  try {
+    const [cols] = await connection.query(`
+      SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bookings' AND COLUMN_NAME = 'payment_transaction_id'
+    `);
+    if (!cols || cols.length === 0) {
+      await connection.query(`
+        ALTER TABLE bookings ADD COLUMN payment_transaction_id INT NULL COMMENT 'Links booking to payment when paid via online store' AFTER notes,
+        ADD INDEX idx_payment_transaction_id (payment_transaction_id)
+      `);
+      console.log('✅ bookings.payment_transaction_id column added (migration)');
+    }
+  } catch (migErr) {
+    console.warn('Bookings payment_transaction_id migration (non-fatal):', migErr.message);
+  }
 
   // Booking Availability table (for service availability slots)
   const bookingAvailabilityTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
@@ -791,6 +857,53 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       INDEX idx_variation_id (variation_id),
       INDEX idx_sku (sku),
       INDEX idx_is_available (is_available)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Product Variants table (specific sellable combinations like Color+Size)
+  const productVariantTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const productVariantTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS product_variants (
+      ${productVariantTenantId}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      product_id INT NOT NULL,
+      sku VARCHAR(100),
+      barcode VARCHAR(100),
+      price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+      stock INT NOT NULL DEFAULT 0,
+      image_url VARCHAR(500),
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      ${productVariantTenantIndex}
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+      INDEX idx_product_id (product_id),
+      INDEX idx_is_active (is_active),
+      INDEX idx_sku (sku),
+      INDEX idx_barcode (barcode)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Product Variant Options table (links a variant to its chosen variation options)
+  const productVariantOptionTenantId2 = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const productVariantOptionTenantIndex2 = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS product_variant_options (
+      ${productVariantOptionTenantId2}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      variant_id INT NOT NULL,
+      variation_id INT NOT NULL,
+      option_id INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      ${productVariantOptionTenantIndex2}
+      FOREIGN KEY (variant_id) REFERENCES product_variants(id) ON DELETE CASCADE,
+      FOREIGN KEY (variation_id) REFERENCES product_variations(id) ON DELETE CASCADE,
+      FOREIGN KEY (option_id) REFERENCES product_variation_options(id) ON DELETE CASCADE,
+      INDEX idx_variant_id (variant_id),
+      INDEX idx_option_id (option_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
@@ -1176,8 +1289,9 @@ async function runTenantMigrations(connection, isSharedDb = false) {
   `);
   console.log('✅ Receipts table created/verified');
 
-  // Make invoice_id nullable in receipts table for standalone receipts (for existing databases)
+  // Migrations for existing receipts tables
   try {
+    // Make invoice_id nullable in receipts table for standalone receipts (for existing databases)
     const [receiptInvoiceColumns] = await connection.query(`
       SELECT COLUMN_NAME, IS_NULLABLE 
       FROM INFORMATION_SCHEMA.COLUMNS 
@@ -1194,9 +1308,27 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       `);
       console.log('✅ invoice_id column made nullable in receipts table');
     }
+
+    // Add receipt_data column if missing (to store full receipt JSON including items)
+    const [receiptDataCols] = await connection.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME = 'receipts' 
+      AND COLUMN_NAME = 'receipt_data'
+    `);
+
+    if (!receiptDataCols || receiptDataCols.length === 0) {
+      console.log('Adding receipt_data column to receipts table...');
+      await connection.query(`
+        ALTER TABLE receipts 
+        ADD COLUMN receipt_data JSON NULL AFTER esc_pos_commands
+      `);
+      console.log('✅ receipt_data column added to receipts table');
+    }
   } catch (alterError) {
-    console.warn('Could not modify invoice_id column to nullable in receipts table:', alterError.message);
-    // Continue - column might already be nullable
+    console.warn('Receipts table migration (invoice_id/receipt_data) warning:', alterError.message);
+    // Continue - columns might already be migrated
   }
 
   // AI Agent Config table
