@@ -1242,6 +1242,9 @@ async function createOnlineStoreProduct(req, res) {
     const hasVariationOptions = Array.isArray(parsedVariations) && parsedVariations.length > 0 &&
       parsedVariations.some(v => v.options && Array.isArray(v.options) && v.options.length > 0);
 
+    // When explicit variants are provided, variation-option images are optional (variants can have their own images)
+    const hasExplicitVariants = Array.isArray(parsedVariants) && parsedVariants.length > 0;
+
     // VALIDATION 1: If no variations, price and stock are REQUIRED
     if (!hasVariationOptions) {
       if (price === undefined || price === null || price === '') {
@@ -1538,8 +1541,8 @@ async function createOnlineStoreProduct(req, res) {
             }
           }
 
-          // VALIDATION 4: Each variation option must have image (image_url OR file upload)
-          if (!variationImageUrl) {
+          // When explicit variants are provided, variation-option images are optional
+          if (!hasExplicitVariants && !variationImageUrl) {
             // Clean up product and variation created so far using raw queries
             await req.db.query(`DELETE FROM product_variation_options WHERE variation_id = :variationId`, {
               replacements: { variationId: variationId },
@@ -1560,8 +1563,8 @@ async function createOnlineStoreProduct(req, res) {
             cleanupFiles();
             return res.status(400).json({
               success: false,
-              message: `Variation option "${optionData.value}" (position ${j}) is missing an image. Each variation option must have an image.`,
-              suggestion: `Either provide "image_url" in options[${j}] or upload a file using field name "variation_option_image_${i}_${j}".`
+              message: `Variation option "${optionData.value}" (position ${j}) is missing an image. Each variation option must have an image when not using explicit variants.`,
+              suggestion: `Either provide "image_url" in options[${j}], upload a file using field name "variation_option_image_${i}_${j}", or pass a "variants" array for combination-level images.`
             });
           }
 
@@ -1883,7 +1886,7 @@ async function updateOnlineStoreProduct(req, res) {
   try {
     const { QueryTypes } = require('sequelize');
     const { id: online_store_id, product_id } = req.params;
-    const { name, sku, description, price, stock, category, image_url, is_active, variations, featured, sort_order } = req.body;
+    const { name, sku, description, price, stock, category, image_url, is_active, variations, variants, featured, sort_order } = req.body;
     const tenantId = req.user?.tenantId;
 
     if (!tenantId) {
@@ -1994,6 +1997,24 @@ async function updateOnlineStoreProduct(req, res) {
     // Check if variations have options
     const hasVariationOptions = Array.isArray(parsedVariations) && parsedVariations.length > 0 &&
       parsedVariations.some(v => v.options && Array.isArray(v.options) && v.options.length > 0);
+
+    // Parse variants (when explicit variants exist, variation-option images are optional)
+    let parsedVariantsUpdate = [];
+    if (variants !== undefined) {
+      if (variants) {
+        if (typeof variants === 'string') {
+          try {
+            parsedVariantsUpdate = JSON.parse(variants);
+            if (!Array.isArray(parsedVariantsUpdate)) parsedVariantsUpdate = [];
+          } catch (_) {
+            parsedVariantsUpdate = [];
+          }
+        } else if (Array.isArray(variants)) {
+          parsedVariantsUpdate = variants;
+        }
+      }
+    }
+    const hasExplicitVariantsUpdate = Array.isArray(parsedVariantsUpdate) && parsedVariantsUpdate.length > 0;
 
     // VALIDATION 1: If no variations, price and stock are REQUIRED (unless not being updated)
     if (!hasVariationOptions && variations === undefined) {
@@ -2227,12 +2248,12 @@ async function updateOnlineStoreProduct(req, res) {
               }
             }
 
-            // VALIDATION: Each variation option must have image (image_url OR file upload)
-            if (!variationImageUrl) {
+            // When explicit variants are provided, variation-option images are optional
+            if (!hasExplicitVariantsUpdate && !variationImageUrl) {
               cleanupFiles();
               return res.status(400).json({
                 success: false,
-                message: `Variation option "${optionData.value}" is missing an image. Provide image_url or upload a file with field name "${variationImageFieldName}".`
+                message: `Variation option "${optionData.value}" is missing an image. Provide image_url or upload a file with field name "${variationImageFieldName}", or pass a "variants" array for combination-level images.`
               });
             }
 
