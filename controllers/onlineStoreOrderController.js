@@ -473,7 +473,7 @@ async function createOrder(req, res) {
     for (const item of items) {
       const { product_id, variant_id: itemVariantId, quantity, unit_price } = item;
       
-      if (!product_id || !quantity || !unit_price) {
+      if (!product_id || quantity == null || quantity === '' || unit_price == null || unit_price === '') {
         await transaction.rollback();
         return res.status(400).json({
           success: false,
