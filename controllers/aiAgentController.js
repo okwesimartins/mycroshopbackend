@@ -466,7 +466,7 @@ async function listProducts(req, res) {
           include: [{
             model: models.ProductVariationOption,
             required: false,
-            attributes: ['id', 'option_value', 'option_display_name', 'price_adjustment', 'stock', 'is_available']
+            attributes: ['id', 'option_value', 'option_display_name', 'price_adjustment', 'stock', 'is_available', 'image_url']
           }]
         }
       ]
@@ -495,7 +495,8 @@ async function listProducts(req, res) {
             option_display_name: o.option_display_name || o.option_value,
             price_adjustment: parseFloat(o.price_adjustment || 0),
             stock: o.stock,
-            is_available: o.is_available
+            is_available: o.is_available,
+            image_url: toFullImageUrl(o.image_url) || null
           }))
         }));
         return {
