@@ -1650,10 +1650,16 @@ async function createOnlineStoreProduct(req, res) {
 
     // After creating variations and options, optionally create explicit product variants
     if (hasVariationOptions && Array.isArray(parsedVariants) && parsedVariants.length > 0) {
-      // Build lookup maps from fetched variations/options (by variation_name + option_value/display_name)
+      const variationsForVariantMap = await req.db.query(
+        `SELECT id, tenant_id, product_id, variation_name, variation_type, is_required, sort_order, created_at 
+         FROM product_variations 
+         WHERE product_id = :productId 
+         ORDER BY sort_order ASC`,
+        { replacements: { productId: productId }, type: QueryTypes.SELECT }
+      );
       const variationMap = new Map(); // key: variation_name -> { id, optionsByValue }
-      if (fetchedVariations && fetchedVariations.length > 0) {
-        for (const variation of fetchedVariations) {
+      if (variationsForVariantMap && variationsForVariantMap.length > 0) {
+        for (const variation of variationsForVariantMap) {
           const options = await req.db.query(
             `SELECT id, option_value, option_display_name 
              FROM product_variation_options 
@@ -2299,6 +2305,160 @@ async function updateOnlineStoreProduct(req, res) {
             );
           }
         }
+      }
+    }
+
+    // When variants are provided, upsert product_variants and product_variant_options (replace existing)
+    if (hasVariationOptions && hasExplicitVariantsUpdate && Array.isArray(parsedVariantsUpdate) && parsedVariantsUpdate.length > 0) {
+      try {
+        const existingVariantIds = await req.db.query(
+          `SELECT id FROM product_variants WHERE product_id = :productId`,
+          { replacements: { productId: product_id }, type: QueryTypes.SELECT }
+        );
+        if (existingVariantIds && existingVariantIds.length > 0) {
+          const ids = existingVariantIds.map(r => r.id);
+          await req.db.query(
+            `DELETE FROM product_variant_options WHERE variant_id IN (${ids.join(',')})`,
+            { type: QueryTypes.DELETE }
+          );
+        }
+        await req.db.query(
+          `DELETE FROM product_variants WHERE product_id = :productId`,
+          { replacements: { productId: product_id }, type: QueryTypes.DELETE }
+        );
+
+        const variationsForVariantMap = await req.db.query(
+          `SELECT id, tenant_id, product_id, variation_name, variation_type, is_required, sort_order, created_at 
+           FROM product_variations 
+           WHERE product_id = :productId 
+           ORDER BY sort_order ASC`,
+          { replacements: { productId: product_id }, type: QueryTypes.SELECT }
+        );
+        const variationMap = new Map();
+        if (variationsForVariantMap && variationsForVariantMap.length > 0) {
+          for (const variation of variationsForVariantMap) {
+            const options = await req.db.query(
+              `SELECT id, option_value, option_display_name 
+               FROM product_variation_options 
+               WHERE variation_id = :variationId`,
+              { replacements: { variationId: variation.id }, type: QueryTypes.SELECT }
+            );
+            const optionsByValue = new Map();
+            for (const opt of options || []) {
+              if (opt.option_value) optionsByValue.set(String(opt.option_value).toLowerCase(), opt);
+              if (opt.option_display_name) optionsByValue.set(String(opt.option_display_name).toLowerCase(), opt);
+            }
+            variationMap.set(String(variation.variation_name).toLowerCase(), { id: variation.id, optionsByValue });
+          }
+        }
+
+        for (const variant of parsedVariantsUpdate) {
+          if (!variant || !Array.isArray(variant.options) || variant.options.length === 0) {
+            cleanupFiles();
+            return res.status(400).json({
+              success: false,
+              message: 'Each variant must have an "options" array with at least one entry (variation_name and option_value).'
+            });
+          }
+          const variantOptions = [];
+          for (const optRef of variant.options) {
+            if (!optRef || !optRef.variation_name || optRef.option_value === undefined || optRef.option_value === null) {
+              cleanupFiles();
+              return res.status(400).json({
+                success: false,
+                message: `Variant option is invalid: each option must have "variation_name" and "option_value". Received: ${JSON.stringify(optRef)}.`
+              });
+            }
+            const vKey = String(optRef.variation_name).toLowerCase();
+            const vEntry = variationMap.get(vKey);
+            if (!vEntry) {
+              cleanupFiles();
+              return res.status(400).json({
+                success: false,
+                message: `Variation "${optRef.variation_name}" not found for this product. Check variation_name matches your variations (e.g. Color, Size).`
+              });
+            }
+            const valueKey = String(optRef.option_value).toLowerCase();
+            const optRow = vEntry.optionsByValue.get(valueKey);
+            if (!optRow) {
+              cleanupFiles();
+              return res.status(400).json({
+                success: false,
+                message: `Option value "${optRef.option_value}" not found for variation "${optRef.variation_name}". Valid options: ${[...vEntry.optionsByValue.keys()].join(', ')}.`
+              });
+            }
+            variantOptions.push({ variation_id: vEntry.id, option_id: optRow.id });
+          }
+
+          if (variant.price === undefined || variant.price === null || variant.price === '') {
+            cleanupFiles();
+            return res.status(400).json({
+              success: false,
+              message: `Variant with options ${JSON.stringify(variant.options)} is missing "price".`
+            });
+          }
+          if (variant.stock === undefined || variant.stock === null || variant.stock === '') {
+            cleanupFiles();
+            return res.status(400).json({
+              success: false,
+              message: `Variant with options ${JSON.stringify(variant.options)} is missing "stock".`
+            });
+          }
+
+          await req.db.query(
+            `INSERT INTO product_variants (tenant_id, product_id, sku, barcode, price, stock, image_url, is_active, created_at, updated_at)
+             VALUES (:tenantId, :productId, :sku, :barcode, :price, :stock, :imageUrl, 1, NOW(), NOW())`,
+            {
+              replacements: {
+                tenantId: tenantId,
+                productId: product_id,
+                sku: variant.sku || null,
+                barcode: null,
+                price: parseFloat(variant.price) || 0,
+                stock: parseInt(variant.stock) || 0,
+                imageUrl: variant.image_url || null
+              },
+              type: QueryTypes.INSERT
+            }
+          );
+
+          const variantIdResults = await req.db.query(
+            `SELECT LAST_INSERT_ID() as id`,
+            { type: QueryTypes.SELECT }
+          );
+          const variantId = variantIdResults && variantIdResults.length > 0 && variantIdResults[0].id ? variantIdResults[0].id : null;
+          if (!variantId) {
+            cleanupFiles();
+            return res.status(500).json({
+              success: false,
+              message: 'Failed to create product variant: could not retrieve variant ID after insert.'
+            });
+          }
+
+          for (const vo of variantOptions) {
+            await req.db.query(
+              `INSERT INTO product_variant_options (tenant_id, variant_id, variation_id, option_id, created_at)
+               VALUES (:tenantId, :variantId, :variationId, :optionId, NOW())`,
+              {
+                replacements: {
+                  tenantId: tenantId,
+                  variantId,
+                  variationId: vo.variation_id,
+                  optionId: vo.option_id
+                },
+                type: QueryTypes.INSERT
+              }
+            );
+          }
+        }
+      } catch (err) {
+        cleanupFiles();
+        console.error('Error upserting product variants on update:', err);
+        return res.status(500).json({
+          success: false,
+          message: err.message || 'Failed to save product variants.',
+          error: err.message
+        });
       }
     }
 
