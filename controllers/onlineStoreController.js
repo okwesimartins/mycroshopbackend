@@ -1516,31 +1516,29 @@ async function createOnlineStoreProduct(req, res) {
             continue; // Skip invalid options
           }
 
-          // Handle image: prioritize uploaded file over image_url
+          // Handle image: uploaded file OR image_url (either is enough)
           let variationImageUrl = optionData.image_url || null;
           const variationImageFieldName = `variation_option_image_${i}_${j}`;
-          
-          // Check if file was uploaded for this variation option
-          if (req.files) {
-            // Handle both single file, array of files, and object of file arrays
+
+          if (req.file && (req.file.fieldname === variationImageFieldName || req.file.fieldname.startsWith(`variation_option_image_${i}_${j}`))) {
+            variationImageUrl = `/uploads/product-variations/${req.file.filename}`;
+          } else if (req.files) {
             let files = [];
             if (Array.isArray(req.files)) {
               files = req.files;
             } else if (typeof req.files === 'object') {
               files = Object.values(req.files).flat();
             }
-            
-            const uploadedFile = files.find(file => 
-              file.fieldname === variationImageFieldName || 
+            const uploadedFile = files.find(file =>
+              file.fieldname === variationImageFieldName ||
               file.fieldname.startsWith(`variation_option_image_${i}_${j}`)
             );
-            
             if (uploadedFile) {
               variationImageUrl = `/uploads/product-variations/${uploadedFile.filename}`;
             }
           }
 
-          // VALIDATION 4: Each variation option must have image (URL or file upload)
+          // VALIDATION 4: Each variation option must have image (image_url OR file upload)
           if (!variationImageUrl) {
             // Clean up product and variation created so far using raw queries
             await req.db.query(`DELETE FROM product_variation_options WHERE variation_id = :variationId`, {
@@ -2159,15 +2157,6 @@ async function updateOnlineStoreProduct(req, res) {
 
       // Create new variations if provided
       if (hasVariationOptions && Array.isArray(parsedVariations) && parsedVariations.length > 0) {
-        // VALIDATION: Only ONE variation type per product
-        if (parsedVariations.length > 1) {
-          cleanupFiles();
-          return res.status(400).json({
-            success: false,
-            message: 'A product can only have ONE variation type'
-          });
-        }
-
         for (let i = 0; i < parsedVariations.length; i++) {
           const variationData = parsedVariations[i];
           if (!variationData.variation_name || !variationData.variation_type) {
@@ -2216,34 +2205,34 @@ async function updateOnlineStoreProduct(req, res) {
               continue;
             }
 
-            // Handle image: prioritize uploaded file over image_url
+            // Handle image: prioritize uploaded file over image_url (either is enough)
             let variationImageUrl = optionData.image_url || null;
             const variationImageFieldName = `variation_option_image_${i}_${j}`;
-            
-            if (req.files) {
+
+            if (req.file && (req.file.fieldname === variationImageFieldName || req.file.fieldname.startsWith(`variation_option_image_${i}_${j}`))) {
+              variationImageUrl = `/uploads/product-variations/${req.file.filename}`;
+            } else if (req.files) {
               let files = [];
               if (Array.isArray(req.files)) {
                 files = req.files;
               } else if (typeof req.files === 'object') {
                 files = Object.values(req.files).flat();
               }
-              
-              const uploadedFile = files.find(file => 
-                file.fieldname === variationImageFieldName || 
+              const uploadedFile = files.find(file =>
+                file.fieldname === variationImageFieldName ||
                 file.fieldname.startsWith(`variation_option_image_${i}_${j}`)
               );
-              
               if (uploadedFile) {
                 variationImageUrl = `/uploads/product-variations/${uploadedFile.filename}`;
               }
             }
 
-            // VALIDATION: Each variation option must have image
+            // VALIDATION: Each variation option must have image (image_url OR file upload)
             if (!variationImageUrl) {
               cleanupFiles();
               return res.status(400).json({
                 success: false,
-                message: `Variation option "${optionData.value}" is missing an image`
+                message: `Variation option "${optionData.value}" is missing an image. Provide image_url or upload a file with field name "${variationImageFieldName}".`
               });
             }
 
