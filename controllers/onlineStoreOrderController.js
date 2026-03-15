@@ -471,7 +471,7 @@ async function createOrder(req, res) {
     const orderItems = [];
 
     for (const item of items) {
-      const { product_id, quantity, unit_price } = item;
+      const { product_id, variant_id: itemVariantId, quantity, unit_price } = item;
       
       if (!product_id || !quantity || !unit_price) {
         await transaction.rollback();
@@ -481,7 +481,6 @@ async function createOrder(req, res) {
         });
       }
 
-      // Verify product exists and is available
       const product = await req.db.models.Product.findByPk(product_id);
       if (!product) {
         await transaction.rollback();
@@ -491,18 +490,46 @@ async function createOrder(req, res) {
         });
       }
 
-      // Check stock if store_id is provided
-      if (finalStoreId) {
-        // Check if product is in the store
+      let variantSku = null;
+      if (itemVariantId) {
+        const variant = await req.db.models.ProductVariant.findOne({
+          where: { id: itemVariantId, product_id }
+        });
+        if (!variant) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Variant ${itemVariantId} not found for product ${product.name}`
+          });
+        }
+        const variantStock = Number(variant.stock);
+        if (variantStock < quantity) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient stock for ${product.name} (selected option). Available: ${variantStock}, Requested: ${quantity}`
+          });
+        }
+        variantSku = variant.sku;
+      } else if (finalStoreId) {
         const productStore = await req.db.models.ProductStore.findOne({
           where: { product_id, store_id: finalStoreId }
         });
-        
         if (productStore && productStore.stock < quantity) {
           await transaction.rollback();
           return res.status(400).json({
             success: false,
             message: `Insufficient stock for product ${product.name}. Available: ${productStore.stock}, Requested: ${quantity}`
+          });
+        }
+      } else {
+        // Online-only (no store): check product or variant stock
+        const productStock = product.stock != null ? Number(product.stock) : null;
+        if (productStock !== null && productStock < quantity && !itemVariantId) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient stock for ${product.name}. Available: ${productStock}, Requested: ${quantity}`
           });
         }
       }
@@ -513,9 +540,11 @@ async function createOrder(req, res) {
       orderItems.push({
         product_id,
         product_name: product.name,
+        product_sku: variantSku || product.sku || null,
         quantity,
         unit_price,
-        total: itemTotal
+        total: itemTotal,
+        variant_id: itemVariantId || null
       });
     }
 
@@ -555,17 +584,28 @@ async function createOrder(req, res) {
       }, { transaction });
     }
 
-    // Update stock if store_id is provided
-    if (finalStoreId) {
-      for (const item of items) {
+    // Deduct stock: variant-level, then store-level, then product-level (online-only)
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const qty = Number(item.quantity);
+      if (item.variant_id) {
+        const pv = await req.db.models.ProductVariant.findByPk(item.variant_id);
+        if (pv) {
+          await pv.update({ stock: Number(pv.stock) - qty }, { transaction });
+        }
+      } else if (finalStoreId) {
         const productStore = await req.db.models.ProductStore.findOne({
           where: { product_id: item.product_id, store_id: finalStoreId }
         });
-        
         if (productStore) {
           await productStore.update({
-            stock: productStore.stock - item.quantity
+            stock: productStore.stock - qty
           }, { transaction });
+        }
+      } else {
+        const p = await req.db.models.Product.findByPk(item.product_id);
+        if (p && p.stock != null) {
+          await p.update({ stock: Number(p.stock) - qty }, { transaction });
         }
       }
     }

@@ -83,6 +83,42 @@ const Tenant = mainSequelize.define('Tenant', {
     allowNull: true,
     comment: 'Business info for AI sales agent: what the business does, delivery timeline, max discount/last-price rules. If no pricing instruction, AI sticks to exact product prices.'
   },
+  payment_instruction_type: {
+    type: require('sequelize').DataTypes.STRING(50),
+    allowNull: true,
+    defaultValue: 'paystack',
+    comment: 'paystack | bank_transfer | paypal — what the AI shows after order (link vs account details)'
+  },
+  paypal_email: {
+    type: require('sequelize').DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'PayPal email for receiving payments (when payment_instruction_type is paypal)'
+  },
+  bank_account_name: {
+    type: require('sequelize').DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'Account name for bank transfer'
+  },
+  bank_name: {
+    type: require('sequelize').DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'Bank name for transfer'
+  },
+  bank_account_number: {
+    type: require('sequelize').DataTypes.STRING(100),
+    allowNull: true,
+    comment: 'Account number for bank transfer'
+  },
+  bank_code: {
+    type: require('sequelize').DataTypes.STRING(50),
+    allowNull: true,
+    comment: 'Bank code (e.g. for Nigeria)'
+  },
+  payment_instructions: {
+    type: require('sequelize').DataTypes.TEXT,
+    allowNull: true,
+    comment: 'Custom message shown to customer after order (e.g. "Send receipt to this number after payment")'
+  },
   created_at: {
     type: require('sequelize').DataTypes.DATE,
     defaultValue: require('sequelize').DataTypes.NOW
@@ -260,6 +296,31 @@ async function initializeMainDatabase() {
       }
     } catch (e) {
       console.warn('Tenant business_bio migration:', e.message);
+    }
+
+    // Add payment/account detail columns to Tenant for AI agent (bank transfer / PayPal flow)
+    const paymentColumns = [
+      'payment_instruction_type', 'paypal_email', 'bank_account_name', 'bank_name',
+      'bank_account_number', 'bank_code', 'payment_instructions'
+    ];
+    for (const col of paymentColumns) {
+      try {
+        const [c] = await mainSequelize.query(`
+          SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Tenant' AND COLUMN_NAME = ?
+        `, { replacements: [col] });
+        if (!c || c.length === 0) {
+          const def = col === 'payment_instruction_type' ? " DEFAULT 'paystack'" : '';
+          let sqlType = 'VARCHAR(255) NULL';
+          if (col === 'payment_instructions') sqlType = 'TEXT NULL';
+          else if (col === 'payment_instruction_type') sqlType = "VARCHAR(50) NULL DEFAULT 'paystack'";
+          else if (col === 'bank_account_number' || col === 'bank_code') sqlType = 'VARCHAR(100) NULL';
+          await mainSequelize.query(`ALTER TABLE Tenant ADD COLUMN ${col} ${sqlType} AFTER business_bio`);
+          console.log('Added Tenant column:', col);
+        }
+      } catch (e) {
+        console.warn('Tenant payment column', col, e.message);
+      }
     }
 
     // Create tenant_configs table if needed

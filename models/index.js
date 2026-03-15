@@ -1924,6 +1924,16 @@ function initializeModels(sequelize) {
     notes: {
       type: DataTypes.TEXT,
       allowNull: true
+    },
+    payment_receipt_url: {
+      type: DataTypes.STRING(512),
+      allowNull: true,
+      comment: 'URL or path to payment receipt image (e.g. from customer WhatsApp)'
+    },
+    payment_receipt_received_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'When the customer sent the receipt'
     }
   }, {
     tableName: 'online_store_orders',
@@ -1958,6 +1968,10 @@ function initializeModels(sequelize) {
     product_name: {
       type: DataTypes.STRING(255),
       allowNull: false
+    },
+    product_sku: {
+      type: DataTypes.STRING(100),
+      allowNull: true
     },
     quantity: {
       type: DataTypes.INTEGER,
@@ -1999,6 +2013,12 @@ function initializeModels(sequelize) {
       type: DataTypes.STRING(255),
       allowNull: true,
       comment: 'Value of the selected variation option (e.g., "Red", "Large")'
+    },
+    variant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'product_variants', key: 'id' },
+      comment: 'Product variant (combination) when order is for a specific variant'
     }
   }, {
     tableName: 'online_store_order_items',

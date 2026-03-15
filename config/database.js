@@ -936,6 +936,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       status ENUM('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
       payment_status ENUM('pending', 'paid', 'failed', 'refunded') DEFAULT 'pending',
       payment_method VARCHAR(50),
+      payment_receipt_url VARCHAR(512),
       notes TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1014,6 +1015,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       variation_option_id INT NULL,
       variation_name VARCHAR(100) NULL,
       variation_option_value VARCHAR(255) NULL,
+      variant_id INT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       ${orderItemTenantIndex}
       FOREIGN KEY (order_id) REFERENCES online_store_orders(id) ON DELETE CASCADE,
@@ -1699,7 +1701,20 @@ async function initializeMainDatabaseTables() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     console.log('✅ domain_lookup table created/verified in main database');
-
+    
+      await connection.query(`
+      CREATE TABLE IF NOT EXISTS order_receipt_message_context (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        tenant_id INT NOT NULL,
+        confirmation_message_id VARCHAR(255) NOT NULL,
+        order_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_tenant_message (tenant_id, confirmation_message_id),
+        INDEX idx_tenant_message (tenant_id, confirmation_message_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ order_receipt_message_context table created/verified in main database');
+    
     await connection.end();
     return true;
   } catch (error) {

@@ -1,5 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
 const { getTenantById } = require('../config/tenant');
 const { mainSequelize, getTenantConnection } = require('../config/database');
 const { fetchVariantsForProductIds } = require('./onlineStoreController');
@@ -580,6 +582,7 @@ async function resolveTenant(req, res) {
       // ignore
     }
 
+    const paymentType = tenant.payment_instruction_type || 'paystack';
     res.json({
       success: true,
       data: {
@@ -588,7 +591,14 @@ async function resolveTenant(req, res) {
         store_name: tenant.name || 'our store',
         business_bio: tenant.business_bio || null,
         subscription_plan: subscriptionPlan,
-        default_online_store_id
+        default_online_store_id,
+        payment_instruction_type: paymentType,
+        paypal_email: tenant.paypal_email || null,
+        bank_account_name: tenant.bank_account_name || null,
+        bank_name: tenant.bank_name || null,
+        bank_account_number: tenant.bank_account_number || null,
+        bank_code: tenant.bank_code || null,
+        payment_instructions: tenant.payment_instructions || null,
       }
     });
   } catch (error) {
@@ -601,6 +611,298 @@ async function resolveTenant(req, res) {
   }
 }
 
+/**
+ * Store the link between the "order confirmation" WhatsApp message we sent and the order_id.
+ * When the customer replies to that message with a receipt image, we use this to attach to the correct order.
+ * POST /api/v1/ai-agent/orders/record-confirmation-message
+ * Body: { tenant_id, order_id, confirmation_message_id }
+ * Headers: x-api-key
+ */
+async function recordOrderConfirmationMessage(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const { tenant_id, order_id, confirmation_message_id } = req.body || {};
+    const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
+    const orderId = order_id != null ? parseInt(order_id, 10) : null;
+    const messageId = typeof confirmation_message_id === 'string' ? confirmation_message_id.trim() : '';
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+    if (!orderId || Number.isNaN(orderId)) {
+      return res.status(400).json({ success: false, message: 'order_id is required' });
+    }
+    if (!messageId) {
+      return res.status(400).json({ success: false, message: 'confirmation_message_id is required' });
+    }
+
+    await mainSequelize.query(
+      `INSERT INTO order_receipt_message_context (tenant_id, order_id, confirmation_message_id)
+       VALUES (:tenantId, :orderId, :messageId)
+       ON DUPLICATE KEY UPDATE order_id = VALUES(order_id), confirmation_message_id = VALUES(confirmation_message_id)`,
+      { replacements: { tenantId, orderId, messageId } }
+    );
+    return res.json({ success: true, message: 'Confirmation message recorded' });
+  } catch (error) {
+    console.error('recordOrderConfirmationMessage error:', error);
+    res.status(500).json({ success: false, message: 'Failed to record', error: error.message });
+  }
+}
+
+/**
+ * Get order_id for a given "order confirmation" message we sent (so receipt reply attaches to correct order).
+ * GET /api/v1/ai-agent/orders/by-confirmation-message?tenant_id=&confirmation_message_id=
+ * Headers: x-api-key
+ */
+async function getOrderByConfirmationMessageId(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const tenant_id = req.query?.tenant_id ?? req.body?.tenant_id;
+    const confirmation_message_id = req.query?.confirmation_message_id ?? req.body?.confirmation_message_id;
+    const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
+    const messageId = typeof confirmation_message_id === 'string' ? confirmation_message_id.trim() : '';
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+    if (!messageId) {
+      return res.status(400).json({ success: false, message: 'confirmation_message_id is required' });
+    }
+
+    const [rows] = await mainSequelize.query(
+      `SELECT order_id FROM order_receipt_message_context
+       WHERE tenant_id = :tenantId AND confirmation_message_id = :messageId
+       LIMIT 1`,
+      { replacements: { tenantId, messageId } }
+    );
+    const orderId = rows && rows[0] ? rows[0].order_id : null;
+    return res.json({ success: true, data: { order_id: orderId } });
+  } catch (error) {
+    console.error('getOrderByConfirmationMessageId error:', error);
+    res.status(500).json({ success: false, message: 'Failed to get order', error: error.message });
+  }
+}
+
+/**
+ * Get the most recent pending order (payment_status pending) for a customer phone.
+ * Used by AI agent when customer sends an image to attach as receipt.
+ * GET/POST /api/v1/ai-agent/orders/pending-by-phone?tenant_id=&customer_phone= (or in body)
+ * Headers: x-api-key
+ */
+async function getPendingOrderByCustomerPhone(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const tenant_id = req.query?.tenant_id ?? req.body?.tenant_id;
+    const customer_phone = req.query?.customer_phone ?? req.body?.customer_phone;
+    const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+    const phone = typeof customer_phone === 'string' ? customer_phone.replace(/[+\s]/g, '') : '';
+    if (!phone) {
+      return res.status(400).json({ success: false, message: 'customer_phone is required' });
+    }
+
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    const sequelize = await getTenantConnection(tenantId, tenant.subscription_plan || 'enterprise');
+    const models = require('../models')(sequelize);
+
+    const { Op } = require('sequelize');
+    const where = {
+      status: 'pending',
+      payment_status: 'pending',
+      [Op.and]: [
+        sequelize.where(
+          sequelize.fn('REPLACE', sequelize.fn('REPLACE', sequelize.col('customer_phone'), '+', ''), ' ', ''),
+          Op.eq,
+          phone
+        )
+      ]
+    };
+    if (tenant.subscription_plan === 'free') {
+      where.tenant_id = tenantId;
+    }
+    const order = await models.OnlineStoreOrder.findOne({
+      where,
+      order: [['created_at', 'DESC']]
+    });
+
+    if (!order) {
+      return res.json({ success: true, data: { order: null } });
+    }
+    return res.json({ success: true, data: { order: order.toJSON() } });
+  } catch (error) {
+    console.error('getPendingOrderByCustomerPhone error:', error);
+    res.status(500).json({ success: false, message: 'Failed to get pending order', error: error.message });
+  }
+}
+
+/**
+ * Attach payment receipt to an order (URL or base64 image from WhatsApp).
+ * POST /api/v1/ai-agent/attach-order-receipt
+ * Body: { tenant_id, order_id, receipt_url?: string, receipt_image_base64?: string }
+ * Headers: x-api-key
+ */
+async function attachOrderReceipt(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const { tenant_id, order_id, receipt_url, receipt_image_base64 } = req.body || {};
+    const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
+    const orderId = order_id != null ? parseInt(order_id, 10) : null;
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+    if (!orderId || Number.isNaN(orderId)) {
+      return res.status(400).json({ success: false, message: 'order_id is required' });
+    }
+    if (!receipt_url && !receipt_image_base64) {
+      return res.status(400).json({ success: false, message: 'receipt_url or receipt_image_base64 is required' });
+    }
+
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    const sequelize = await getTenantConnection(tenantId, tenant.subscription_plan || 'enterprise');
+    const models = require('../models')(sequelize);
+
+    const order = await models.OnlineStoreOrder.findByPk(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    let finalReceiptUrl = receipt_url || null;
+    if (receipt_image_base64) {
+      const uploadsDir = path.join(__dirname, '..', 'uploads', 'receipts', String(tenantId));
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const ext = 'jpg';
+      const filename = `${orderId}-${Date.now()}.${ext}`;
+      const filePath = path.join(uploadsDir, filename);
+      const buf = Buffer.from(receipt_image_base64, 'base64');
+      fs.writeFileSync(filePath, buf);
+      finalReceiptUrl = `/uploads/receipts/${tenantId}/${filename}`;
+    }
+
+    await order.update({
+      payment_receipt_url: finalReceiptUrl,
+      payment_receipt_received_at: new Date()
+    });
+
+    return res.json({
+      success: true,
+      message: 'Receipt attached to order',
+      data: { order: await order.reload() }
+    });
+  } catch (error) {
+    console.error('attachOrderReceipt error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to attach receipt',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Confirm or decline order payment (for AI / WhatsApp flow when store owner approves receipt).
+ * Called when store owner taps Approve/Decline on receipt notification.
+ * POST /api/v1/ai-agent/confirm-order-payment
+ * Body: { tenant_id, order_id, action: 'approve' | 'decline' }
+ * Headers: x-api-key
+ */
+async function confirmOrderPayment(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { tenant_id, order_id, action } = req.body || {};
+    const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
+    const orderId = order_id != null ? parseInt(order_id, 10) : null;
+
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id is required'
+      });
+    }
+    if (!orderId || Number.isNaN(orderId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'order_id is required'
+      });
+    }
+    if (!action || !['approve', 'decline'].includes(String(action).toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: 'action must be "approve" or "decline"'
+      });
+    }
+
+    const { getTenantConnection } = require('../config/database');
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const models = require('../models')(sequelize);
+
+    const order = await models.OnlineStoreOrder.findByPk(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    const act = String(action).toLowerCase();
+    if (act === 'approve') {
+      await order.update({
+        payment_status: 'paid',
+        status: 'confirmed',
+        updated_at: new Date()
+      });
+      return res.json({
+        success: true,
+        message: 'Payment confirmed and order approved',
+        data: { order: await order.reload() }
+      });
+    }
+    // decline: leave payment_status and status as-is (or could set a declined note)
+    return res.json({
+      success: true,
+      message: 'Payment declined',
+      data: { order: await order.reload() }
+    });
+  } catch (error) {
+    console.error('confirmOrderPayment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to confirm order payment',
+      error: error.message
+    });
+  }
+}
+
 module.exports = {
   handleWebhook,
   getConfig,
@@ -608,6 +910,11 @@ module.exports = {
   checkProduct,
   getProductInfo,
   listProducts,
-  resolveTenant
+  resolveTenant,
+  recordOrderConfirmationMessage,
+  getOrderByConfirmationMessageId,
+  getPendingOrderByCustomerPhone,
+  attachOrderReceipt,
+  confirmOrderPayment
 };
 

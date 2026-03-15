@@ -204,8 +204,7 @@ async function login(req, res) {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Login failed',
-      error: error.message
+      message: 'Login failed'
     });
   }
 }
@@ -398,7 +397,14 @@ async function getTenantProfile(req, res) {
           total_fixed_assets: tenant.total_fixed_assets,
           status: tenant.status,
           subscription_plan: subscriptionPlan,
-          created_at: tenant.created_at
+          created_at: tenant.created_at,
+          payment_instruction_type: tenant.payment_instruction_type || 'paystack',
+          paypal_email: tenant.paypal_email || null,
+          bank_account_name: tenant.bank_account_name || null,
+          bank_name: tenant.bank_name || null,
+          bank_account_number: tenant.bank_account_number || null,
+          bank_code: tenant.bank_code || null,
+          payment_instructions: tenant.payment_instructions || null,
         },
         online_stores: onlineStores.map(store => ({
           id: store.id,
@@ -442,7 +448,10 @@ async function getTenantProfile(req, res) {
  */
 async function updateTenantProfile(req, res) {
   try {
-    const { name, subdomain, phone, address, website } = req.body;
+    const {
+      name, subdomain, phone, address, website, country, business_type, annual_turnover, total_fixed_assets,
+      payment_instruction_type, paypal_email, bank_account_name, bank_name, bank_account_number, bank_code, payment_instructions
+    } = req.body;
     
     const tenant = await getTenantById(req.user.tenantId);
     
@@ -485,6 +494,13 @@ async function updateTenantProfile(req, res) {
       ...(business_type !== undefined && { business_type }),
       ...(annual_turnover !== undefined && { annual_turnover: annual_turnover ? parseFloat(annual_turnover) : null }),
       ...(total_fixed_assets !== undefined && { total_fixed_assets: total_fixed_assets ? parseFloat(total_fixed_assets) : null }),
+      ...(payment_instruction_type !== undefined && { payment_instruction_type: payment_instruction_type || 'paystack' }),
+      ...(paypal_email !== undefined && { paypal_email: paypal_email || null }),
+      ...(bank_account_name !== undefined && { bank_account_name: bank_account_name || null }),
+      ...(bank_name !== undefined && { bank_name: bank_name || null }),
+      ...(bank_account_number !== undefined && { bank_account_number: bank_account_number || null }),
+      ...(bank_code !== undefined && { bank_code: bank_code || null }),
+      ...(payment_instructions !== undefined && { payment_instructions: payment_instructions || null }),
       updated_at: new Date()
     });
 
@@ -504,7 +520,14 @@ async function updateTenantProfile(req, res) {
           business_type: tenant.business_type,
           business_category: tenant.business_category,
           annual_turnover: tenant.annual_turnover,
-          total_fixed_assets: tenant.total_fixed_assets
+          total_fixed_assets: tenant.total_fixed_assets,
+          payment_instruction_type: tenant.payment_instruction_type || 'paystack',
+          paypal_email: tenant.paypal_email || null,
+          bank_account_name: tenant.bank_account_name || null,
+          bank_name: tenant.bank_name || null,
+          bank_account_number: tenant.bank_account_number || null,
+          bank_code: tenant.bank_code || null,
+          payment_instructions: tenant.payment_instructions || null,
         }
       }
     });

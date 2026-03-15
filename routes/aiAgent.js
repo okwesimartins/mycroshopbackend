@@ -17,6 +17,13 @@ router.post('/resolve-phone-number-id', aiAgentController.resolveTenant);
 router.get('/check-product', aiAgentController.checkProduct);
 router.get('/product-info', aiAgentController.getProductInfo);
 router.get('/list-products', aiAgentController.listProducts);
+router.post('/orders/record-confirmation-message', aiAgentController.recordOrderConfirmationMessage);
+router.get('/orders/by-confirmation-message', aiAgentController.getOrderByConfirmationMessageId);
+router.post('/orders/by-confirmation-message', aiAgentController.getOrderByConfirmationMessageId);
+router.get('/orders/pending-by-phone', aiAgentController.getPendingOrderByCustomerPhone);
+router.post('/orders/pending-by-phone', aiAgentController.getPendingOrderByCustomerPhone);
+router.post('/attach-order-receipt', aiAgentController.attachOrderReceipt);
+router.post('/confirm-order-payment', aiAgentController.confirmOrderPayment);
 
 // Protected routes
 router.use(authenticate);
