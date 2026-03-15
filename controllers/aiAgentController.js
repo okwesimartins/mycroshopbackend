@@ -344,8 +344,13 @@ async function checkProduct(req, res) {
       ],
       is_active: true
     };
+    // For free plan (shared DB): only scope by tenant_id if the column exists in the DB.
+    // list-products does not filter by tenant_id; if the shared DB has no tenant_id on products, adding it here causes "Failed to check product".
     if (subscriptionPlan === 'free') {
-      where.tenant_id = tenantId;
+      const tableHasTenantId = await sequelize.getQueryInterface().describeTable('products').then(cols => Object.prototype.hasOwnProperty.call(cols || {}, 'tenant_id')).catch(() => false);
+      if (tableHasTenantId) {
+        where.tenant_id = tenantId;
+      }
     }
 
     const product = await models.Product.findOne({
