@@ -431,6 +431,20 @@ async function createOrder(req, res) {
 
     // Cache a safe Product attribute list for this request (used for enterprise; free uses raw SQL to avoid model/schema drift).
     const productSafeAttrs = await safeAttrs('products', ['id', 'name', 'sku', 'price', 'stock', 'image_url', 'description', 'category']);
+    const optionSafeAttrs = await safeAttrs('product_variation_options', [
+      'id',
+      'variation_id',
+      'option_value',
+      'option_display_name',
+      'price_adjustment',
+      'stock',
+      'sku',
+      'image_url',
+      'is_default',
+      'is_available',
+      'sort_order',
+      'created_at'
+    ]);
 
     const {
       online_store_id,
@@ -618,7 +632,8 @@ async function createOrder(req, res) {
         }
 
         const option = await req.db.models.ProductVariationOption.findOne({
-          where: { id: itemVariationOptionId, variation_id: itemVariationId }
+          where: { id: itemVariationOptionId, variation_id: itemVariationId },
+          attributes: optionSafeAttrs
         });
         if (!option) {
           await transaction.rollback();
@@ -759,9 +774,17 @@ async function createOrder(req, res) {
           await pv.update({ stock: Number(pv.stock) - qty }, { transaction });
         }
       } else if (item.variation_option_id) {
-        const opt = await req.db.models.ProductVariationOption.findByPk(item.variation_option_id);
-        if (opt && opt.stock != null) {
-          await opt.update({ stock: Number(opt.stock) - qty }, { transaction });
+        // Use raw SQL for option stock update to avoid selecting non-existent columns (e.g. barcode) on older schemas.
+        const rows = await req.db.query(
+          'SELECT id, stock FROM product_variation_options WHERE id = ? LIMIT 1',
+          { replacements: [item.variation_option_id], type: Sequelize.QueryTypes.SELECT, transaction }
+        );
+        const optRow = rows && rows[0] ? rows[0] : null;
+        if (optRow && optRow.stock != null) {
+          await req.db.query(
+            'UPDATE product_variation_options SET stock = ? WHERE id = ?',
+            { replacements: [Number(optRow.stock) - qty, item.variation_option_id], type: Sequelize.QueryTypes.UPDATE, transaction }
+          );
         }
       } else if (finalStoreId) {
         const productStore = await req.db.models.ProductStore.findOne({
