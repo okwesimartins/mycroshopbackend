@@ -413,8 +413,14 @@ async function createOrder(req, res) {
         tableColsCache.set(tableName, cols || {});
       }
       const cols = tableColsCache.get(tableName) || {};
-      return (desired || []).filter(c => Object.prototype.hasOwnProperty.call(cols, c));
+      const picked = (desired || []).filter(c => Object.prototype.hasOwnProperty.call(cols, c));
+      // Never return empty — Sequelize may fall back to selecting all columns.
+      if (picked.length === 0 && Object.prototype.hasOwnProperty.call(cols, 'id')) return ['id'];
+      return picked;
     }
+
+    // Cache a safe Product attribute list for this request (works for both free + enterprise schemas).
+    const productSafeAttrs = await safeAttrs('products', ['id', 'name', 'sku', 'price', 'stock', 'image_url', 'description', 'category']);
 
     const {
       online_store_id,
@@ -512,7 +518,7 @@ async function createOrder(req, res) {
       // Avoid selecting non-existent columns by explicitly selecting safe attributes.
       const product = await req.db.models.Product.findOne({
         where: { id: product_id },
-        attributes: await safeAttrs('products', ['id', 'name', 'sku', 'price', 'stock', 'image_url', 'description', 'category'])
+        attributes: productSafeAttrs
       });
       if (!product) {
         await transaction.rollback();
@@ -781,7 +787,7 @@ async function createOrder(req, res) {
           include: [
             {
               model: req.db.models.Product,
-              attributes: await safeAttrs('products', ['id', 'name', 'sku', 'price', 'stock', 'image_url', 'description', 'category'])
+              attributes: productSafeAttrs
             }
           ]
         }
