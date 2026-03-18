@@ -403,6 +403,7 @@ async function createOrder(req, res) {
   const transaction = await req.db.transaction();
   
   try {
+    const CREATE_ORDER_IMPL_VERSION = 'createOrder-raw-product-v1';
     // Some free/shared DBs may be older and missing columns (e.g. barcode, store_id).
     // To support both free + enterprise schemas safely, only SELECT columns that exist.
     const qi = req.db.getQueryInterface();
@@ -421,6 +422,12 @@ async function createOrder(req, res) {
 
     const tenant = req.tenant || req.user?.tenant;
     const isFreePlan = tenant?.subscription_plan === 'free';
+    console.log('[createOrder]', CREATE_ORDER_IMPL_VERSION, {
+      tenantId: req.user?.tenantId,
+      plan: tenant?.subscription_plan,
+      online_store_id: req.body?.online_store_id,
+      itemsCount: Array.isArray(req.body?.items) ? req.body.items.length : null
+    });
 
     // Cache a safe Product attribute list for this request (used for enterprise; free uses raw SQL to avoid model/schema drift).
     const productSafeAttrs = await safeAttrs('products', ['id', 'name', 'sku', 'price', 'stock', 'image_url', 'description', 'category']);
@@ -517,21 +524,14 @@ async function createOrder(req, res) {
         });
       }
 
-      // Free/shared DB can be older and miss enterprise columns (barcode, batch_number, store_id, etc).
-      // To avoid Sequelize selecting missing columns, use a raw query for products on free plan.
-      let product = null;
-      if (isFreePlan) {
-        const rows = await req.db.query(
-          'SELECT id, name, sku, price, stock FROM products WHERE id = ? LIMIT 1',
-          { replacements: [product_id], type: Sequelize.QueryTypes.SELECT, transaction }
-        );
-        product = rows && rows[0] ? rows[0] : null;
-      } else {
-        product = await req.db.models.Product.findOne({
-          where: { id: product_id },
-          attributes: productSafeAttrs
-        });
-      }
+      // IMPORTANT: Always use raw SQL for product reads here.
+      // This avoids Sequelize selecting non-existent enterprise columns (barcode, batch_number, store_id)
+      // against older free/shared schemas. Works for both free + enterprise.
+      const productRows = await req.db.query(
+        'SELECT id, name, sku, price, stock FROM products WHERE id = ? LIMIT 1',
+        { replacements: [product_id], type: Sequelize.QueryTypes.SELECT, transaction }
+      );
+      const product = productRows && productRows[0] ? productRows[0] : null;
 
       if (!product) {
         await transaction.rollback();
@@ -773,27 +773,17 @@ async function createOrder(req, res) {
           }, { transaction });
         }
       } else {
-        // Free plan: raw update to avoid Product model selecting missing columns
-        if (isFreePlan) {
-          const rows = await req.db.query(
-            'SELECT id, stock FROM products WHERE id = ? LIMIT 1',
-            { replacements: [item.product_id], type: Sequelize.QueryTypes.SELECT, transaction }
+        // Always raw SQL for product stock updates (see note above).
+        const rows = await req.db.query(
+          'SELECT id, stock FROM products WHERE id = ? LIMIT 1',
+          { replacements: [item.product_id], type: Sequelize.QueryTypes.SELECT, transaction }
+        );
+        const prodRow = rows && rows[0] ? rows[0] : null;
+        if (prodRow && prodRow.stock != null) {
+          await req.db.query(
+            'UPDATE products SET stock = ? WHERE id = ?',
+            { replacements: [Number(prodRow.stock) - qty, item.product_id], type: Sequelize.QueryTypes.UPDATE, transaction }
           );
-          const prodRow = rows && rows[0] ? rows[0] : null;
-          if (prodRow && prodRow.stock != null) {
-            await req.db.query(
-              'UPDATE products SET stock = ? WHERE id = ?',
-              { replacements: [Number(prodRow.stock) - qty, item.product_id], type: Sequelize.QueryTypes.UPDATE, transaction }
-            );
-          }
-        } else {
-          const p = await req.db.models.Product.findOne({
-            where: { id: item.product_id },
-            attributes: await safeAttrs('products', ['id', 'stock'])
-          });
-          if (p && p.stock != null) {
-            await p.update({ stock: Number(p.stock) - qty }, { transaction });
-          }
         }
       }
     }
@@ -801,26 +791,19 @@ async function createOrder(req, res) {
     await transaction.commit();
 
     // Fetch complete order
-    // Free plan: avoid including Product model (schema drift). Items already store product_name/product_sku.
+    // Do NOT include Product model here (it can SELECT barcode/batch_number/store_id on older schemas).
     const completeOrder = await req.db.models.OnlineStoreOrder.findByPk(order.id, {
       include: [
         { model: req.db.models.OnlineStore },
-        { model: req.db.models.Store, attributes: ['id', 'name'] },
-        {
-          model: req.db.models.OnlineStoreOrderItem,
-          include: isFreePlan ? [] : [{
-            model: req.db.models.Product,
-            attributes: productSafeAttrs,
-            required: false
-          }]
-        }
+        { model: req.db.models.Store, attributes: ['id', 'name'], required: false },
+        { model: req.db.models.OnlineStoreOrderItem }
       ]
     });
 
     res.status(201).json({
       success: true,
       message: 'Order created successfully',
-      data: { order: completeOrder }
+      data: { order: completeOrder, impl_version: CREATE_ORDER_IMPL_VERSION }
     });
   } catch (error) {
     await transaction.rollback();
@@ -828,7 +811,8 @@ async function createOrder(req, res) {
     const message = error && error.message ? String(error.message) : 'Failed to create order';
     res.status(500).json({
       success: false,
-      message
+      message,
+      impl_version: 'createOrder-raw-product-v1'
     });
   }
 }
