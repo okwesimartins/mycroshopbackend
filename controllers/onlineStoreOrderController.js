@@ -1,4 +1,4 @@
-const { Sequelize, QueryTypes } = require('sequelize');
+const { Sequelize } = require('sequelize');
 const { v4: uuidv4 } = require('uuid');
 
 /**
@@ -543,7 +543,7 @@ async function createOrder(req, res) {
       // against older free/shared schemas. Works for both free + enterprise.
       const productRows = await req.db.query(
         'SELECT id, name, sku, price, stock FROM products WHERE id = ? LIMIT 1',
-        { replacements: [product_id], type: QueryTypes.SELECT, transaction }
+        { replacements: [product_id], type: Sequelize.QueryTypes.SELECT, transaction }
       );
       const product = productRows && productRows[0] ? productRows[0] : null;
 
@@ -777,13 +777,13 @@ async function createOrder(req, res) {
         // Use raw SQL for option stock update to avoid selecting non-existent columns (e.g. barcode) on older schemas.
         const rows = await req.db.query(
           'SELECT id, stock FROM product_variation_options WHERE id = ? LIMIT 1',
-          { replacements: [item.variation_option_id], type: QueryTypes.SELECT, transaction }
+          { replacements: [item.variation_option_id], type: Sequelize.QueryTypes.SELECT, transaction }
         );
         const optRow = rows && rows[0] ? rows[0] : null;
         if (optRow && optRow.stock != null) {
           await req.db.query(
             'UPDATE product_variation_options SET stock = ? WHERE id = ?',
-            { replacements: [Number(optRow.stock) - qty, item.variation_option_id], type: QueryTypes.UPDATE, transaction }
+            { replacements: [Number(optRow.stock) - qty, item.variation_option_id], type: Sequelize.QueryTypes.UPDATE, transaction }
           );
         }
       } else if (finalStoreId) {
@@ -799,13 +799,13 @@ async function createOrder(req, res) {
         // Always raw SQL for product stock updates (see note above).
         const rows = await req.db.query(
           'SELECT id, stock FROM products WHERE id = ? LIMIT 1',
-          { replacements: [item.product_id], type: QueryTypes.SELECT, transaction }
+          { replacements: [item.product_id], type: Sequelize.QueryTypes.SELECT, transaction }
         );
         const prodRow = rows && rows[0] ? rows[0] : null;
         if (prodRow && prodRow.stock != null) {
           await req.db.query(
             'UPDATE products SET stock = ? WHERE id = ?',
-            { replacements: [Number(prodRow.stock) - qty, item.product_id], type: QueryTypes.UPDATE, transaction }
+            { replacements: [Number(prodRow.stock) - qty, item.product_id], type: Sequelize.QueryTypes.UPDATE, transaction }
           );
         }
       }
@@ -829,15 +829,25 @@ async function createOrder(req, res) {
       data: { order: completeOrder, impl_version: CREATE_ORDER_IMPL_VERSION }
     });
   } catch (error) {
-    await transaction.rollback();
-    console.error('Error creating order:', error);
-    if (error?.sql) console.error('Error SQL:', error.sql);
-    if (error?.parameters) console.error('Error SQL params:', error.parameters);
+    // Never let rollback failures prevent an HTTP response (otherwise Postman shows "Incomplete response").
+    try {
+      await transaction.rollback();
+    } catch (rbErr) {
+      console.error('[createOrder] rollback failed:', rbErr?.message || rbErr);
+    }
+
+    const reqTag = `ord_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    console.error('[createOrder] ERROR', reqTag, error);
+    if (error?.sql) console.error('[createOrder] SQL', reqTag, error.sql);
+    if (error?.parameters) console.error('[createOrder] SQL params', reqTag, error.parameters);
+
     const message = error && error.message ? String(error.message) : 'Failed to create order';
-    res.status(500).json({
+    if (res.headersSent) return;
+    return res.status(500).json({
       success: false,
       message,
       impl_version: 'createOrder-raw-product-v1',
+      request_tag: reqTag,
       debug: {
         name: error?.name || null,
         sql: error?.sql || null
