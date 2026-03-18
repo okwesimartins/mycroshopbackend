@@ -808,11 +808,17 @@ async function createOrder(req, res) {
   } catch (error) {
     await transaction.rollback();
     console.error('Error creating order:', error);
+    if (error?.sql) console.error('Error SQL:', error.sql);
+    if (error?.parameters) console.error('Error SQL params:', error.parameters);
     const message = error && error.message ? String(error.message) : 'Failed to create order';
     res.status(500).json({
       success: false,
       message,
-      impl_version: 'createOrder-raw-product-v1'
+      impl_version: 'createOrder-raw-product-v1',
+      debug: {
+        name: error?.name || null,
+        sql: error?.sql || null
+      }
     });
   }
 }
