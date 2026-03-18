@@ -419,7 +419,10 @@ async function createOrder(req, res) {
       return picked;
     }
 
-    // Cache a safe Product attribute list for this request (works for both free + enterprise schemas).
+    const tenant = req.tenant || req.user?.tenant;
+    const isFreePlan = tenant?.subscription_plan === 'free';
+
+    // Cache a safe Product attribute list for this request (used for enterprise; free uses raw SQL to avoid model/schema drift).
     const productSafeAttrs = await safeAttrs('products', ['id', 'name', 'sku', 'price', 'stock', 'image_url', 'description', 'category']);
 
     const {
@@ -514,12 +517,22 @@ async function createOrder(req, res) {
         });
       }
 
-      // Free/shared DB products table may not have `store_id` column.
-      // Avoid selecting non-existent columns by explicitly selecting safe attributes.
-      const product = await req.db.models.Product.findOne({
-        where: { id: product_id },
-        attributes: productSafeAttrs
-      });
+      // Free/shared DB can be older and miss enterprise columns (barcode, batch_number, store_id, etc).
+      // To avoid Sequelize selecting missing columns, use a raw query for products on free plan.
+      let product = null;
+      if (isFreePlan) {
+        const rows = await req.db.query(
+          'SELECT id, name, sku, price, stock FROM products WHERE id = ? LIMIT 1',
+          { replacements: [product_id], type: Sequelize.QueryTypes.SELECT, transaction }
+        );
+        product = rows && rows[0] ? rows[0] : null;
+      } else {
+        product = await req.db.models.Product.findOne({
+          where: { id: product_id },
+          attributes: productSafeAttrs
+        });
+      }
+
       if (!product) {
         await transaction.rollback();
         return res.status(404).json({
@@ -760,12 +773,27 @@ async function createOrder(req, res) {
           }, { transaction });
         }
       } else {
-        const p = await req.db.models.Product.findOne({
-          where: { id: item.product_id },
-          attributes: await safeAttrs('products', ['id', 'stock'])
-        });
-        if (p && p.stock != null) {
-          await p.update({ stock: Number(p.stock) - qty }, { transaction });
+        // Free plan: raw update to avoid Product model selecting missing columns
+        if (isFreePlan) {
+          const rows = await req.db.query(
+            'SELECT id, stock FROM products WHERE id = ? LIMIT 1',
+            { replacements: [item.product_id], type: Sequelize.QueryTypes.SELECT, transaction }
+          );
+          const prodRow = rows && rows[0] ? rows[0] : null;
+          if (prodRow && prodRow.stock != null) {
+            await req.db.query(
+              'UPDATE products SET stock = ? WHERE id = ?',
+              { replacements: [Number(prodRow.stock) - qty, item.product_id], type: Sequelize.QueryTypes.UPDATE, transaction }
+            );
+          }
+        } else {
+          const p = await req.db.models.Product.findOne({
+            where: { id: item.product_id },
+            attributes: await safeAttrs('products', ['id', 'stock'])
+          });
+          if (p && p.stock != null) {
+            await p.update({ stock: Number(p.stock) - qty }, { transaction });
+          }
         }
       }
     }
@@ -773,23 +801,18 @@ async function createOrder(req, res) {
     await transaction.commit();
 
     // Fetch complete order
+    // Free plan: avoid including Product model (schema drift). Items already store product_name/product_sku.
     const completeOrder = await req.db.models.OnlineStoreOrder.findByPk(order.id, {
       include: [
-        {
-          model: req.db.models.OnlineStore
-        },
-        {
-          model: req.db.models.Store,
-          attributes: ['id', 'name']
-        },
+        { model: req.db.models.OnlineStore },
+        { model: req.db.models.Store, attributes: ['id', 'name'] },
         {
           model: req.db.models.OnlineStoreOrderItem,
-          include: [
-            {
-              model: req.db.models.Product,
-              attributes: productSafeAttrs
-            }
-          ]
+          include: isFreePlan ? [] : [{
+            model: req.db.models.Product,
+            attributes: productSafeAttrs,
+            required: false
+          }]
         }
       ]
     });
