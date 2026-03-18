@@ -463,8 +463,24 @@ async function createOrder(req, res) {
       shipping_amount = 0,
       discount_amount = 0,
       payment_method,
-      notes
+      notes,
+      idempotency_key
     } = req.body;
+
+    // Idempotency: accept from header or body (WhatsApp can use inbound messageId).
+    const headerKey = req.headers['idempotency-key'] || req.headers['Idempotency-Key'];
+    const rawIdempotencyKey = (typeof headerKey === 'string' && headerKey.trim())
+      ? headerKey.trim()
+      : (typeof idempotency_key === 'string' && idempotency_key.trim() ? idempotency_key.trim() : null);
+    const idempotencyKey = rawIdempotencyKey ? rawIdempotencyKey.slice(0, 255) : null;
+
+    const tenantIdResolved = req.user?.tenantId != null
+      ? parseInt(req.user.tenantId, 10)
+      : (req.body?.tenant_id != null ? parseInt(req.body.tenant_id, 10) : null);
+    if (isFreePlan && (!tenantIdResolved || Number.isNaN(tenantIdResolved))) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'tenant_id is required for free users', impl_version: CREATE_ORDER_IMPL_VERSION });
+    }
 
     if (!online_store_id || !items || !Array.isArray(items) || items.length === 0) {
       await transaction.rollback();
@@ -482,6 +498,29 @@ async function createOrder(req, res) {
         success: false,
         message: 'Online store not found'
       });
+    }
+
+    // If idempotency_key is provided, return existing order instead of creating duplicate.
+    if (idempotencyKey) {
+      const where = { idempotency_key: idempotencyKey };
+      if (isFreePlan) where.tenant_id = tenantIdResolved;
+      const existing = await req.db.models.OnlineStoreOrder.findOne({
+        where,
+        include: [
+          { model: req.db.models.OnlineStore, required: false },
+          { model: req.db.models.Store, required: false },
+          { model: req.db.models.OnlineStoreOrderItem }
+        ],
+        order: [['id', 'DESC']]
+      });
+      if (existing) {
+        await transaction.rollback();
+        return res.status(200).json({
+          success: true,
+          message: 'Order already exists (idempotent replay)',
+          data: { order: existing, impl_version: CREATE_ORDER_IMPL_VERSION }
+        });
+      }
     }
 
     // If store_id provided, verify it's linked to online store
@@ -728,15 +767,13 @@ async function createOrder(req, res) {
     const taxAmount = subtotal * (tax_rate / 100);
     const total = subtotal + taxAmount + shipping_amount - discount_amount;
 
-    const tenantIdResolved = req.user?.tenantId != null
-      ? parseInt(req.user.tenantId, 10)
-      : (req.body?.tenant_id != null ? parseInt(req.body.tenant_id, 10) : null);
-    const isFree = (req.tenant?.subscription_plan === 'free');
+    const isFree = isFreePlan;
 
     const orderPayload = {
       online_store_id,
       store_id: finalStoreId,
       order_number: generateOrderNumber(),
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       customer_name,
       customer_email: customer_email || null,
       customer_phone: customer_phone || null,
