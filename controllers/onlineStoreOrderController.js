@@ -470,8 +470,22 @@ async function createOrder(req, res) {
     let subtotal = 0;
     const orderItems = [];
 
+    const approxEq = (a, b, eps = 0.01) => {
+      const x = Number(a);
+      const y = Number(b);
+      if (Number.isNaN(x) || Number.isNaN(y)) return false;
+      return Math.abs(x - y) <= eps;
+    };
+
     for (const item of items) {
-      const { product_id, variant_id: itemVariantId, quantity, unit_price } = item;
+      const {
+        product_id,
+        variant_id: itemVariantId,
+        variation_id: itemVariationId,
+        variation_option_id: itemVariationOptionId,
+        quantity,
+        unit_price
+      } = item;
       
       if (!product_id || quantity == null || quantity === '' || unit_price == null || unit_price === '') {
         await transaction.rollback();
@@ -490,7 +504,29 @@ async function createOrder(req, res) {
         });
       }
 
+      const unitPriceNum = Number(unit_price);
+      if (Number.isNaN(unitPriceNum)) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'unit_price must be a number'
+        });
+      }
+
       let variantSku = null;
+      let variationName = null;
+      let variationOptionValue = null;
+
+      // ── Validate: variant_id vs variation_option_id (mutually exclusive) ──
+      if (itemVariantId && (itemVariationId || itemVariationOptionId)) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Provide either variant_id OR (variation_id + variation_option_id), not both'
+        });
+      }
+
+      // ── Variant-level validation + stock + price ───────────────────────
       if (itemVariantId) {
         const variant = await req.db.models.ProductVariant.findOne({
           where: { id: itemVariantId, product_id }
@@ -510,8 +546,81 @@ async function createOrder(req, res) {
             message: `Insufficient stock for ${product.name} (selected option). Available: ${variantStock}, Requested: ${quantity}`
           });
         }
+        // Validate unit_price matches variant price (when variant price is set)
+        const expected = variant.price != null ? Number(variant.price) : null;
+        if (expected != null && !Number.isNaN(expected) && !approxEq(unitPriceNum, expected)) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Invalid unit_price for selected variant. Expected ${expected}, got ${unitPriceNum}`
+          });
+        }
         variantSku = variant.sku;
-      } else if (finalStoreId) {
+      }
+
+      // ── Variation option-level validation + stock + price ───────────────
+      // This supports products that use variation options directly (no ProductVariant rows).
+      if (!itemVariantId && (itemVariationId || itemVariationOptionId)) {
+        if (!itemVariationId || !itemVariationOptionId) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'When using variation options, both variation_id and variation_option_id are required'
+          });
+        }
+
+        const variation = await req.db.models.ProductVariation.findOne({
+          where: { id: itemVariationId, product_id }
+        });
+        if (!variation) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Variation ${itemVariationId} not found for this product`
+          });
+        }
+
+        const option = await req.db.models.ProductVariationOption.findOne({
+          where: { id: itemVariationOptionId, variation_id: itemVariationId }
+        });
+        if (!option) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Variation option ${itemVariationOptionId} not found for this variation`
+          });
+        }
+
+        // Stock check at option level if present
+        if (option.stock != null) {
+          const optStock = Number(option.stock);
+          if (!Number.isNaN(optStock) && optStock < Number(quantity)) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Insufficient stock for ${product.name} (${variation.variation_name}: ${option.option_display_name || option.option_value}). Available: ${optStock}, Requested: ${quantity}`
+            });
+          }
+        }
+
+        // Price check: expected = product.price + option.price_adjustment (fallbacks to 0)
+        const basePrice = product.price != null ? Number(product.price) : 0;
+        const adj = option.price_adjustment != null ? Number(option.price_adjustment) : 0;
+        const expected = (Number.isNaN(basePrice) ? 0 : basePrice) + (Number.isNaN(adj) ? 0 : adj);
+        if (!approxEq(unitPriceNum, expected)) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Invalid unit_price for selected option. Expected ${expected}, got ${unitPriceNum}`
+          });
+        }
+
+        variationName = variation.variation_name || null;
+        variationOptionValue = option.option_value || option.option_display_name || null;
+      }
+
+      // ── Product/store stock checks (only when not variant/option-level) ──
+      if (!itemVariantId && !itemVariationOptionId && finalStoreId) {
         const productStore = await req.db.models.ProductStore.findOne({
           where: { product_id, store_id: finalStoreId }
         });
@@ -522,10 +631,10 @@ async function createOrder(req, res) {
             message: `Insufficient stock for product ${product.name}. Available: ${productStore.stock}, Requested: ${quantity}`
           });
         }
-      } else {
+      } else if (!itemVariantId && !itemVariationOptionId) {
         // Online-only (no store): check product or variant stock
         const productStock = product.stock != null ? Number(product.stock) : null;
-        if (productStock !== null && productStock < quantity && !itemVariantId) {
+        if (productStock !== null && productStock < quantity) {
           await transaction.rollback();
           return res.status(400).json({
             success: false,
@@ -534,7 +643,19 @@ async function createOrder(req, res) {
         }
       }
 
-      const itemTotal = quantity * unit_price;
+      // Price check for non-variant, non-option items: must match base product.price (when set)
+      if (!itemVariantId && !itemVariationOptionId && product.price != null) {
+        const expected = Number(product.price);
+        if (!Number.isNaN(expected) && !approxEq(unitPriceNum, expected)) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Invalid unit_price for product. Expected ${expected}, got ${unitPriceNum}`
+          });
+        }
+      }
+
+      const itemTotal = Number(quantity) * unitPriceNum;
       subtotal += itemTotal;
 
       orderItems.push({
@@ -542,17 +663,20 @@ async function createOrder(req, res) {
         product_name: product.name,
         product_sku: variantSku || product.sku || null,
         quantity,
-        unit_price,
+        unit_price: unitPriceNum,
         total: itemTotal,
-        variant_id: itemVariantId || null
+        variant_id: itemVariantId || null,
+        variation_id: itemVariationId || null,
+        variation_option_id: itemVariationOptionId || null,
+        variation_name: variationName,
+        variation_option_value: variationOptionValue
       });
     }
 
     const taxAmount = subtotal * (tax_rate / 100);
     const total = subtotal + taxAmount + shipping_amount - discount_amount;
 
-    // Create order
-    const order = await req.db.models.OnlineStoreOrder.create({
+    const orderPayload = {
       online_store_id,
       store_id: finalStoreId,
       order_number: generateOrderNumber(),
@@ -574,17 +698,21 @@ async function createOrder(req, res) {
       payment_status: 'pending',
       payment_method: payment_method || null,
       notes: notes || null
-    }, { transaction });
-
-    // Create order items
-    for (const item of orderItems) {
-      await req.db.models.OnlineStoreOrderItem.create({
-        order_id: order.id,
-        ...item
-      }, { transaction });
+    };
+    if (req.tenant?.subscription_plan === 'free' && req.user?.tenantId) {
+      orderPayload.tenant_id = req.user.tenantId;
     }
 
-    // Deduct stock: variant-level, then store-level, then product-level (online-only)
+    const order = await req.db.models.OnlineStoreOrder.create(orderPayload, { transaction });
+
+    const tenantIdForItems = req.tenant?.subscription_plan === 'free' ? req.user?.tenantId : null;
+    for (const item of orderItems) {
+      const itemPayload = { order_id: order.id, ...item };
+      if (tenantIdForItems != null) itemPayload.tenant_id = tenantIdForItems;
+      await req.db.models.OnlineStoreOrderItem.create(itemPayload, { transaction });
+    }
+
+    // Deduct stock: variant-level, then option-level, then store-level, then product-level (online-only)
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const qty = Number(item.quantity);
@@ -592,6 +720,11 @@ async function createOrder(req, res) {
         const pv = await req.db.models.ProductVariant.findByPk(item.variant_id);
         if (pv) {
           await pv.update({ stock: Number(pv.stock) - qty }, { transaction });
+        }
+      } else if (item.variation_option_id) {
+        const opt = await req.db.models.ProductVariationOption.findByPk(item.variation_option_id);
+        if (opt && opt.stock != null) {
+          await opt.update({ stock: Number(opt.stock) - qty }, { transaction });
         }
       } else if (finalStoreId) {
         const productStore = await req.db.models.ProductStore.findOne({
@@ -640,9 +773,10 @@ async function createOrder(req, res) {
   } catch (error) {
     await transaction.rollback();
     console.error('Error creating order:', error);
+    const message = error && error.message ? String(error.message) : 'Failed to create order';
     res.status(500).json({
       success: false,
-      message: 'Failed to create order'
+      message
     });
   }
 }
