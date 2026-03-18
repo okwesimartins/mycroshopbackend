@@ -728,6 +728,11 @@ async function createOrder(req, res) {
     const taxAmount = subtotal * (tax_rate / 100);
     const total = subtotal + taxAmount + shipping_amount - discount_amount;
 
+    const tenantIdResolved = req.user?.tenantId != null
+      ? parseInt(req.user.tenantId, 10)
+      : (req.body?.tenant_id != null ? parseInt(req.body.tenant_id, 10) : null);
+    const isFree = (req.tenant?.subscription_plan === 'free');
+
     const orderPayload = {
       online_store_id,
       store_id: finalStoreId,
@@ -751,13 +756,20 @@ async function createOrder(req, res) {
       payment_method: payment_method || null,
       notes: notes || null
     };
-    if (req.tenant?.subscription_plan === 'free' && req.user?.tenantId) {
-      orderPayload.tenant_id = req.user.tenantId;
+    if (isFree) {
+      if (!tenantIdResolved || Number.isNaN(tenantIdResolved)) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'tenant_id is required for free users'
+        });
+      }
+      orderPayload.tenant_id = tenantIdResolved;
     }
 
     const order = await req.db.models.OnlineStoreOrder.create(orderPayload, { transaction });
 
-    const tenantIdForItems = req.tenant?.subscription_plan === 'free' ? req.user?.tenantId : null;
+    const tenantIdForItems = isFree ? tenantIdResolved : null;
     for (const item of orderItems) {
       const itemPayload = { order_id: order.id, ...item };
       if (tenantIdForItems != null) itemPayload.tenant_id = tenantIdForItems;
