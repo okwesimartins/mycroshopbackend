@@ -24,6 +24,10 @@ router.get('/orders/pending-by-phone', aiAgentController.getPendingOrderByCustom
 router.post('/orders/pending-by-phone', aiAgentController.getPendingOrderByCustomerPhone);
 router.post('/attach-order-receipt', aiAgentController.attachOrderReceipt);
 router.post('/confirm-order-payment', aiAgentController.confirmOrderPayment);
+// Booking (list services, availability, create booking)
+router.get('/list-services', aiAgentController.listServices);
+router.get('/service-availability', aiAgentController.getServiceAvailability);
+router.post('/create-booking', aiAgentController.createBooking);
 
 // Protected routes
 router.use(authenticate);

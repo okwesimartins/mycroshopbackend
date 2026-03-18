@@ -1004,6 +1004,321 @@ async function confirmOrderPayment(req, res) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Agent – Booking (list services, availability, create booking)
+// x-api-key only; used by Cloud process-message.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * List bookable services for the tenant (for AI agent).
+ * GET /api/v1/ai-agent/list-services?tenant_id=…&subscription_plan=…&online_store_id=…
+ */
+async function listServices(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { tenant_id, subscription_plan, online_store_id } = req.query;
+    if (!tenant_id) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+
+    const tenantId = parseInt(tenant_id, 10);
+    if (Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'Invalid tenant_id' });
+    }
+
+    const subscriptionPlan = subscription_plan || 'enterprise';
+    const { getTenantConnection } = require('../config/database');
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const models = require('../models')(sequelize);
+
+    const where = { is_active: true };
+    if (subscriptionPlan === 'free') {
+      where.tenant_id = tenantId;
+    }
+
+    // Optional: filter services linked to a specific online store (free plan)
+    let serviceIds = null;
+    if (subscriptionPlan === 'free' && online_store_id) {
+      const oss = await models.OnlineStoreService.findAll({
+        where: { online_store_id: parseInt(online_store_id, 10), is_visible: true },
+        attributes: ['service_id']
+      });
+      serviceIds = oss.map(o => o.service_id);
+      if (serviceIds.length === 0) {
+        return res.json({ success: true, services: [] });
+      }
+    }
+
+    if (serviceIds && serviceIds.length) {
+      const { Op } = require('sequelize');
+      where.id = { [Op.in]: serviceIds };
+    }
+
+    const services = await models.StoreService.findAll({
+      where,
+      attributes: ['id', 'service_title', 'description', 'price', 'duration_minutes', 'location_type'],
+      order: [['sort_order', 'ASC'], ['service_title', 'ASC']]
+    });
+
+    res.json({
+      success: true,
+      services: services.map(s => ({
+        id: s.id,
+        service_title: s.service_title,
+        description: s.description || null,
+        price: parseFloat(s.price || 0),
+        duration_minutes: s.duration_minutes || 30,
+        location_type: s.location_type || 'in_person'
+      }))
+    });
+  } catch (error) {
+    console.error('listServices error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to list services',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Get available time slots for a service on a given date.
+ * Uses BookingAvailability (day_of_week, start_time, end_time) and existing Bookings to compute free slots.
+ * GET /api/v1/ai-agent/service-availability?tenant_id=…&service_id=…&date=YYYY-MM-DD&subscription_plan=…
+ */
+async function getServiceAvailability(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { tenant_id, service_id, date, subscription_plan } = req.query;
+    if (!tenant_id || !service_id || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id, service_id and date (YYYY-MM-DD) are required'
+      });
+    }
+
+    const tenantId = parseInt(tenant_id, 10);
+    const serviceId = parseInt(service_id, 10);
+    if (Number.isNaN(tenantId) || Number.isNaN(serviceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid tenant_id or service_id' });
+    }
+
+    const dateStr = String(date).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return res.status(400).json({ success: false, message: 'date must be YYYY-MM-DD' });
+    }
+
+    const subscriptionPlan = subscription_plan || 'enterprise';
+    const { getTenantConnection } = require('../config/database');
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const models = require('../models')(sequelize);
+
+    const service = await models.StoreService.findOne({
+      where: subscriptionPlan === 'free' ? { id: serviceId, tenant_id: tenantId } : { id: serviceId },
+      attributes: ['id', 'duration_minutes']
+    });
+    if (!service) {
+      return res.status(404).json({ success: false, message: 'Service not found' });
+    }
+
+    const d = new Date(dateStr + 'T00:00:00');
+    const dayOfWeek = d.getDay();
+    const durationMinutes = service.duration_minutes || 30;
+
+    const { Op } = require('sequelize');
+    const availWhere = {
+      service_id: serviceId,
+      day_of_week: dayOfWeek,
+      is_available: true
+    };
+    if (subscriptionPlan === 'free') {
+      availWhere.tenant_id = tenantId;
+    }
+    const availRows = await models.BookingAvailability.findAll({
+      where: availWhere,
+      attributes: ['start_time', 'end_time']
+    });
+
+    const slots = [];
+    const pad = (n) => String(n).padStart(2, '0');
+
+    if (availRows.length === 0) {
+      // No availability config: default 09:00–17:00, 30-min slots
+      const start = 9 * 60;
+      const end = 17 * 60;
+      for (let t = start; t + durationMinutes <= end; t += 30) {
+        const h = Math.floor(t / 60);
+        const m = t % 60;
+        slots.push({
+          start: `${pad(h)}:${pad(m)}:00`,
+          end: `${pad(Math.floor((t + durationMinutes) / 60))}:${pad((t + durationMinutes) % 60)}:00`,
+          slot: `${pad(h)}:${pad(m)}`,
+          label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`
+        });
+      }
+    } else {
+      for (const row of availRows) {
+        const startStr = row.start_time;
+        const endStr = row.end_time;
+        const [sh, sm] = (typeof startStr === 'string' ? startStr : '').split(':').map(Number);
+        const [eh, em] = (typeof endStr === 'string' ? endStr : '').split(':').map(Number);
+        const startMins = (sh || 0) * 60 + (sm || 0);
+        const endMins = (eh || 0) * 60 + (em || 0);
+        for (let t = startMins; t + durationMinutes <= endMins; t += 30) {
+          const h = Math.floor(t / 60);
+          const m = t % 60;
+          slots.push({
+            start: `${pad(h)}:${pad(m)}:00`,
+            end: `${pad(Math.floor((t + durationMinutes) / 60))}:${pad((t + durationMinutes) % 60)}:00`,
+            slot: `${pad(h)}:${pad(m)}`,
+            label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`
+          });
+        }
+      }
+    }
+
+    const dayStart = new Date(dateStr + 'T00:00:00').getTime();
+    const dayEnd = new Date(dateStr + 'T23:59:59').getTime();
+
+    const bookingWhere = {
+      service_id: serviceId,
+      status: { [Op.notIn]: ['cancelled'] },
+      scheduled_at: { [Op.gte]: new Date(dayStart), [Op.lte]: new Date(dayEnd) }
+    };
+    if (subscriptionPlan === 'free') {
+      bookingWhere.tenant_id = tenantId;
+    }
+    const existingBookings = await models.Booking.findAll({
+      where: bookingWhere,
+      attributes: ['scheduled_at', 'duration_minutes']
+    });
+
+    const bookedRanges = existingBookings.map(b => {
+      const at = new Date(b.scheduled_at);
+      const dur = b.duration_minutes || 30;
+      const start = at.getHours() * 60 + at.getMinutes();
+      const end = start + dur;
+      return [start, end];
+    });
+
+    const available = slots.filter(s => {
+      const [sh, sm] = s.start.split(':').map(Number);
+      const slotStart = sh * 60 + sm;
+      const slotEnd = slotStart + durationMinutes;
+      return !bookedRanges.some(([bStart, bEnd]) => slotStart < bEnd && slotEnd > bStart);
+    });
+
+    res.json({
+      success: true,
+      date: dateStr,
+      service_id: serviceId,
+      slots: available.map(s => ({ start: s.start, end: s.end, slot: s.slot, label: s.label }))
+    });
+  } catch (error) {
+    console.error('getServiceAvailability error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get availability',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Create a booking (for AI agent).
+ * POST /api/v1/ai-agent/create-booking
+ * Body: { tenant_id, service_id, scheduled_at, customer_name, customer_phone, customer_email?, subscription_plan? }
+ * scheduled_at: ISO datetime or "YYYY-MM-DDTHH:mm:ss"
+ */
+async function createBooking(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const body = req.body || {};
+    const {
+      tenant_id,
+      service_id,
+      scheduled_at,
+      customer_name,
+      customer_phone,
+      customer_email,
+      subscription_plan
+    } = body;
+
+    if (!tenant_id || !service_id || !scheduled_at || !customer_name || !customer_phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id, service_id, scheduled_at, customer_name and customer_phone are required'
+      });
+    }
+
+    const tenantId = parseInt(tenant_id, 10);
+    const serviceId = parseInt(service_id, 10);
+    if (Number.isNaN(tenantId) || Number.isNaN(serviceId)) {
+      return res.status(400).json({ success: false, message: 'Invalid tenant_id or service_id' });
+    }
+
+    const subscriptionPlan = subscription_plan || 'enterprise';
+    const { getTenantConnection } = require('../config/database');
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const models = require('../models')(sequelize);
+
+    const service = await models.StoreService.findOne({
+      where: subscriptionPlan === 'free' ? { id: serviceId, tenant_id: tenantId } : { id: serviceId },
+      attributes: ['id', 'service_title', 'description', 'duration_minutes', 'location_type']
+    });
+    if (!service) {
+      return res.status(404).json({ success: false, message: 'Service not found' });
+    }
+
+    const at = new Date(scheduled_at);
+    if (Number.isNaN(at.getTime())) {
+      return res.status(400).json({ success: false, message: 'Invalid scheduled_at' });
+    }
+
+    const booking = await models.Booking.create({
+      tenant_id: subscriptionPlan === 'free' ? tenantId : null,
+      store_id: service.store_id || null,
+      service_id: serviceId,
+      customer_id: null,
+      customer_name: String(customer_name).trim(),
+      customer_email: (customer_email && String(customer_email).trim()) || null,
+      customer_phone: String(customer_phone).trim(),
+      service_title: service.service_title,
+      description: service.description || null,
+      scheduled_at: at,
+      duration_minutes: service.duration_minutes || 30,
+      timezone: 'Africa/Lagos',
+      location_type: service.location_type || 'in_person',
+      status: 'pending'
+    });
+
+    res.status(201).json({
+      success: true,
+      data: { booking: booking.toJSON(), created: true },
+      message: 'Booking created'
+    });
+  } catch (error) {
+    console.error('createBooking error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create booking',
+      error: error.message
+    });
+  }
+}
+
 module.exports = {
   handleWebhook,
   getConfig,
@@ -1016,6 +1331,9 @@ module.exports = {
   getOrderByConfirmationMessageId,
   getPendingOrderByCustomerPhone,
   attachOrderReceipt,
-  confirmOrderPayment
+  confirmOrderPayment,
+  listServices,
+  getServiceAvailability,
+  createBooking
 };
 
