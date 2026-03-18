@@ -403,6 +403,19 @@ async function createOrder(req, res) {
   const transaction = await req.db.transaction();
   
   try {
+    // Some free/shared DBs may be older and missing columns (e.g. barcode, store_id).
+    // To support both free + enterprise schemas safely, only SELECT columns that exist.
+    const qi = req.db.getQueryInterface();
+    const tableColsCache = new Map();
+    async function safeAttrs(tableName, desired) {
+      if (!tableColsCache.has(tableName)) {
+        const cols = await qi.describeTable(tableName);
+        tableColsCache.set(tableName, cols || {});
+      }
+      const cols = tableColsCache.get(tableName) || {};
+      return (desired || []).filter(c => Object.prototype.hasOwnProperty.call(cols, c));
+    }
+
     const {
       online_store_id,
       store_id, // Physical store to fulfill order
@@ -499,7 +512,7 @@ async function createOrder(req, res) {
       // Avoid selecting non-existent columns by explicitly selecting safe attributes.
       const product = await req.db.models.Product.findOne({
         where: { id: product_id },
-        attributes: ['id', 'name', 'sku', 'price', 'stock']
+        attributes: await safeAttrs('products', ['id', 'name', 'sku', 'price', 'stock', 'image_url', 'description', 'category'])
       });
       if (!product) {
         await transaction.rollback();
@@ -743,7 +756,7 @@ async function createOrder(req, res) {
       } else {
         const p = await req.db.models.Product.findOne({
           where: { id: item.product_id },
-          attributes: ['id', 'stock']
+          attributes: await safeAttrs('products', ['id', 'stock'])
         });
         if (p && p.stock != null) {
           await p.update({ stock: Number(p.stock) - qty }, { transaction });
@@ -768,7 +781,7 @@ async function createOrder(req, res) {
           include: [
             {
               model: req.db.models.Product,
-              attributes: ['id', 'name', 'sku', 'price', 'stock', 'image_url']
+              attributes: await safeAttrs('products', ['id', 'name', 'sku', 'price', 'stock', 'image_url', 'description', 'category'])
             }
           ]
         }
