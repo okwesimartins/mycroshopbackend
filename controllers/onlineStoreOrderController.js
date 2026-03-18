@@ -495,7 +495,12 @@ async function createOrder(req, res) {
         });
       }
 
-      const product = await req.db.models.Product.findByPk(product_id);
+      // Free/shared DB products table may not have `store_id` column.
+      // Avoid selecting non-existent columns by explicitly selecting safe attributes.
+      const product = await req.db.models.Product.findOne({
+        where: { id: product_id },
+        attributes: ['id', 'name', 'sku', 'price', 'stock']
+      });
       if (!product) {
         await transaction.rollback();
         return res.status(404).json({
@@ -736,7 +741,10 @@ async function createOrder(req, res) {
           }, { transaction });
         }
       } else {
-        const p = await req.db.models.Product.findByPk(item.product_id);
+        const p = await req.db.models.Product.findOne({
+          where: { id: item.product_id },
+          attributes: ['id', 'stock']
+        });
         if (p && p.stock != null) {
           await p.update({ stock: Number(p.stock) - qty }, { transaction });
         }
@@ -752,13 +760,15 @@ async function createOrder(req, res) {
           model: req.db.models.OnlineStore
         },
         {
-          model: req.db.models.Store
+          model: req.db.models.Store,
+          attributes: ['id', 'name']
         },
         {
           model: req.db.models.OnlineStoreOrderItem,
           include: [
             {
-              model: req.db.models.Product
+              model: req.db.models.Product,
+              attributes: ['id', 'name', 'sku', 'price', 'stock', 'image_url']
             }
           ]
         }
