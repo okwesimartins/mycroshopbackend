@@ -340,7 +340,8 @@ async function checkProduct(req, res) {
     const where = {
       [Op.or]: [
         { name: { [Op.like]: likeTerm } },
-        { sku: { [Op.like]: likeTerm } }
+        { sku: { [Op.like]: likeTerm } },
+        { category: { [Op.like]: likeTerm } }
       ],
       is_active: true
     };
@@ -700,6 +701,7 @@ async function resolveTenant(req, res) {
         bank_account_number: tenant.bank_account_number || null,
         bank_code: tenant.bank_code || null,
         payment_instructions: tenant.payment_instructions || null,
+        owner_whatsapp_number: tenant.owner_whatsapp_number || tenant.owner_phone || tenant.phone || null,
       }
     });
   } catch (error) {
