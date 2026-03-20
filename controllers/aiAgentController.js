@@ -646,8 +646,25 @@ async function resolveTenant(req, res) {
       });
     }
 
+    // Pull owner notification number from whatsapp_connections when available.
+    // Column names differ across environments, so discover columns dynamically.
+    let ownerCol = null;
+    try {
+      const [columns] = await mainSequelize.query('SHOW COLUMNS FROM whatsapp_connections');
+      const availableCols = new Set((columns || []).map(c => c.Field));
+      const ownerCandidates = [
+        'owner_whatsapp_number',
+        'owner_phone',
+        'phone',
+        'owner_number',
+        'notification_phone'
+      ];
+      ownerCol = ownerCandidates.find(c => availableCols.has(c)) || null;
+    } catch (_) {}
+
+    const selectOwner = ownerCol ? `, ${ownerCol} AS owner_whatsapp_number` : '';
     const [rows] = await mainSequelize.query(
-      'SELECT tenant_id, access_token FROM whatsapp_connections WHERE phone_number_id = ? LIMIT 1',
+      `SELECT tenant_id, access_token${selectOwner} FROM whatsapp_connections WHERE phone_number_id = ? LIMIT 1`,
       { replacements: [phoneNumberId] }
     );
 
@@ -658,7 +675,7 @@ async function resolveTenant(req, res) {
       });
     }
 
-    const { tenant_id, access_token } = rows[0];
+    const { tenant_id, access_token, owner_whatsapp_number: ownerFromConnection } = rows[0];
     const tenant = await getTenantById(tenant_id);
     if (!tenant) {
       return res.status(404).json({
@@ -701,7 +718,7 @@ async function resolveTenant(req, res) {
         bank_account_number: tenant.bank_account_number || null,
         bank_code: tenant.bank_code || null,
         payment_instructions: tenant.payment_instructions || null,
-        owner_whatsapp_number: tenant.owner_whatsapp_number || tenant.owner_phone || tenant.phone || null,
+        owner_whatsapp_number: ownerFromConnection || tenant.owner_whatsapp_number || tenant.owner_phone || tenant.phone || null,
       }
     });
   } catch (error) {
