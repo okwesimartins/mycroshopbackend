@@ -1278,6 +1278,41 @@ function buildSlotsFromStoreServiceJson(availObj, dayOfWeek, durationMinutes) {
 }
 
 /**
+ * Weekdays (0=Sun … 6=Sat) that are explicitly bookable in store JSON:
+ * key exists, available !== false, and at least one valid time_slots entry.
+ * Weekdays omitted from JSON are NOT bookable (no fallback for range walking).
+ */
+function getBookableWeekdayIndicesFromStoreJson(availObj) {
+  const set = new Set();
+  if (!availObj || typeof availObj !== 'object') return set;
+  for (let dow = 0; dow < 7; dow++) {
+    const day = getDayBlockFromAvailabilityJson(availObj, dow);
+    if (!day || typeof day !== 'object') continue;
+    if (day.available === false) continue;
+    const times = Array.isArray(day.time_slots)
+      ? day.time_slots
+      : Array.isArray(day.timeSlots)
+        ? day.timeSlots
+        : [];
+    let anyValid = false;
+    for (const t of times) {
+      if (normalizeTimeToHHmm(t)) {
+        anyValid = true;
+        break;
+      }
+    }
+    if (anyValid) set.add(dow);
+  }
+  return set;
+}
+
+/** Local calendar weekday for YYYY-MM-DD (noon avoids DST midnight edge cases). */
+function localDayOfWeekFromYMD(dateStr) {
+  const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+  return d.getDay();
+}
+
+/**
  * Raw slots for one calendar day: prefer StoreService.availability JSON, else booking_availability rows, else default grid.
  */
 async function resolveRawSlotsForDay({
@@ -1289,8 +1324,7 @@ async function resolveRawSlotsForDay({
   service
 }) {
   const durationMinutes = service.duration_minutes || 30;
-  const d = new Date(dateStr + 'T00:00:00');
-  const dayOfWeek = d.getDay();
+  const dayOfWeek = localDayOfWeekFromYMD(dateStr);
 
   const availJson = normalizeServiceAvailabilityColumn(service.availability);
   if (usesStoreServiceAvailabilityJson(availJson)) {
@@ -1325,13 +1359,16 @@ async function resolveRawSlotsForDay({
  * Query:
  * - tenant_id (required)
  * - service_id (required)
- * - date (optional) — YYYY-MM-DD. If omitted, returns **mode: "range"**: a calendar scan of `days`
- *   from `from`, applying **store_services.availability** (or fallback) per weekday. This is not
- *   a different ruleset — same column as single-day; only the response shape groups by date.
+ * - date (optional) — YYYY-MM-DD. If omitted, returns **mode: "range"**.
  * - subscription_plan (optional)
- * - from (optional, range mode) — start date YYYY-MM-DD; default: today (local)
- * - days (optional, range mode) — number of calendar days to scan; default 14, max 60
- * - include_empty (optional, range mode) — if "true", include dates with zero slots; default false
+ * - from (optional, range mode) — anchor date YYYY-MM-DD to start walking forward; default: today (local)
+ * - days (optional, range mode) — default 14, max 60:
+ *   - If **store_services.availability** JSON is used: **max bookable dates** to return (weekdays that
+ *     exist in JSON with `available !== false` and at least one `time_slot`). Other weekdays are **skipped**
+ *     (they never appear in `dates`). Walks forward day-by-day until enough bookable days are filled or cap.
+ *   - Else (booking_availability / default hours): **calendar window length** in days (unchanged).
+ * - include_empty (optional, range mode) — if "true", include bookable weekdays that are **sold out**
+ *   (zero free slots after bookings); default false
  */
 async function getServiceAvailability(req, res) {
   try {
@@ -1430,9 +1467,18 @@ async function getServiceAvailability(req, res) {
 
     const includeEmpty = String(include_empty || '').toLowerCase() === 'true';
 
-    const toStr = addDaysToYMD(fromStr, numDays - 1);
+    const MAX_CALENDAR_DAYS_STORE_SCAN = 120;
+    const usesStoreJson = usesStoreServiceAvailabilityJson(parsedStoreAvailability);
+
+    let scanEndStr;
+    if (usesStoreJson) {
+      scanEndStr = addDaysToYMD(fromStr, MAX_CALENDAR_DAYS_STORE_SCAN - 1);
+    } else {
+      scanEndStr = addDaysToYMD(fromStr, numDays - 1);
+    }
+
     const rangeStart = new Date(fromStr + 'T00:00:00');
-    const rangeEnd = new Date(toStr + 'T23:59:59.999');
+    const rangeEnd = new Date(scanEndStr + 'T23:59:59.999');
 
     const rangeBookingWhere = {
       service_id: serviceId,
@@ -1458,8 +1504,98 @@ async function getServiceAvailability(req, res) {
     let totalSlots = 0;
     const sourcesSeen = new Set();
 
+    if (usesStoreJson) {
+      const bookableDowSet = getBookableWeekdayIndicesFromStoreJson(parsedStoreAvailability);
+      let currentDate = fromStr;
+      let calendarSteps = 0;
+      let bookableDatesCollected = 0;
+
+      while (bookableDatesCollected < numDays && calendarSteps < MAX_CALENDAR_DAYS_STORE_SCAN) {
+        const dow = localDayOfWeekFromYMD(currentDate);
+
+        if (!bookableDowSet.has(dow)) {
+          currentDate = addDaysToYMD(currentDate, 1);
+          calendarSteps++;
+          continue;
+        }
+
+        const { slots, source } = await resolveRawSlotsForDay({
+          models,
+          tenantId,
+          serviceId,
+          subscriptionPlan,
+          dateStr: currentDate,
+          service
+        });
+        sourcesSeen.add(source);
+
+        const dayBookings = bookingsByDate.get(currentDate) || [];
+        const available = filterSlotsByBookings(slots, dayBookings, durationMinutes);
+
+        const slotPayload = available.map(s => ({
+          date: currentDate,
+          weekday: AVAILABILITY_DAY_NAMES[dow],
+          start: s.start,
+          end: s.end,
+          slot: s.slot,
+          label: s.label
+        }));
+
+        const soldOutBookableDay = slots.length > 0 && slotPayload.length === 0;
+        const shouldEmit =
+          slotPayload.length > 0 || (includeEmpty && soldOutBookableDay);
+
+        if (shouldEmit) {
+          totalSlots += slotPayload.length;
+          datesOut.push({
+            date: currentDate,
+            weekday: AVAILABILITY_DAY_NAMES[dow],
+            slots: slotPayload
+          });
+          bookableDatesCollected++;
+        }
+
+        currentDate = addDaysToYMD(currentDate, 1);
+        calendarSteps++;
+      }
+
+      const availability_source =
+        sourcesSeen.size === 1 ? [...sourcesSeen][0] : 'mixed';
+
+      const bookableWeekdayNames = [...bookableDowSet]
+        .sort((a, b) => a - b)
+        .map((i) => AVAILABILITY_DAY_NAMES[i]);
+
+      const firstReturned = datesOut[0]?.date || null;
+      const lastReturned = datesOut.length ? datesOut[datesOut.length - 1].date : null;
+
+      return res.json({
+        success: true,
+        mode: 'range',
+        range_style: 'bookable_dates_from_store_json',
+        service_id: serviceId,
+        service_title: service.service_title,
+        duration_minutes: durationMinutes,
+        store_service_availability: parsedStoreAvailability,
+        bookable_weekdays: bookableWeekdayNames,
+        scan_anchor: fromStr,
+        calendar_days_scanned: calendarSteps,
+        from: firstReturned,
+        to: lastReturned,
+        days: numDays,
+        dates_returned: datesOut.length,
+        total_slots: totalSlots,
+        availability_source,
+        dates: datesOut
+      });
+    }
+
+    // ── Range without store JSON: fixed calendar window (original behaviour) ──
+    const toStr = addDaysToYMD(fromStr, numDays - 1);
+
     for (let i = 0; i < numDays; i++) {
       const dateStr = addDaysToYMD(fromStr, i);
+      const dow = localDayOfWeekFromYMD(dateStr);
 
       const { slots, source } = await resolveRawSlotsForDay({
         models,
@@ -1476,6 +1612,7 @@ async function getServiceAvailability(req, res) {
 
       const slotPayload = available.map(s => ({
         date: dateStr,
+        weekday: AVAILABILITY_DAY_NAMES[dow],
         start: s.start,
         end: s.end,
         slot: s.slot,
@@ -1487,6 +1624,7 @@ async function getServiceAvailability(req, res) {
       if (includeEmpty || slotPayload.length > 0) {
         datesOut.push({
           date: dateStr,
+          weekday: AVAILABILITY_DAY_NAMES[dow],
           slots: slotPayload
         });
       }
@@ -1497,9 +1635,8 @@ async function getServiceAvailability(req, res) {
 
     return res.json({
       success: true,
-      // "range" = multi-day calendar (omit `date` query). Slots per day still come from
-      // store_services.availability (weekday → time_slots) when availability_source is store_service_json.
       mode: 'range',
+      range_style: 'calendar_window',
       service_id: serviceId,
       service_title: service.service_title,
       duration_minutes: durationMinutes,
