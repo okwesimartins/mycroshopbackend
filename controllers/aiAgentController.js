@@ -1105,9 +1105,106 @@ async function listServices(req, res) {
 }
 
 /**
- * Get available time slots for a service on a given date.
+ * Helpers for service availability (single day + range).
+ */
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function addDaysToYMD(dateStr, deltaDays) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + deltaDays);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function todayYMDLocal() {
+  const dt = new Date();
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function bookingDateKey(scheduledAt) {
+  const at = new Date(scheduledAt);
+  const yy = at.getFullYear();
+  const mm = String(at.getMonth() + 1).padStart(2, '0');
+  const dd = String(at.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function buildRawSlotsFromAvailability(availRows, durationMinutes) {
+  const slots = [];
+  const pad = pad2;
+  if (!availRows.length) {
+    const start = 9 * 60;
+    const end = 17 * 60;
+    for (let t = start; t + durationMinutes <= end; t += 30) {
+      const h = Math.floor(t / 60);
+      const m = t % 60;
+      slots.push({
+        start: `${pad(h)}:${pad(m)}:00`,
+        end: `${pad(Math.floor((t + durationMinutes) / 60))}:${pad((t + durationMinutes) % 60)}:00`,
+        slot: `${pad(h)}:${pad(m)}`,
+        label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`
+      });
+    }
+    return slots;
+  }
+  for (const row of availRows) {
+    const startStr = row.start_time;
+    const endStr = row.end_time;
+    const [sh, sm] = (typeof startStr === 'string' ? startStr : '').split(':').map(Number);
+    const [eh, em] = (typeof endStr === 'string' ? endStr : '').split(':').map(Number);
+    const startMins = (sh || 0) * 60 + (sm || 0);
+    const endMins = (eh || 0) * 60 + (em || 0);
+    for (let t = startMins; t + durationMinutes <= endMins; t += 30) {
+      const h = Math.floor(t / 60);
+      const m = t % 60;
+      slots.push({
+        start: `${pad(h)}:${pad(m)}:00`,
+        end: `${pad(Math.floor((t + durationMinutes) / 60))}:${pad((t + durationMinutes) % 60)}:00`,
+        slot: `${pad(h)}:${pad(m)}`,
+        label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`
+      });
+    }
+  }
+  return slots;
+}
+
+function filterSlotsByBookings(slots, existingBookings, durationMinutes) {
+  const bookedRanges = existingBookings.map(b => {
+    const at = new Date(b.scheduled_at);
+    const dur = b.duration_minutes || 30;
+    const start = at.getHours() * 60 + at.getMinutes();
+    const end = start + dur;
+    return [start, end];
+  });
+  return slots.filter(s => {
+    const [sh, sm] = s.start.split(':').map(Number);
+    const slotStart = sh * 60 + sm;
+    const slotEnd = slotStart + durationMinutes;
+    return !bookedRanges.some(([bStart, bEnd]) => slotStart < bEnd && slotEnd > bStart);
+  });
+}
+
+/**
+ * Get available time slots for a service.
  * Uses BookingAvailability (day_of_week, start_time, end_time) and existing Bookings to compute free slots.
- * GET /api/v1/ai-agent/service-availability?tenant_id=…&service_id=…&date=YYYY-MM-DD&subscription_plan=…
+ *
+ * GET /api/v1/ai-agent/service-availability
+ *
+ * Query:
+ * - tenant_id (required)
+ * - service_id (required)
+ * - date (optional) — YYYY-MM-DD. If omitted, returns availability across a date range.
+ * - subscription_plan (optional)
+ * - from (optional, range mode) — start date YYYY-MM-DD; default: today (local)
+ * - days (optional, range mode) — number of calendar days to scan; default 14, max 60
+ * - include_empty (optional, range mode) — if "true", include dates with zero slots; default false
  */
 async function getServiceAvailability(req, res) {
   try {
@@ -1116,11 +1213,11 @@ async function getServiceAvailability(req, res) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
-    const { tenant_id, service_id, date, subscription_plan } = req.query;
-    if (!tenant_id || !service_id || !date) {
+    const { tenant_id, service_id, date, subscription_plan, from, days, include_empty } = req.query;
+    if (!tenant_id || !service_id) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id, service_id and date (YYYY-MM-DD) are required'
+        message: 'tenant_id and service_id are required'
       });
     }
 
@@ -1130,15 +1227,11 @@ async function getServiceAvailability(req, res) {
       return res.status(400).json({ success: false, message: 'Invalid tenant_id or service_id' });
     }
 
-    const dateStr = String(date).trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return res.status(400).json({ success: false, message: 'date must be YYYY-MM-DD' });
-    }
-
     const subscriptionPlan = subscription_plan || 'enterprise';
     const { getTenantConnection } = require('../config/database');
     const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
     const models = require('../models')(sequelize);
+    const { Op } = require('sequelize');
 
     const service = await models.StoreService.findOne({
       where: subscriptionPlan === 'free' ? { id: serviceId, tenant_id: tenantId } : { id: serviceId },
@@ -1148,98 +1241,148 @@ async function getServiceAvailability(req, res) {
       return res.status(404).json({ success: false, message: 'Service not found' });
     }
 
-    const d = new Date(dateStr + 'T00:00:00');
-    const dayOfWeek = d.getDay();
     const durationMinutes = service.duration_minutes || 30;
 
-    const { Op } = require('sequelize');
-    const availWhere = {
-      service_id: serviceId,
-      day_of_week: dayOfWeek,
-      is_available: true
-    };
-    if (subscriptionPlan === 'free') {
-      availWhere.tenant_id = tenantId;
-    }
-    const availRows = await models.BookingAvailability.findAll({
-      where: availWhere,
-      attributes: ['start_time', 'end_time']
-    });
-
-    const slots = [];
-    const pad = (n) => String(n).padStart(2, '0');
-
-    if (availRows.length === 0) {
-      // No availability config: default 09:00–17:00, 30-min slots
-      const start = 9 * 60;
-      const end = 17 * 60;
-      for (let t = start; t + durationMinutes <= end; t += 30) {
-        const h = Math.floor(t / 60);
-        const m = t % 60;
-        slots.push({
-          start: `${pad(h)}:${pad(m)}:00`,
-          end: `${pad(Math.floor((t + durationMinutes) / 60))}:${pad((t + durationMinutes) % 60)}:00`,
-          slot: `${pad(h)}:${pad(m)}`,
-          label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`
-        });
+    // ── Single date (date provided) ─────────────────────────────────────────
+    if (date != null && String(date).trim() !== '') {
+      const dateStr = String(date).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        return res.status(400).json({ success: false, message: 'date must be YYYY-MM-DD' });
       }
-    } else {
-      for (const row of availRows) {
-        const startStr = row.start_time;
-        const endStr = row.end_time;
-        const [sh, sm] = (typeof startStr === 'string' ? startStr : '').split(':').map(Number);
-        const [eh, em] = (typeof endStr === 'string' ? endStr : '').split(':').map(Number);
-        const startMins = (sh || 0) * 60 + (sm || 0);
-        const endMins = (eh || 0) * 60 + (em || 0);
-        for (let t = startMins; t + durationMinutes <= endMins; t += 30) {
-          const h = Math.floor(t / 60);
-          const m = t % 60;
-          slots.push({
-            start: `${pad(h)}:${pad(m)}:00`,
-            end: `${pad(Math.floor((t + durationMinutes) / 60))}:${pad((t + durationMinutes) % 60)}:00`,
-            slot: `${pad(h)}:${pad(m)}`,
-            label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`
-          });
-        }
+
+      const d = new Date(dateStr + 'T00:00:00');
+      const dayOfWeek = d.getDay();
+
+      const availWhere = {
+        service_id: serviceId,
+        day_of_week: dayOfWeek,
+        is_available: true
+      };
+      if (subscriptionPlan === 'free') {
+        availWhere.tenant_id = tenantId;
       }
+      const availRows = await models.BookingAvailability.findAll({
+        where: availWhere,
+        attributes: ['start_time', 'end_time']
+      });
+
+      const slots = buildRawSlotsFromAvailability(availRows, durationMinutes);
+
+      const dayStart = new Date(dateStr + 'T00:00:00').getTime();
+      const dayEnd = new Date(dateStr + 'T23:59:59').getTime();
+
+      const bookingWhere = {
+        service_id: serviceId,
+        status: { [Op.notIn]: ['cancelled'] },
+        scheduled_at: { [Op.gte]: new Date(dayStart), [Op.lte]: new Date(dayEnd) }
+      };
+      if (subscriptionPlan === 'free') {
+        bookingWhere.tenant_id = tenantId;
+      }
+      const existingBookings = await models.Booking.findAll({
+        where: bookingWhere,
+        attributes: ['scheduled_at', 'duration_minutes']
+      });
+
+      const available = filterSlotsByBookings(slots, existingBookings, durationMinutes);
+
+      return res.json({
+        success: true,
+        mode: 'single',
+        date: dateStr,
+        service_id: serviceId,
+        slots: available.map(s => ({ start: s.start, end: s.end, slot: s.slot, label: s.label }))
+      });
     }
 
-    const dayStart = new Date(dateStr + 'T00:00:00').getTime();
-    const dayEnd = new Date(dateStr + 'T23:59:59').getTime();
+    // ── Range: no date — return availability per day with date + time slots ──
+    let fromStr = (from && String(from).trim()) || todayYMDLocal();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromStr)) {
+      return res.status(400).json({ success: false, message: 'from must be YYYY-MM-DD' });
+    }
 
-    const bookingWhere = {
+    let numDays = parseInt(days, 10);
+    if (Number.isNaN(numDays) || numDays < 1) numDays = 14;
+    numDays = Math.min(numDays, 60);
+
+    const includeEmpty = String(include_empty || '').toLowerCase() === 'true';
+
+    const toStr = addDaysToYMD(fromStr, numDays - 1);
+    const rangeStart = new Date(fromStr + 'T00:00:00');
+    const rangeEnd = new Date(toStr + 'T23:59:59.999');
+
+    const rangeBookingWhere = {
       service_id: serviceId,
       status: { [Op.notIn]: ['cancelled'] },
-      scheduled_at: { [Op.gte]: new Date(dayStart), [Op.lte]: new Date(dayEnd) }
+      scheduled_at: { [Op.between]: [rangeStart, rangeEnd] }
     };
     if (subscriptionPlan === 'free') {
-      bookingWhere.tenant_id = tenantId;
+      rangeBookingWhere.tenant_id = tenantId;
     }
-    const existingBookings = await models.Booking.findAll({
-      where: bookingWhere,
+    const rangeBookings = await models.Booking.findAll({
+      where: rangeBookingWhere,
       attributes: ['scheduled_at', 'duration_minutes']
     });
 
-    const bookedRanges = existingBookings.map(b => {
-      const at = new Date(b.scheduled_at);
-      const dur = b.duration_minutes || 30;
-      const start = at.getHours() * 60 + at.getMinutes();
-      const end = start + dur;
-      return [start, end];
-    });
+    const bookingsByDate = new Map();
+    for (const b of rangeBookings) {
+      const key = bookingDateKey(b.scheduled_at);
+      if (!bookingsByDate.has(key)) bookingsByDate.set(key, []);
+      bookingsByDate.get(key).push(b);
+    }
 
-    const available = slots.filter(s => {
-      const [sh, sm] = s.start.split(':').map(Number);
-      const slotStart = sh * 60 + sm;
-      const slotEnd = slotStart + durationMinutes;
-      return !bookedRanges.some(([bStart, bEnd]) => slotStart < bEnd && slotEnd > bStart);
-    });
+    const datesOut = [];
+    let totalSlots = 0;
 
-    res.json({
+    for (let i = 0; i < numDays; i++) {
+      const dateStr = addDaysToYMD(fromStr, i);
+      const d = new Date(dateStr + 'T00:00:00');
+      const dayOfWeek = d.getDay();
+
+      const availWhere = {
+        service_id: serviceId,
+        day_of_week: dayOfWeek,
+        is_available: true
+      };
+      if (subscriptionPlan === 'free') {
+        availWhere.tenant_id = tenantId;
+      }
+      const availRows = await models.BookingAvailability.findAll({
+        where: availWhere,
+        attributes: ['start_time', 'end_time']
+      });
+
+      const slots = buildRawSlotsFromAvailability(availRows, durationMinutes);
+      const dayBookings = bookingsByDate.get(dateStr) || [];
+      const available = filterSlotsByBookings(slots, dayBookings, durationMinutes);
+
+      const slotPayload = available.map(s => ({
+        date: dateStr,
+        start: s.start,
+        end: s.end,
+        slot: s.slot,
+        label: s.label
+      }));
+
+      totalSlots += slotPayload.length;
+
+      if (includeEmpty || slotPayload.length > 0) {
+        datesOut.push({
+          date: dateStr,
+          slots: slotPayload
+        });
+      }
+    }
+
+    return res.json({
       success: true,
-      date: dateStr,
+      mode: 'range',
       service_id: serviceId,
-      slots: available.map(s => ({ start: s.start, end: s.end, slot: s.slot, label: s.label }))
+      from: fromStr,
+      to: toStr,
+      days: numDays,
+      total_slots: totalSlots,
+      dates: datesOut
     });
   } catch (error) {
     console.error('getServiceAvailability error:', error);
