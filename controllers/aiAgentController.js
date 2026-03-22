@@ -1191,6 +1191,131 @@ function filterSlotsByBookings(slots, existingBookings, durationMinutes) {
   });
 }
 
+/** JS Date.getDay(): 0=Sun … 6=Sat — matches StoreService.availability JSON keys */
+const AVAILABILITY_DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+function normalizeServiceAvailabilityColumn(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (!t) return null;
+    try {
+      return JSON.parse(t);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof raw === 'object') return raw;
+  return null;
+}
+
+/** True if object looks like { monday: { available, time_slots }, ... } */
+function usesStoreServiceAvailabilityJson(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  return AVAILABILITY_DAY_NAMES.some((k) => Object.prototype.hasOwnProperty.call(obj, k));
+}
+
+function getDayBlockFromAvailabilityJson(availObj, dayOfWeek) {
+  const want = AVAILABILITY_DAY_NAMES[dayOfWeek];
+  if (availObj[want] != null) return availObj[want];
+  const found = Object.keys(availObj).find((k) => k.toLowerCase() === want);
+  return found ? availObj[found] : null;
+}
+
+function normalizeTimeToHHmm(timeStr) {
+  const s = String(timeStr).trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const hh = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+  const mm = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+  return `${pad2(hh)}:${pad2(mm)}`;
+}
+
+function slotFromStartHHmm(hhmm, durationMinutes) {
+  const pad = pad2;
+  const [sh, sm] = hhmm.split(':').map(Number);
+  const startMins = sh * 60 + sm;
+  const endMins = startMins + durationMinutes;
+  const h = Math.floor(startMins / 60);
+  const m = startMins % 60;
+  const eh = Math.floor(endMins / 60);
+  const em = endMins % 60;
+  const hour12 = (hr) => {
+    if (hr === 0) return 12;
+    if (hr > 12) return hr - 12;
+    return hr;
+  };
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return {
+    start: `${pad(h)}:${pad(m)}:00`,
+    end: `${pad(eh)}:${pad(em)}:00`,
+    slot: `${pad(h)}:${pad(m)}`,
+    label: `${hour12(h)}:${pad(m)} ${ampm}`
+  };
+}
+
+/**
+ * Slots from store_services.availability JSON (explicit time_slots per weekday).
+ */
+function buildSlotsFromStoreServiceJson(availObj, dayOfWeek, durationMinutes) {
+  const day = getDayBlockFromAvailabilityJson(availObj, dayOfWeek);
+  if (!day || typeof day !== 'object') return [];
+  if (day.available === false) return [];
+  const times = Array.isArray(day.time_slots)
+    ? day.time_slots
+    : Array.isArray(day.timeSlots)
+      ? day.timeSlots
+      : [];
+  const seen = new Set();
+  const slots = [];
+  for (const t of times) {
+    const hhmm = normalizeTimeToHHmm(t);
+    if (!hhmm || seen.has(hhmm)) continue;
+    seen.add(hhmm);
+    slots.push(slotFromStartHHmm(hhmm, durationMinutes));
+  }
+  return slots;
+}
+
+/**
+ * Raw slots for one calendar day: prefer StoreService.availability JSON, else booking_availability rows, else default grid.
+ */
+async function resolveRawSlotsForDay({
+  models,
+  tenantId,
+  serviceId,
+  subscriptionPlan,
+  dateStr,
+  service
+}) {
+  const durationMinutes = service.duration_minutes || 30;
+  const d = new Date(dateStr + 'T00:00:00');
+  const dayOfWeek = d.getDay();
+
+  const availJson = normalizeServiceAvailabilityColumn(service.availability);
+  if (usesStoreServiceAvailabilityJson(availJson)) {
+    const slots = buildSlotsFromStoreServiceJson(availJson, dayOfWeek, durationMinutes);
+    return { slots, source: 'store_service_json' };
+  }
+
+  const availWhere = {
+    service_id: serviceId,
+    day_of_week: dayOfWeek,
+    is_available: true
+  };
+  if (subscriptionPlan === 'free') {
+    availWhere.tenant_id = tenantId;
+  }
+  const availRows = await models.BookingAvailability.findAll({
+    where: availWhere,
+    attributes: ['start_time', 'end_time']
+  });
+
+  const slots = buildRawSlotsFromAvailability(availRows, durationMinutes);
+  const source = availRows.length ? 'booking_availability' : 'default_hours';
+  return { slots, source };
+}
+
 /**
  * Get available time slots for a service.
  * Uses BookingAvailability (day_of_week, start_time, end_time) and existing Bookings to compute free slots.
@@ -1235,7 +1360,7 @@ async function getServiceAvailability(req, res) {
 
     const service = await models.StoreService.findOne({
       where: subscriptionPlan === 'free' ? { id: serviceId, tenant_id: tenantId } : { id: serviceId },
-      attributes: ['id', 'duration_minutes']
+      attributes: ['id', 'duration_minutes', 'availability']
     });
     if (!service) {
       return res.status(404).json({ success: false, message: 'Service not found' });
@@ -1250,23 +1375,14 @@ async function getServiceAvailability(req, res) {
         return res.status(400).json({ success: false, message: 'date must be YYYY-MM-DD' });
       }
 
-      const d = new Date(dateStr + 'T00:00:00');
-      const dayOfWeek = d.getDay();
-
-      const availWhere = {
-        service_id: serviceId,
-        day_of_week: dayOfWeek,
-        is_available: true
-      };
-      if (subscriptionPlan === 'free') {
-        availWhere.tenant_id = tenantId;
-      }
-      const availRows = await models.BookingAvailability.findAll({
-        where: availWhere,
-        attributes: ['start_time', 'end_time']
+      const { slots, source: availability_source } = await resolveRawSlotsForDay({
+        models,
+        tenantId,
+        serviceId,
+        subscriptionPlan,
+        dateStr,
+        service
       });
-
-      const slots = buildRawSlotsFromAvailability(availRows, durationMinutes);
 
       const dayStart = new Date(dateStr + 'T00:00:00').getTime();
       const dayEnd = new Date(dateStr + 'T23:59:59').getTime();
@@ -1291,6 +1407,7 @@ async function getServiceAvailability(req, res) {
         mode: 'single',
         date: dateStr,
         service_id: serviceId,
+        availability_source,
         slots: available.map(s => ({ start: s.start, end: s.end, slot: s.slot, label: s.label }))
       });
     }
@@ -1333,26 +1450,21 @@ async function getServiceAvailability(req, res) {
 
     const datesOut = [];
     let totalSlots = 0;
+    const sourcesSeen = new Set();
 
     for (let i = 0; i < numDays; i++) {
       const dateStr = addDaysToYMD(fromStr, i);
-      const d = new Date(dateStr + 'T00:00:00');
-      const dayOfWeek = d.getDay();
 
-      const availWhere = {
-        service_id: serviceId,
-        day_of_week: dayOfWeek,
-        is_available: true
-      };
-      if (subscriptionPlan === 'free') {
-        availWhere.tenant_id = tenantId;
-      }
-      const availRows = await models.BookingAvailability.findAll({
-        where: availWhere,
-        attributes: ['start_time', 'end_time']
+      const { slots, source } = await resolveRawSlotsForDay({
+        models,
+        tenantId,
+        serviceId,
+        subscriptionPlan,
+        dateStr,
+        service
       });
+      sourcesSeen.add(source);
 
-      const slots = buildRawSlotsFromAvailability(availRows, durationMinutes);
       const dayBookings = bookingsByDate.get(dateStr) || [];
       const available = filterSlotsByBookings(slots, dayBookings, durationMinutes);
 
@@ -1374,6 +1486,9 @@ async function getServiceAvailability(req, res) {
       }
     }
 
+    const availability_source =
+      sourcesSeen.size === 1 ? [...sourcesSeen][0] : 'mixed';
+
     return res.json({
       success: true,
       mode: 'range',
@@ -1382,6 +1497,7 @@ async function getServiceAvailability(req, res) {
       to: toStr,
       days: numDays,
       total_slots: totalSlots,
+      availability_source,
       dates: datesOut
     });
   } catch (error) {
