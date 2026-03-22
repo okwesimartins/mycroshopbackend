@@ -1325,7 +1325,9 @@ async function resolveRawSlotsForDay({
  * Query:
  * - tenant_id (required)
  * - service_id (required)
- * - date (optional) — YYYY-MM-DD. If omitted, returns availability across a date range.
+ * - date (optional) — YYYY-MM-DD. If omitted, returns **mode: "range"**: a calendar scan of `days`
+ *   from `from`, applying **store_services.availability** (or fallback) per weekday. This is not
+ *   a different ruleset — same column as single-day; only the response shape groups by date.
  * - subscription_plan (optional)
  * - from (optional, range mode) — start date YYYY-MM-DD; default: today (local)
  * - days (optional, range mode) — number of calendar days to scan; default 14, max 60
@@ -1360,13 +1362,14 @@ async function getServiceAvailability(req, res) {
 
     const service = await models.StoreService.findOne({
       where: subscriptionPlan === 'free' ? { id: serviceId, tenant_id: tenantId } : { id: serviceId },
-      attributes: ['id', 'duration_minutes', 'availability']
+      attributes: ['id', 'service_title', 'duration_minutes', 'availability']
     });
     if (!service) {
       return res.status(404).json({ success: false, message: 'Service not found' });
     }
 
     const durationMinutes = service.duration_minutes || 30;
+    const parsedStoreAvailability = normalizeServiceAvailabilityColumn(service.availability);
 
     // ── Single date (date provided) ─────────────────────────────────────────
     if (date != null && String(date).trim() !== '') {
@@ -1407,6 +1410,9 @@ async function getServiceAvailability(req, res) {
         mode: 'single',
         date: dateStr,
         service_id: serviceId,
+        service_title: service.service_title,
+        duration_minutes: durationMinutes,
+        store_service_availability: parsedStoreAvailability,
         availability_source,
         slots: available.map(s => ({ start: s.start, end: s.end, slot: s.slot, label: s.label }))
       });
@@ -1491,8 +1497,13 @@ async function getServiceAvailability(req, res) {
 
     return res.json({
       success: true,
+      // "range" = multi-day calendar (omit `date` query). Slots per day still come from
+      // store_services.availability (weekday → time_slots) when availability_source is store_service_json.
       mode: 'range',
       service_id: serviceId,
+      service_title: service.service_title,
+      duration_minutes: durationMinutes,
+      store_service_availability: parsedStoreAvailability,
       from: fromStr,
       to: toStr,
       days: numDays,
