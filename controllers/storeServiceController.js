@@ -51,6 +51,39 @@ function normalizeServicesData(services) {
   return services.map(service => normalizeServiceData(service));
 }
 
+function validateAvailabilityConfig(availability) {
+  if (availability == null) return null;
+  if (typeof availability !== 'object' || Array.isArray(availability)) {
+    return 'availability must be an object';
+  }
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  for (const day of days) {
+    const block = availability[day];
+    if (block == null) continue;
+    if (typeof block !== 'object' || Array.isArray(block)) {
+      return `${day} must be an object`;
+    }
+    if (block.available != null && typeof block.available !== 'boolean') {
+      return `${day}.available must be boolean`;
+    }
+    const slots = block.time_slots ?? block.timeSlots;
+    if (slots != null) {
+      if (!Array.isArray(slots)) return `${day}.time_slots must be an array`;
+      for (const s of slots) {
+        if (!/^\d{1,2}:\d{2}$/.test(String(s || '').trim())) {
+          return `${day}.time_slots contains invalid time "${s}" (expected HH:mm)`;
+        }
+      }
+    }
+    const capacity = block.max_bookings_per_slot ?? block.slot_capacity ?? block.staff_count;
+    if (capacity != null) {
+      const n = parseInt(capacity, 10);
+      if (Number.isNaN(n) || n < 1) return `${day} capacity must be >= 1`;
+    }
+  }
+  return null;
+}
+
 /**
  * Get all store services (for a specific store or all stores)
  * Includes services from physical stores and services linked to online stores
@@ -271,6 +304,11 @@ async function createStoreService(req, res) {
         // Already an object (from raw JSON)
         parsedAvailability = availability;
       }
+    }
+    const availabilityErr = validateAvailabilityConfig(parsedAvailability);
+    if (availabilityErr) {
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: availabilityErr });
     }
 
     // Verify store exists
@@ -538,6 +576,10 @@ async function updateStoreService(req, res) {
     } else if (availability === null || availability === '') {
       // Explicitly set to null
       parsedAvailability = null;
+    }
+    const availabilityErr = validateAvailabilityConfig(parsedAvailability);
+    if (availabilityErr) {
+      return res.status(400).json({ success: false, message: availabilityErr });
     }
 
     // Handle smart sort_order rearrangement if sort_order is being updated
@@ -1029,6 +1071,10 @@ async function createOnlineStoreService(req, res) {
           // Already an object (from raw JSON)
           parsedAvailability = availability;
         }
+      }
+      const availabilityErr = validateAvailabilityConfig(parsedAvailability);
+      if (availabilityErr) {
+        return res.status(400).json({ success: false, message: availabilityErr });
       }
 
     if (!service_title) {

@@ -1,6 +1,14 @@
 const { Sequelize } = require('sequelize');
 const moment = require('moment');
 
+function countOverlaps(existingBookings, slotStart, slotEnd) {
+  return existingBookings.filter((booking) => {
+    const bookingStart = moment(booking.scheduled_at);
+    const bookingEnd = moment(booking.scheduled_at).add(booking.duration_minutes || 60, 'minutes');
+    return slotStart.isBefore(bookingEnd) && slotEnd.isAfter(bookingStart);
+  }).length;
+}
+
 /**
  * Get all bookings (store-specific or all stores)
  */
@@ -165,13 +173,14 @@ async function createBooking(req, res) {
     const startTime = moment(scheduled_at);
     const endTime = moment(scheduled_at).add(duration, 'minutes');
 
-    // Check for overlapping bookings
-    const conflictingBooking = await req.db.models.Booking.findOne({
+    // Capacity-aware overlap check:
+    // allow up to max_bookings_per_slot concurrent bookings for the same service/time window.
+    const existingBookings = await req.db.models.Booking.findAll({
       where: {
         store_id,
         service_id,
         scheduled_at: {
-          [Sequelize.Op.between]: [startTime.toDate(), endTime.toDate()]
+          [Sequelize.Op.between]: [startTime.clone().subtract(duration, 'minutes').toDate(), endTime.toDate()]
         },
         status: {
           [Sequelize.Op.in]: ['pending', 'confirmed']
@@ -179,10 +188,21 @@ async function createBooking(req, res) {
       }
     });
 
-    if (conflictingBooking) {
+    const dayOfWeek = startTime.day();
+    const slotAvailability = await req.db.models.BookingAvailability.findOne({
+      where: {
+        store_id,
+        service_id,
+        day_of_week: dayOfWeek,
+        is_available: true
+      }
+    });
+    const capacity = Math.max(1, parseInt(slotAvailability?.max_bookings_per_slot, 10) || 1);
+    const overlapCount = countOverlaps(existingBookings, startTime, endTime);
+    if (overlapCount >= capacity) {
       return res.status(409).json({
         success: false,
-        message: 'Time slot already booked'
+        message: 'Time slot has reached capacity'
       });
     }
 
@@ -558,18 +578,15 @@ async function getAvailableTimeSlots(req, res) {
         const slotStart = moment(currentSlot).subtract(duration, 'minutes');
         const slotEnd = moment(currentSlot);
 
-        // Check if this slot conflicts with existing bookings
-        const hasConflict = existingBookings.some(booking => {
-          const bookingStart = moment(booking.scheduled_at);
-          const bookingEnd = moment(booking.scheduled_at).add(booking.duration_minutes, 'minutes');
-          return (slotStart.isBefore(bookingEnd) && slotEnd.isAfter(bookingStart));
-        });
-
-        if (!hasConflict) {
+        // Capacity-aware availability: slot remains available until capacity is reached.
+        const capacity = Math.max(1, parseInt(avail.max_bookings_per_slot, 10) || 1);
+        const overlapCount = countOverlaps(existingBookings, slotStart, slotEnd);
+        if (overlapCount < capacity) {
           availableSlots.push({
             start_time: slotStart.format('YYYY-MM-DD HH:mm:ss'),
             end_time: slotEnd.format('YYYY-MM-DD HH:mm:ss'),
-            duration_minutes: duration
+            duration_minutes: duration,
+            remaining_capacity: capacity - overlapCount
           });
         }
       }
