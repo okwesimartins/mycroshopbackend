@@ -24,6 +24,10 @@ router.get('/orders/pending-by-phone', aiAgentController.getPendingOrderByCustom
 router.post('/orders/pending-by-phone', aiAgentController.getPendingOrderByCustomerPhone);
 router.post('/attach-order-receipt', aiAgentController.attachOrderReceipt);
 router.post('/confirm-order-payment', aiAgentController.confirmOrderPayment);
+router.post('/attach-booking-receipt', aiAgentController.attachBookingReceipt);
+router.post('/confirm-booking-payment', aiAgentController.confirmBookingPayment);
+router.post('/initialize-payment-link', aiAgentController.initializeAIPaymentLink);
+router.post('/refund-request', aiAgentController.submitRefundRequest);
 // Booking (list services, availability, create booking)
 router.get('/list-services', aiAgentController.listServices);
 router.get('/service-availability', aiAgentController.getServiceAvailability);

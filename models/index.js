@@ -1047,6 +1047,28 @@ function initializeModels(sequelize) {
       type: DataTypes.INTEGER,
       allowNull: true,
       comment: 'Links booking to payment when paid via online store'
+    },
+    payment_status: {
+      type: DataTypes.ENUM('unpaid', 'receipt_uploaded', 'approved', 'declined'),
+      allowNull: false,
+      defaultValue: 'unpaid'
+    },
+    payment_receipt_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+      comment: 'URL/path to payment receipt image for booking payments'
+    },
+    payment_receipt_received_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    payment_approved_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    payment_declined_at: {
+      type: DataTypes.DATE,
+      allowNull: true
     }
   }, {
     tableName: 'bookings',
@@ -1110,6 +1132,68 @@ function initializeModels(sequelize) {
     timestamps: true,
     createdAt: 'created_at',
     updatedAt: false
+  });
+
+  // Refund Request Model (AI WhatsApp refund intake)
+  const RefundRequest = sequelize.define('RefundRequest', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Required for free users (shared DB), NULL for enterprise users'
+    },
+    customer_name: {
+      type: DataTypes.STRING(255),
+      allowNull: true
+    },
+    customer_phone: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
+    customer_email: {
+      type: DataTypes.STRING(255),
+      allowNull: true
+    },
+    order_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true
+    },
+    receipt_id: {
+      type: DataTypes.STRING(100),
+      allowNull: true
+    },
+    source_channel: {
+      type: DataTypes.ENUM('whatsapp_ai', 'web', 'other'),
+      allowNull: false,
+      defaultValue: 'whatsapp_ai'
+    },
+    reason: {
+      type: DataTypes.STRING(255),
+      allowNull: false
+    },
+    details: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    verification_status: {
+      type: DataTypes.ENUM('verified', 'unverified'),
+      allowNull: false,
+      defaultValue: 'unverified'
+    },
+    status: {
+      type: DataTypes.ENUM('submitted', 'in_review', 'approved', 'rejected'),
+      allowNull: false,
+      defaultValue: 'submitted'
+    }
+  }, {
+    tableName: 'refund_requests',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
   });
 
   // Store Product Model (for online store product publishing)
@@ -3365,6 +3449,7 @@ function initializeModels(sequelize) {
     StoreService,
     Booking,
     BookingAvailability,
+    RefundRequest,
     StoreProduct,
     CustomerInteraction,
     AIAgentConfig,

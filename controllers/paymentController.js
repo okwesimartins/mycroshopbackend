@@ -2,7 +2,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { decryptSecretKey } = require('./paymentGatewayController');
 const { getTenantById } = require('../config/tenant');
-const { getTenantConnection } = require('../config/database');
+const { getTenantConnection, mainSequelize } = require('../config/database');
 const initModels = require('../models');
 const { Sequelize } = require('sequelize');
 const moment = require('moment');
@@ -65,6 +65,80 @@ function extractPaymentMetadata(paymentTransaction) {
   } catch (e) {
     console.error('Error extracting payment metadata:', e);
     return {};
+  }
+}
+
+async function getWhatsappConnectionForTenant(tenantId) {
+  try {
+    const [rows] = await mainSequelize.query(
+      `SELECT phone_number_id, access_token FROM whatsapp_connections WHERE tenant_id = ? LIMIT 1`,
+      { replacements: [tenantId] }
+    );
+    return rows?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function sendWhatsappText(phoneNumberId, accessToken, to, message) {
+  if (!phoneNumberId || !accessToken || !to || !message) return false;
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to: String(to).replace(/[+\s]/g, ''),
+        type: 'text',
+        text: { body: String(message).slice(0, 4096) },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 15000
+      }
+    );
+    return true;
+  } catch (e) {
+    console.warn('sendWhatsappText failed:', e.message);
+    return false;
+  }
+}
+
+async function notifyWhatsAppPaymentSuccess({ tenantId, metadata, models, transaction, isFreePlan }) {
+  try {
+    const isWhatsApp = metadata?.channel === 'whatsapp' || metadata?.source === 'whatsapp_ai' || metadata?.flow === 'service_booking';
+    const customerPhone = metadata?.customer_phone || null;
+    if (!isWhatsApp || !customerPhone) return;
+    const wa = await getWhatsappConnectionForTenant(tenantId);
+    if (!wa?.phone_number_id || !wa?.access_token) return;
+
+    let msg = `✅ Payment successful.\nReference: ${transaction.transaction_reference}`;
+    const orderId = metadata?.order_id || transaction?.order_id || null;
+    const bookingId = metadata?.booking_id || null;
+    if (orderId) {
+      const where = isFreePlan ? { id: orderId, tenant_id: tenantId } : { id: orderId };
+      const order = await models.OnlineStoreOrder.findOne({
+        where,
+        include: [{ model: models.OnlineStoreOrderItem, required: false }]
+      });
+      if (order) {
+        const items = (order.OnlineStoreOrderItems || []).slice(0, 8).map(i => `• ${i.product_name} x${i.quantity}`).join('\n');
+        msg += `\n\nOrder #${order.order_number || order.id}\n${items || ''}\nTotal: ₦${Number(order.total || 0).toLocaleString()}`;
+      }
+    } else {
+      const bookingWhere = bookingId
+        ? (isFreePlan ? { id: bookingId, tenant_id: tenantId } : { id: bookingId })
+        : { payment_transaction_id: transaction.id, ...(isFreePlan ? { tenant_id: tenantId } : {}) };
+      const booking = await models.Booking.findOne({ where: bookingWhere });
+      if (booking) {
+        msg += `\n\nBooking #${booking.id}\nService: ${booking.service_title}\nWhen: ${booking.scheduled_at}`;
+      }
+    }
+    await sendWhatsappText(wa.phone_number_id, wa.access_token, customerPhone, msg);
+  } catch (e) {
+    console.warn('notifyWhatsAppPaymentSuccess skipped:', e.message);
   }
 }
 
@@ -1546,6 +1620,27 @@ async function verifyPayment(req, res) {
             });
 
             if (!existingBooking) {
+              let reusedExisting = false;
+              // If AI already pre-created a pending booking, confirm that one instead of creating duplicate.
+              if (metadata.booking_id) {
+                const preWhere = isFreePlan && currentTransaction.tenant_id
+                  ? { id: metadata.booking_id, tenant_id: currentTransaction.tenant_id }
+                  : { id: metadata.booking_id };
+                const preBooking = await models.Booking.findOne({ where: preWhere, transaction: dbTransaction });
+                if (preBooking) {
+                  await preBooking.update({
+                    status: 'confirmed',
+                    payment_transaction_id: currentTransaction.id,
+                    payment_status: 'approved',
+                    payment_approved_at: new Date(),
+                    payment_declined_at: null,
+                  }, { transaction: dbTransaction });
+                  bookingCreated = true;
+                  reusedExisting = true;
+                  console.log('✅ Existing pending booking confirmed from payment metadata.booking_id:', preBooking.id);
+                }
+              }
+              if (!reusedExisting) {
               // Create booking automatically after successful payment
               // For free users, store_id can be null
               const bookingData = {
@@ -1562,6 +1657,7 @@ async function verifyPayment(req, res) {
                 staff_name: metadata.staff_name || null,
                 notes: metadata.notes || null,
                 status: 'confirmed', // Auto-confirm since payment is successful
+                payment_status: 'approved',
                 payment_transaction_id: currentTransaction.id
               };
 
@@ -1661,6 +1757,7 @@ async function verifyPayment(req, res) {
                     console.error('Error sending booking confirmation email:', emailError);
                   }
                 }
+              }
               }
             }
           } catch (bookingError) {
@@ -2223,6 +2320,26 @@ async function handlePaymentWebhook(req, res) {
             });
 
             if (!existingBooking) {
+              let reusedExisting = false;
+              // If AI already pre-created a pending booking, confirm that one instead of creating duplicate.
+              if (metadata.booking_id) {
+                const preWhere = isFreePlan && transaction.tenant_id
+                  ? { id: metadata.booking_id, tenant_id: transaction.tenant_id }
+                  : { id: metadata.booking_id };
+                const preBooking = await models.Booking.findOne({ where: preWhere });
+                if (preBooking) {
+                  await preBooking.update({
+                    status: 'confirmed',
+                    payment_transaction_id: transaction.id,
+                    payment_status: 'approved',
+                    payment_approved_at: new Date(),
+                    payment_declined_at: null,
+                  });
+                  reusedExisting = true;
+                  console.log('✅ Existing pending booking confirmed from webhook metadata.booking_id:', preBooking.id);
+                }
+              }
+              if (!reusedExisting) {
               // Create booking automatically after successful payment
               // For free users, store_id can be null
               const bookingData = {
@@ -2239,6 +2356,7 @@ async function handlePaymentWebhook(req, res) {
                 staff_name: metadata.staff_name || null,
                 notes: metadata.notes || null,
                 status: 'confirmed', // Auto-confirm since payment is successful
+                payment_status: 'approved',
                 payment_transaction_id: transaction.id
               };
 
@@ -2322,6 +2440,7 @@ async function handlePaymentWebhook(req, res) {
                   console.error('Error sending booking confirmation email from webhook:', emailError);
                 }
               }
+              }
             }
           }
         } catch (bookingError) {
@@ -2340,6 +2459,15 @@ async function handlePaymentWebhook(req, res) {
           });
         }
       }
+
+      // Smart WhatsApp post-payment notification for AI-originated payments.
+      await notifyWhatsAppPaymentSuccess({
+        tenantId: parsedTenantId,
+        metadata,
+        models,
+        transaction,
+        isFreePlan,
+      });
 
       console.log(`✅ Payment webhook processed: Transaction ${transaction.id} marked as success`);
     } else if (event === 'charge.failed') {

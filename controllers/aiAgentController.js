@@ -25,6 +25,124 @@ function verifyWebhookSignature(payload, signature, secret) {
   );
 }
 
+async function getWhatsappConnectionForTenant(tenantId) {
+  try {
+    let ownerCol = null;
+    const [columns] = await mainSequelize.query('SHOW COLUMNS FROM whatsapp_connections');
+    const availableCols = new Set((columns || []).map(c => c.Field));
+    const ownerCandidates = ['owner_whatsapp_number', 'owner_phone', 'phone', 'owner_number', 'notification_phone'];
+    ownerCol = ownerCandidates.find(c => availableCols.has(c)) || null;
+    const selectOwner = ownerCol ? `, ${ownerCol} AS owner_whatsapp_number` : '';
+    const [rows] = await mainSequelize.query(
+      `SELECT phone_number_id, access_token${selectOwner} FROM whatsapp_connections WHERE tenant_id = ? LIMIT 1`,
+      { replacements: [tenantId] }
+    );
+    return rows?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function sendWhatsAppTextRaw(phoneNumberId, accessToken, to, body) {
+  if (!phoneNumberId || !accessToken || !to || !body) return false;
+  try {
+    const toNum = String(to).replace(/[+\s]/g, '');
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to: toNum,
+        type: 'text',
+        text: { body: String(body).slice(0, 4096) }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+    return true;
+  } catch (e) {
+    console.warn('sendWhatsAppTextRaw failed:', e.message);
+    return false;
+  }
+}
+
+function isValidIsoDateLike(v) {
+  if (!v) return false;
+  const d = new Date(v);
+  return !Number.isNaN(d.getTime());
+}
+
+function validateProductMetadata(md, amountNum) {
+  const errs = [];
+  if (!md.customer_phone || !String(md.customer_phone).trim()) {
+    errs.push('metadata.customer_phone is required');
+  }
+  const items = Array.isArray(md.items) ? md.items : null;
+  if (!items || items.length === 0) {
+    errs.push('metadata.items is required for product payments');
+    return errs;
+  }
+
+  let itemTotal = 0;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i] || {};
+    const prefix = `metadata.items[${i}]`;
+    const qty = Number(it.quantity);
+    const price = Number(it.unit_price);
+    if (!it.product_id || Number.isNaN(Number(it.product_id))) errs.push(`${prefix}.product_id is required`);
+    if (!Number.isFinite(qty) || qty <= 0) errs.push(`${prefix}.quantity must be > 0`);
+    if (!Number.isFinite(price) || price <= 0) errs.push(`${prefix}.unit_price must be > 0`);
+
+    // Optional variant support:
+    // - simple item: no variant_id and no variant_options (valid)
+    // - variant item: variant_id, optionally variant_options
+    // - options-only item: variant_options with no variant_id (still valid for stores without strict variant IDs)
+    if (it.variant_options != null) {
+      if (!Array.isArray(it.variant_options)) {
+        errs.push(`${prefix}.variant_options must be an array when provided`);
+      } else {
+        for (let j = 0; j < it.variant_options.length; j++) {
+          const opt = it.variant_options[j] || {};
+          if (!opt.name || !String(opt.name).trim()) errs.push(`${prefix}.variant_options[${j}].name is required`);
+          if (!opt.value || !String(opt.value).trim()) errs.push(`${prefix}.variant_options[${j}].value is required`);
+        }
+      }
+    }
+    itemTotal += (Number.isFinite(qty) ? qty : 0) * (Number.isFinite(price) ? price : 0);
+  }
+
+  if (md.total != null) {
+    const declaredTotal = Number(md.total);
+    if (!Number.isFinite(declaredTotal) || declaredTotal <= 0) {
+      errs.push('metadata.total must be a positive number when provided');
+    } else {
+      const diff = Math.abs(declaredTotal - amountNum);
+      if (diff > 1) errs.push(`amount (${amountNum}) does not match metadata.total (${declaredTotal})`);
+    }
+  } else {
+    const diff = Math.abs(itemTotal - amountNum);
+    // Allow slight slack for fees/discounts if they exist
+    const hasAdjustments = md.delivery_fee != null || md.discount != null || md.tax != null;
+    if (!hasAdjustments && diff > 1) {
+      errs.push(`amount (${amountNum}) does not match item total (${itemTotal})`);
+    }
+  }
+  return errs;
+}
+
+function validateServiceMetadata(md) {
+  const errs = [];
+  if (!md.service_id || Number.isNaN(Number(md.service_id))) errs.push('metadata.service_id is required');
+  if (!md.scheduled_at || !isValidIsoDateLike(md.scheduled_at)) errs.push('metadata.scheduled_at must be a valid datetime');
+  if (!md.customer_phone || !String(md.customer_phone).trim()) errs.push('metadata.customer_phone is required');
+  if (md.booking_id != null && Number.isNaN(Number(md.booking_id))) errs.push('metadata.booking_id must be numeric when provided');
+  return errs;
+}
+
 /**
  * Handle webhook from Meta/Google Cloud
  * This endpoint receives messages from WhatsApp/Instagram
@@ -1149,7 +1267,8 @@ function buildRawSlotsFromAvailability(availRows, durationMinutes) {
         start: `${pad(h)}:${pad(m)}:00`,
         end: `${pad(Math.floor((t + durationMinutes) / 60))}:${pad((t + durationMinutes) % 60)}:00`,
         slot: `${pad(h)}:${pad(m)}`,
-        label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`
+        label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`,
+        max_bookings_per_slot: 1,
       });
     }
     return slots;
@@ -1161,6 +1280,7 @@ function buildRawSlotsFromAvailability(availRows, durationMinutes) {
     const [eh, em] = (typeof endStr === 'string' ? endStr : '').split(':').map(Number);
     const startMins = (sh || 0) * 60 + (sm || 0);
     const endMins = (eh || 0) * 60 + (em || 0);
+    const capacity = Math.max(1, parseInt(row.max_bookings_per_slot, 10) || 1);
     for (let t = startMins; t + durationMinutes <= endMins; t += 30) {
       const h = Math.floor(t / 60);
       const m = t % 60;
@@ -1168,7 +1288,8 @@ function buildRawSlotsFromAvailability(availRows, durationMinutes) {
         start: `${pad(h)}:${pad(m)}:00`,
         end: `${pad(Math.floor((t + durationMinutes) / 60))}:${pad((t + durationMinutes) % 60)}:00`,
         slot: `${pad(h)}:${pad(m)}`,
-        label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`
+        label: `${h === 0 ? 12 : h > 12 ? h - 12 : h}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`,
+        max_bookings_per_slot: capacity,
       });
     }
   }
@@ -1187,7 +1308,9 @@ function filterSlotsByBookings(slots, existingBookings, durationMinutes) {
     const [sh, sm] = s.start.split(':').map(Number);
     const slotStart = sh * 60 + sm;
     const slotEnd = slotStart + durationMinutes;
-    return !bookedRanges.some(([bStart, bEnd]) => slotStart < bEnd && slotEnd > bStart);
+    const overlapCount = bookedRanges.filter(([bStart, bEnd]) => slotStart < bEnd && slotEnd > bStart).length;
+    const capacity = Math.max(1, parseInt(s.max_bookings_per_slot, 10) || 1);
+    return overlapCount < capacity;
   });
 }
 
@@ -1231,7 +1354,7 @@ function normalizeTimeToHHmm(timeStr) {
   return `${pad2(hh)}:${pad2(mm)}`;
 }
 
-function slotFromStartHHmm(hhmm, durationMinutes) {
+function slotFromStartHHmm(hhmm, durationMinutes, capacity = 1) {
   const pad = pad2;
   const [sh, sm] = hhmm.split(':').map(Number);
   const startMins = sh * 60 + sm;
@@ -1250,7 +1373,8 @@ function slotFromStartHHmm(hhmm, durationMinutes) {
     start: `${pad(h)}:${pad(m)}:00`,
     end: `${pad(eh)}:${pad(em)}:00`,
     slot: `${pad(h)}:${pad(m)}`,
-    label: `${hour12(h)}:${pad(m)} ${ampm}`
+    label: `${hour12(h)}:${pad(m)} ${ampm}`,
+    max_bookings_per_slot: Math.max(1, parseInt(capacity, 10) || 1),
   };
 }
 
@@ -1261,6 +1385,10 @@ function buildSlotsFromStoreServiceJson(availObj, dayOfWeek, durationMinutes) {
   const day = getDayBlockFromAvailabilityJson(availObj, dayOfWeek);
   if (!day || typeof day !== 'object') return [];
   if (day.available === false) return [];
+  const dayCapacity = Math.max(
+    1,
+    parseInt(day.max_bookings_per_slot ?? day.slot_capacity ?? day.staff_count ?? 1, 10) || 1
+  );
   const times = Array.isArray(day.time_slots)
     ? day.time_slots
     : Array.isArray(day.timeSlots)
@@ -1272,7 +1400,7 @@ function buildSlotsFromStoreServiceJson(availObj, dayOfWeek, durationMinutes) {
     const hhmm = normalizeTimeToHHmm(t);
     if (!hhmm || seen.has(hhmm)) continue;
     seen.add(hhmm);
-    slots.push(slotFromStartHHmm(hhmm, durationMinutes));
+    slots.push(slotFromStartHHmm(hhmm, durationMinutes, dayCapacity));
   }
   return slots;
 }
@@ -1342,7 +1470,7 @@ async function resolveRawSlotsForDay({
   }
   const availRows = await models.BookingAvailability.findAll({
     where: availWhere,
-    attributes: ['start_time', 'end_time']
+    attributes: ['start_time', 'end_time', 'max_bookings_per_slot']
   });
 
   const slots = buildRawSlotsFromAvailability(availRows, durationMinutes);
@@ -1661,7 +1789,7 @@ async function getServiceAvailability(req, res) {
 /**
  * Create a booking (for AI agent).
  * POST /api/v1/ai-agent/create-booking
- * Body: { tenant_id, service_id, scheduled_at, customer_name, customer_phone, customer_email?, subscription_plan? }
+ * Body: { tenant_id, service_id, scheduled_at, customer_name, customer_phone, customer_email?, subscription_plan?, notes?, status? }
  * scheduled_at: ISO datetime or "YYYY-MM-DDTHH:mm:ss"
  */
 async function createBooking(req, res) {
@@ -1679,7 +1807,9 @@ async function createBooking(req, res) {
       customer_name,
       customer_phone,
       customer_email,
-      subscription_plan
+      subscription_plan,
+      notes,
+      status
     } = body;
 
     if (!tenant_id || !service_id || !scheduled_at || !customer_name || !customer_phone) {
@@ -1702,7 +1832,7 @@ async function createBooking(req, res) {
 
     const service = await models.StoreService.findOne({
       where: subscriptionPlan === 'free' ? { id: serviceId, tenant_id: tenantId } : { id: serviceId },
-      attributes: ['id', 'service_title', 'description', 'duration_minutes', 'location_type']
+      attributes: ['id', 'store_id', 'service_title', 'description', 'duration_minutes', 'location_type']
     });
     if (!service) {
       return res.status(404).json({ success: false, message: 'Service not found' });
@@ -1712,6 +1842,39 @@ async function createBooking(req, res) {
     if (Number.isNaN(at.getTime())) {
       return res.status(400).json({ success: false, message: 'Invalid scheduled_at' });
     }
+
+    // Capacity-safe slot check: ensure selected start time is still available before insert.
+    const dateStr = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+    const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+    const { Op } = require('sequelize');
+    const dayStart = new Date(dateStr + 'T00:00:00').getTime();
+    const dayEnd = new Date(dateStr + 'T23:59:59').getTime();
+    const bookingWhere = {
+      service_id: serviceId,
+      status: { [Op.notIn]: ['cancelled'] },
+      scheduled_at: { [Op.gte]: new Date(dayStart), [Op.lte]: new Date(dayEnd) }
+    };
+    if (subscriptionPlan === 'free') bookingWhere.tenant_id = tenantId;
+    const existingBookings = await models.Booking.findAll({
+      where: bookingWhere,
+      attributes: ['scheduled_at', 'duration_minutes']
+    });
+    const { slots } = await resolveRawSlotsForDay({
+      models, tenantId, serviceId, subscriptionPlan, dateStr, service
+    });
+    const available = filterSlotsByBookings(slots, existingBookings, service.duration_minutes || 30);
+    const requested = available.find(s => s.slot === hhmm);
+    if (!requested) {
+      return res.status(409).json({
+        success: false,
+        message: 'Selected slot is no longer available'
+      });
+    }
+
+    const allowedStatuses = new Set(['pending', 'confirmed']);
+    const initialStatus = allowedStatuses.has(String(status || '').toLowerCase())
+      ? String(status).toLowerCase()
+      : 'pending';
 
     const booking = await models.Booking.create({
       tenant_id: subscriptionPlan === 'free' ? tenantId : null,
@@ -1727,7 +1890,9 @@ async function createBooking(req, res) {
       duration_minutes: service.duration_minutes || 30,
       timezone: 'Africa/Lagos',
       location_type: service.location_type || 'in_person',
-      status: 'pending'
+      status: initialStatus,
+      payment_status: initialStatus === 'confirmed' ? 'approved' : 'unpaid',
+      notes: notes ? String(notes).slice(0, 4000) : null
     });
 
     res.status(201).json({
@@ -1745,6 +1910,350 @@ async function createBooking(req, res) {
   }
 }
 
+/**
+ * Attach payment receipt to a booking (service flow).
+ * POST /api/v1/ai-agent/attach-booking-receipt
+ * Body: { tenant_id, booking_id, receipt_url?: string, receipt_image_base64?: string }
+ * Headers: x-api-key
+ */
+async function attachBookingReceipt(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const { tenant_id, booking_id, receipt_url, receipt_image_base64 } = req.body || {};
+    const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
+    const bookingId = booking_id != null ? parseInt(booking_id, 10) : null;
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+    if (!bookingId || Number.isNaN(bookingId)) {
+      return res.status(400).json({ success: false, message: 'booking_id is required' });
+    }
+    if (!receipt_url && !receipt_image_base64) {
+      return res.status(400).json({ success: false, message: 'receipt_url or receipt_image_base64 is required' });
+    }
+
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    const sequelize = await getTenantConnection(tenantId, tenant.subscription_plan || 'enterprise');
+    const models = require('../models')(sequelize);
+
+    const where = tenant.subscription_plan === 'free'
+      ? { id: bookingId, tenant_id: tenantId }
+      : { id: bookingId };
+    const booking = await models.Booking.findOne({ where });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    let finalReceiptUrl = receipt_url || null;
+    if (receipt_image_base64) {
+      const uploadsDir = path.join(__dirname, '..', 'uploads', 'receipts', String(tenantId));
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const ext = 'jpg';
+      const filename = `booking-${bookingId}-${Date.now()}.${ext}`;
+      const filePath = path.join(uploadsDir, filename);
+      const buf = Buffer.from(receipt_image_base64, 'base64');
+      fs.writeFileSync(filePath, buf);
+      finalReceiptUrl = `/uploads/receipts/${tenantId}/${filename}`;
+    }
+
+    await booking.update({
+      payment_receipt_url: finalReceiptUrl,
+      payment_receipt_received_at: new Date(),
+      payment_status: 'receipt_uploaded',
+    });
+
+    return res.json({
+      success: true,
+      message: 'Receipt attached to booking',
+      data: { booking: await booking.reload(), receipt_url: finalReceiptUrl }
+    });
+  } catch (error) {
+    console.error('attachBookingReceipt error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to attach booking receipt',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Confirm or decline booking payment by store owner approval.
+ * POST /api/v1/ai-agent/confirm-booking-payment
+ * Body: { tenant_id, booking_id, action: 'approve' | 'decline' }
+ * Headers: x-api-key
+ */
+async function confirmBookingPayment(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { tenant_id, booking_id, action } = req.body || {};
+    const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
+    const bookingId = booking_id != null ? parseInt(booking_id, 10) : null;
+    const act = String(action || '').toLowerCase();
+
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+    if (!bookingId || Number.isNaN(bookingId)) {
+      return res.status(400).json({ success: false, message: 'booking_id is required' });
+    }
+    if (!['approve', 'decline'].includes(act)) {
+      return res.status(400).json({ success: false, message: 'action must be "approve" or "decline"' });
+    }
+
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const models = require('../models')(sequelize);
+
+    const where = subscriptionPlan === 'free'
+      ? { id: bookingId, tenant_id: tenantId }
+      : { id: bookingId };
+    const booking = await models.Booking.findOne({ where });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    if (act === 'approve') {
+      await booking.update({
+        status: 'confirmed',
+        payment_status: 'approved',
+        payment_approved_at: new Date(),
+        payment_declined_at: null,
+      });
+      return res.json({
+        success: true,
+        message: 'Booking payment approved and booking confirmed',
+        data: { booking: await booking.reload() }
+      });
+    }
+
+    await booking.update({
+      status: 'pending',
+      payment_status: 'declined',
+      payment_declined_at: new Date(),
+    });
+    return res.json({
+      success: true,
+      message: 'Booking payment declined',
+      data: { booking: await booking.reload() }
+    });
+  } catch (error) {
+    console.error('confirmBookingPayment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to confirm booking payment',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Initialize a payment link for AI sales agent (WhatsApp context aware metadata).
+ * POST /api/v1/ai-agent/initialize-payment-link
+ * Body: { tenant_id, amount, email?, name?, currency?, callback_url?, metadata? }
+ */
+async function initializeAIPaymentLink(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const {
+      tenant_id, amount, email, name, currency, callback_url, metadata
+    } = req.body || {};
+    const tenantId = parseInt(tenant_id, 10);
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+    const amountNum = Number(amount);
+    if (!amount || !Number.isFinite(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ success: false, message: 'amount is required' });
+    }
+    const md = {
+      ...(metadata || {}),
+      source: 'whatsapp_ai',
+      channel: 'whatsapp',
+      tenant_id: tenantId,
+    };
+    if (md.whatsapp_message_id == null && req.body?.whatsapp_message_id) {
+      md.whatsapp_message_id = req.body.whatsapp_message_id;
+    }
+    if (md.customer_phone == null && req.body?.customer_phone) {
+      md.customer_phone = req.body.customer_phone;
+    }
+
+    // Flow-aware payload validation
+    const explicitFlow = String(md.flow || '').toLowerCase();
+    const looksService = !!(md.service_id || md.scheduled_at || md.booking_type === 'service' || explicitFlow === 'service_booking');
+    const looksProduct = !!(md.order_id || md.items || explicitFlow === 'product_order');
+    if (looksService && looksProduct) {
+      return res.status(400).json({
+        success: false,
+        message: 'metadata must represent one flow only (product_order OR service_booking)'
+      });
+    }
+    if (!looksService && !looksProduct) {
+      return res.status(400).json({
+        success: false,
+        message: 'metadata.flow must indicate product_order or service_booking (or provide identifying fields)'
+      });
+    }
+
+    const validationErrors = looksService
+      ? validateServiceMetadata(md)
+      : validateProductMetadata(md, amountNum);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment payload',
+        errors: validationErrors
+      });
+    }
+
+    if (looksService) {
+      md.flow = 'service_booking';
+      md.booking_type = 'service';
+      md.is_booking = true;
+    } else {
+      md.flow = 'product_order';
+      md.is_booking = false;
+    }
+
+    const safeEmail = email || `${String(req.body?.customer_phone || 'customer').replace(/\D/g, '') || 'customer'}@wa.mycroshop.local`;
+    const base = (process.env.BACKEND_BASE_URL || process.env.MYCROSHOP_API_URL || '').replace(/\/$/, '');
+    if (!base) {
+      return res.status(500).json({ success: false, message: 'BACKEND_BASE_URL not configured' });
+    }
+    const payRes = await axios.post(
+      `${base}/api/v1/payments/initialize`,
+      {
+        tenant_id: tenantId,
+        amount: amountNum,
+        email: safeEmail,
+        name: name || 'WhatsApp Customer',
+        currency: currency || 'NGN',
+        callback_url: callback_url || undefined,
+        metadata: md,
+      },
+      { timeout: 20000 }
+    );
+    return res.json(payRes.data);
+  } catch (error) {
+    console.error('initializeAIPaymentLink error:', error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to initialize AI payment link',
+      error: error.response?.data?.message || error.message
+    });
+  }
+}
+
+/**
+ * Submit refund request from AI/WhatsApp.
+ * POST /api/v1/ai-agent/refund-request
+ */
+async function submitRefundRequest(req, res) {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.AI_AGENT_API_KEY) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const body = req.body || {};
+    const tenantId = parseInt(body.tenant_id, 10);
+    if (!tenantId || Number.isNaN(tenantId)) {
+      return res.status(400).json({ success: false, message: 'tenant_id is required' });
+    }
+    if (!body.reason || !String(body.reason).trim()) {
+      return res.status(400).json({ success: false, message: 'reason is required' });
+    }
+
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const models = require('../models')(sequelize);
+
+    let verificationStatus = 'unverified';
+    const orderId = body.order_id ? parseInt(body.order_id, 10) : null;
+    if (orderId && !Number.isNaN(orderId)) {
+      const orderWhere = subscriptionPlan === 'free'
+        ? { id: orderId, tenant_id: tenantId }
+        : { id: orderId };
+      const exists = await models.OnlineStoreOrder.findOne({ where: orderWhere, attributes: ['id'] });
+      if (exists) verificationStatus = 'verified';
+    }
+    if (verificationStatus !== 'verified' && body.receipt_id) {
+      try {
+        const [rows] = await sequelize.query(
+          `SELECT id FROM receipts WHERE receipt_number = ? LIMIT 1`,
+          { replacements: [String(body.receipt_id)] }
+        );
+        if (rows && rows.length > 0) verificationStatus = 'verified';
+      } catch {
+        // receipts table may not exist in some tenants; keep unverified
+      }
+    }
+
+    const payload = {
+      tenant_id: subscriptionPlan === 'free' ? tenantId : null,
+      customer_name: body.customer_name || null,
+      customer_phone: body.customer_phone || null,
+      customer_email: body.customer_email || null,
+      order_id: orderId || null,
+      receipt_id: body.receipt_id || null,
+      source_channel: body.source_channel || 'whatsapp_ai',
+      reason: String(body.reason).slice(0, 255),
+      details: body.details ? String(body.details).slice(0, 4000) : null,
+      verification_status: verificationStatus,
+      status: 'submitted',
+    };
+    const refund = await models.RefundRequest.create(payload);
+
+    const waConn = await getWhatsappConnectionForTenant(tenantId);
+    const ownerPhone = waConn?.owner_whatsapp_number;
+    if (waConn?.phone_number_id && waConn?.access_token && ownerPhone) {
+      await sendWhatsAppTextRaw(
+        waConn.phone_number_id,
+        waConn.access_token,
+        ownerPhone,
+        `Refund request submitted (#${refund.id}).\nCustomer: ${payload.customer_name || 'N/A'} (${payload.customer_phone || 'N/A'})\n` +
+        `Order ID: ${payload.order_id || 'N/A'}\nReason: ${payload.reason}\nVerification: ${verificationStatus}`
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: 'Refund request submitted',
+      data: {
+        refund_request: refund.toJSON(),
+        owner_whatsapp_number: ownerPhone || null,
+        verification_status: verificationStatus,
+      }
+    });
+  } catch (error) {
+    console.error('submitRefundRequest error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to submit refund request', error: error.message });
+  }
+}
+
 module.exports = {
   handleWebhook,
   getConfig,
@@ -1758,6 +2267,10 @@ module.exports = {
   getPendingOrderByCustomerPhone,
   attachOrderReceipt,
   confirmOrderPayment,
+  attachBookingReceipt,
+  confirmBookingPayment,
+  initializeAIPaymentLink,
+  submitRefundRequest,
   listServices,
   getServiceAvailability,
   createBooking

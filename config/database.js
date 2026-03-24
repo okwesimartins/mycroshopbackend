@@ -681,6 +681,11 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       status ENUM('pending', 'confirmed', 'completed', 'cancelled', 'no_show') DEFAULT 'pending',
       cancellation_reason TEXT,
       notes TEXT,
+      payment_status ENUM('unpaid', 'receipt_uploaded', 'approved', 'declined') NOT NULL DEFAULT 'unpaid',
+      payment_receipt_url VARCHAR(500) NULL,
+      payment_receipt_received_at DATETIME NULL,
+      payment_approved_at DATETIME NULL,
+      payment_declined_at DATETIME NULL,
       payment_transaction_id INT NULL COMMENT 'Links booking to payment when paid via online store',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -693,6 +698,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       INDEX idx_customer_id (customer_id),
       INDEX idx_scheduled_at (scheduled_at),
       INDEX idx_status (status),
+      INDEX idx_payment_status (payment_status),
       INDEX idx_payment_transaction_id (payment_transaction_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
