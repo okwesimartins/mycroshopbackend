@@ -70,6 +70,16 @@ async function sendWhatsAppTextRaw(phoneNumberId, accessToken, to, body) {
   }
 }
 
+function extensionFromMime(mime) {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('jpeg') || m.includes('jpg')) return 'jpg';
+  if (m.includes('png')) return 'png';
+  if (m.includes('webp')) return 'webp';
+  if (m.includes('gif')) return 'gif';
+  if (m.includes('pdf')) return 'pdf';
+  return 'bin';
+}
+
 function isValidIsoDateLike(v) {
   if (!v) return false;
   const d = new Date(v);
@@ -997,7 +1007,7 @@ async function attachOrderReceipt(req, res) {
     if (apiKey !== process.env.AI_AGENT_API_KEY) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
-    const { tenant_id, order_id, receipt_url, receipt_image_base64 } = req.body || {};
+    const { tenant_id, order_id, receipt_url, receipt_image_base64, mime_type } = req.body || {};
     const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
     const orderId = order_id != null ? parseInt(order_id, 10) : null;
     if (!tenantId || Number.isNaN(tenantId)) {
@@ -1028,7 +1038,7 @@ async function attachOrderReceipt(req, res) {
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
-      const ext = 'jpg';
+      const ext = extensionFromMime(mime_type);
       const filename = `${orderId}-${Date.now()}.${ext}`;
       const filePath = path.join(uploadsDir, filename);
       const buf = Buffer.from(receipt_image_base64, 'base64');
@@ -1922,7 +1932,7 @@ async function attachBookingReceipt(req, res) {
     if (apiKey !== process.env.AI_AGENT_API_KEY) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
-    const { tenant_id, booking_id, receipt_url, receipt_image_base64 } = req.body || {};
+    const { tenant_id, booking_id, receipt_url, receipt_image_base64, mime_type } = req.body || {};
     const tenantId = tenant_id != null ? parseInt(tenant_id, 10) : null;
     const bookingId = booking_id != null ? parseInt(booking_id, 10) : null;
     if (!tenantId || Number.isNaN(tenantId)) {
@@ -1956,7 +1966,7 @@ async function attachBookingReceipt(req, res) {
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
-      const ext = 'jpg';
+      const ext = extensionFromMime(mime_type);
       const filename = `booking-${bookingId}-${Date.now()}.${ext}`;
       const filePath = path.join(uploadsDir, filename);
       const buf = Buffer.from(receipt_image_base64, 'base64');
