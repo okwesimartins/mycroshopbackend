@@ -1207,9 +1207,16 @@ async function listServices(req, res) {
 
     const services = await models.StoreService.findAll({
       where,
-      attributes: ['id', 'service_title', 'description', 'price', 'duration_minutes', 'location_type'],
+      attributes: ['id', 'service_title', 'description', 'price', 'duration_minutes', 'location_type', 'service_image_url'],
       order: [['sort_order', 'ASC'], ['service_title', 'ASC']]
     });
+
+    const baseUrl = (process.env.BACKEND_BASE_URL || process.env.MYCROSHOP_API_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+    const toFullImageUrl = (url) => {
+      if (!url) return null;
+      if (String(url).startsWith('http')) return url;
+      return `${baseUrl}${String(url).startsWith('/') ? '' : '/'}${url}`;
+    };
 
     res.json({
       success: true,
@@ -1219,7 +1226,8 @@ async function listServices(req, res) {
         description: s.description || null,
         price: parseFloat(s.price || 0),
         duration_minutes: s.duration_minutes || 30,
-        location_type: s.location_type || 'in_person'
+        location_type: s.location_type || 'in_person',
+        service_image_url: toFullImageUrl(s.service_image_url) || null
       }))
     });
   } catch (error) {
@@ -1535,9 +1543,16 @@ async function getServiceAvailability(req, res) {
     const models = require('../models')(sequelize);
     const { Op } = require('sequelize');
 
+    const baseUrl = (process.env.BACKEND_BASE_URL || process.env.MYCROSHOP_API_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+    const toFullImageUrl = (url) => {
+      if (!url) return null;
+      if (String(url).startsWith('http')) return url;
+      return `${baseUrl}${String(url).startsWith('/') ? '' : '/'}${url}`;
+    };
+
     const service = await models.StoreService.findOne({
       where: subscriptionPlan === 'free' ? { id: serviceId, tenant_id: tenantId } : { id: serviceId },
-      attributes: ['id', 'service_title', 'duration_minutes', 'availability']
+      attributes: ['id', 'service_title', 'duration_minutes', 'availability', 'service_image_url']
     });
     if (!service) {
       return res.status(404).json({ success: false, message: 'Service not found' });
@@ -1586,6 +1601,7 @@ async function getServiceAvailability(req, res) {
         date: dateStr,
         service_id: serviceId,
         service_title: service.service_title,
+        service_image_url: toFullImageUrl(service.service_image_url) || null,
         duration_minutes: durationMinutes,
         store_service_availability: parsedStoreAvailability,
         availability_source,
@@ -1713,6 +1729,7 @@ async function getServiceAvailability(req, res) {
         range_style: 'bookable_dates_from_store_json',
         service_id: serviceId,
         service_title: service.service_title,
+        service_image_url: toFullImageUrl(service.service_image_url) || null,
         duration_minutes: durationMinutes,
         store_service_availability: parsedStoreAvailability,
         bookable_weekdays: bookableWeekdayNames,
@@ -1777,6 +1794,7 @@ async function getServiceAvailability(req, res) {
       range_style: 'calendar_window',
       service_id: serviceId,
       service_title: service.service_title,
+      service_image_url: toFullImageUrl(service.service_image_url) || null,
       duration_minutes: durationMinutes,
       store_service_availability: parsedStoreAvailability,
       from: fromStr,

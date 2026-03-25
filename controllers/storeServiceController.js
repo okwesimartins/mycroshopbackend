@@ -75,6 +75,14 @@ function validateAvailabilityConfig(availability) {
         }
       }
     }
+    // Capacity is a single concept (how many concurrent bookings allowed per slot).
+    // We support multiple field names for backward compatibility / different UX wording,
+    // but they must not be provided together to avoid ambiguity.
+    const capFields = ['max_bookings_per_slot', 'slot_capacity', 'staff_count'];
+    const providedCaps = capFields.filter(k => block[k] != null);
+    if (providedCaps.length > 1) {
+      return `${day} capacity is ambiguous: provide only one of ${capFields.join(', ')}`;
+    }
     const capacity = block.max_bookings_per_slot ?? block.slot_capacity ?? block.staff_count;
     if (capacity != null) {
       const n = parseInt(capacity, 10);
