@@ -691,18 +691,15 @@ async function addProductToCollection(req, res) {
       console.warn('Could not fetch tenant:', error);
     }
 
-    // Check if product exists
-    // For free users, exclude advanced inventory fields that don't exist in the table
+    // Check if product exists and belongs to this tenant
     let product;
     if (isFreePlan) {
-      // For free users, exclude columns that don't exist in free tier database
-      // Columns NOT available for free users: store_id, barcode, cost, low_stock_threshold, expiry_date, batch_number, unit_of_measure
       product = await models.Product.findOne({
-        where: { id: product_id },
+        where: { id: product_id, tenant_id: tenantId },
         attributes: {
           exclude: ['store_id', 'barcode', 'cost', 'low_stock_threshold', 'expiry_date', 'batch_number', 'unit_of_measure']
         },
-        include: [] // Explicitly exclude all associations
+        include: []
       });
     } else {
       product = await models.Product.findByPk(product_id);
@@ -1190,8 +1187,15 @@ async function addServiceToCollection(req, res) {
       });
     }
 
-    // Check if service exists
-    const service = await models.StoreService.findByPk(service_id);
+    // Check if service exists and belongs to this tenant
+    const isFreePlanSvc = req.tenant?.subscription_plan === 'free';
+    const tenantIdSvc = req.user?.tenantId;
+    const service = await models.StoreService.findOne({
+      where: {
+        id: service_id,
+        ...(isFreePlanSvc ? { tenant_id: tenantIdSvc } : {})
+      }
+    });
     if (!service) {
       return res.status(404).json({
         success: false,

@@ -81,27 +81,31 @@ async function getAvailableProducts(req, res) {
   try {
     // Initialize models
     const models = initModels(req.db);
-    
+
     const { online_store_id } = req.params;
     const { search, category, store_id, page = 1, limit = 20 } = req.query;
-    
+
+    const isFreePlan = req.tenant?.subscription_plan === 'free';
+    const tenantId = req.user?.tenantId;
+
     // Parse pagination parameters
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 20;
     const offset = (pageNum - 1) * limitNum;
 
-    // Get online store to check if it's linked to a physical store
-    const onlineStore = await models.OnlineStore.findByPk(online_store_id);
+    // Verify the online store belongs to this tenant before returning any products
+    const onlineStore = await verifyOnlineStoreOwnership(req, online_store_id);
     if (!onlineStore) {
-      return res.status(404).json({
+      return res.status(403).json({
         success: false,
-        message: 'Online store not found'
+        message: 'Online store not found or access denied'
       });
     }
 
-    // Build where clause
+    // Build where clause — free users MUST be scoped to their tenant_id
     const where = {
-      is_active: true
+      is_active: true,
+      ...(isFreePlan ? { tenant_id: tenantId } : {})
     };
 
     if (search) {
@@ -115,30 +119,27 @@ async function getAvailableProducts(req, res) {
       where.category = category;
     }
 
-    if (store_id) {
+    // store_id filter only applies to enterprise users (free users have no store_id on products)
+    if (store_id && !isFreePlan) {
       where.store_id = store_id;
     }
 
-    // Get all product IDs that are already in collections for this online store
+    // Get all product IDs already in collections for this online store
     const productsInCollections = await models.StoreCollectionProduct.findAll({
       attributes: ['product_id'],
-      include: [
-        {
-          model: models.StoreCollection,
-          where: { online_store_id: online_store_id },
-          attributes: []
-        }
-      ],
+      include: [{
+        model: models.StoreCollection,
+        where: { online_store_id },
+        attributes: []
+      }],
       raw: true
     });
 
     const productIdsInCollections = productsInCollections.map(p => p.product_id).filter(Boolean);
 
-    // Exclude products that are already in collections
+    // Exclude products already in collections
     if (productIdsInCollections.length > 0) {
-      where.id = {
-        [Sequelize.Op.notIn]: productIdsInCollections
-      };
+      where.id = { [Sequelize.Op.notIn]: productIdsInCollections };
     }
 
     // Get products with pagination using findAndCountAll
@@ -229,9 +230,13 @@ async function getCollectionProducts(req, res) {
 
     // Build Product include with conditional Store association
     // Free users may not have store_id, so Store should be optional
+    const tenantId = req.user?.tenantId;
     const productInclude = {
       model: models.Product,
-      attributes: productAttributes, // Explicitly set attributes to exclude store_id for free users
+      attributes: productAttributes,
+      // Free users: scope to their tenant_id to prevent cross-tenant product leakage
+      ...(isFreePlan ? { where: { tenant_id: tenantId } } : {}),
+      required: isFreePlan, // INNER JOIN for free users so only their products appear
       include: []
     };
 

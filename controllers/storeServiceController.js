@@ -1476,16 +1476,25 @@ async function getAvailableServices(req, res) {
     const { online_store_id } = req.params;
     const { search, location_type } = req.query;
 
-    // Verify online store exists
-    const onlineStore = await models.OnlineStore.findByPk(online_store_id);
+    const isFreePlan = req.tenant?.subscription_plan === 'free';
+    const tenantId = req.user?.tenantId;
+
+    // Verify the online store belongs to this tenant
+    const onlineStoreWhere = {
+      id: online_store_id,
+      ...(isFreePlan ? { tenant_id: tenantId } : {})
+    };
+    const onlineStore = await models.OnlineStore.findOne({ where: onlineStoreWhere });
     if (!onlineStore) {
-      return res.status(404).json({
+      return res.status(403).json({
         success: false,
-        message: 'Online store not found'
+        message: 'Online store not found or access denied'
       });
     }
 
     // Get services linked to this online store via OnlineStoreService
+    // Free users: also scope StoreService to their tenant_id
+    const { Op } = require('sequelize');
     const onlineStoreServices = await models.OnlineStoreService.findAll({
       where: { online_store_id },
       include: [
@@ -1493,9 +1502,8 @@ async function getAvailableServices(req, res) {
           model: models.StoreService,
           where: {
             is_active: true,
-            ...(search && {
-              service_title: { [require('sequelize').Op.like]: `%${search}%` }
-            }),
+            ...(isFreePlan ? { tenant_id: tenantId } : {}),
+            ...(search && { service_title: { [Op.like]: `%${search}%` } }),
             ...(location_type && { location_type })
           },
           required: true,
