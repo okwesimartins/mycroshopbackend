@@ -1899,12 +1899,16 @@ async function bulkUpdateStock(req, res) {
 
 async function getLowStockProducts(req, res) {
   try {
+    const isFreePlan = req.tenant?.subscription_plan === 'free';
+    const tenantId = req.user?.tenantId;
+
     const products = await req.db.models.Product.findAll({
       where: {
         is_active: true,
         stock: {
           [Sequelize.Op.lte]: Sequelize.col('low_stock_threshold')
-        }
+        },
+        ...(isFreePlan ? { tenant_id: tenantId } : {})
       },
       order: [['stock', 'ASC']]
     });
@@ -1930,7 +1934,10 @@ async function getLowStockProducts(req, res) {
 async function getProductCategories(req, res) {
   try {
     const { sort_by = 'count' } = req.query; // 'count' or 'name'
-    
+
+    const isFreePlan = req.tenant?.subscription_plan === 'free';
+    const tenantId = req.user?.tenantId;
+
     // Get all unique categories with their usage counts using proper GROUP BY
     const categories = await req.db.models.Product.findAll({
       attributes: [
@@ -1941,7 +1948,9 @@ async function getProductCategories(req, res) {
         category: {
           [Sequelize.Op.ne]: null,
           [Sequelize.Op.ne]: '' // Exclude empty strings
-        }
+        },
+        // Free users share a database — scope to their tenant only
+        ...(isFreePlan ? { tenant_id: tenantId } : {})
       },
       group: ['category'],
       having: Sequelize.where(

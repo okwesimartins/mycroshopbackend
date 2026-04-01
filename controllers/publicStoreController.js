@@ -76,10 +76,12 @@ async function getPublicStore(req, res) {
 
     // Get online store with basic info
     // For free users: don't include OnlineStoreLocation (they don't have physical stores)
+    // Also filter by tenant_id for free users to prevent cross-tenant store resolution
     const onlineStore = await models.OnlineStore.findOne({
-      where: { 
-        username: effectiveUsername, 
-        is_published: true 
+      where: {
+        username: effectiveUsername,
+        is_published: true,
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
       },
       include: isFreePlan 
         ? [] // Free users don't have physical stores
@@ -147,10 +149,11 @@ async function getPublicStore(req, res) {
         FROM store_products sp
         INNER JOIN products p ON sp.product_id = p.id
         WHERE sp.tenant_id = :tenantId
+          AND p.tenant_id = :tenantId
           AND sp.is_published = 1
           AND p.is_active = 1
       `, {
-        replacements: { tenantId: tenant_id },
+        replacements: { tenantId: effectiveTenantId },
         type: Sequelize.QueryTypes.SELECT
       });
       hasProducts = (parseInt(productCountResult?.count || 0) > 0);
@@ -182,8 +185,8 @@ async function getPublicStore(req, res) {
           AND oss.online_store_id = :onlineStoreId
           AND oss.is_visible = 1
       `, {
-        replacements: { 
-          tenantId: tenant_id,
+        replacements: {
+          tenantId: effectiveTenantId,
           onlineStoreId: onlineStore.id
         },
         type: Sequelize.QueryTypes.SELECT
@@ -209,7 +212,7 @@ async function getPublicStore(req, res) {
     // For free users: filter by tenant_id (store_collections doesn't have online_store_id)
     const productCollections = await models.StoreCollection.findAll({
       where: {
-        ...(isFreePlan ? { tenant_id: tenant_id } : { online_store_id: onlineStore.id }),
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : { online_store_id: onlineStore.id }),
         is_visible: true,
         collection_type: 'product'
       },
@@ -219,24 +222,27 @@ async function getPublicStore(req, res) {
           include: [
             {
               model: models.Product,
-              where: { is_active: true },
+              where: {
+                is_active: true,
+                ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
+              },
               required: false,
               attributes: ['id', 'name', 'sku', 'price', 'image_url', 'category']
             }
           ],
-          limit: previewLimit, // Limit products per collection
+          limit: previewLimit,
           order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
         }
       ],
       order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']],
-      limit: 10 // Limit number of collections shown
+      limit: 10
     });
 
     // Get service collections (preview - limited items per collection)
     // For free users: filter by tenant_id (store_collections doesn't have online_store_id)
     const serviceCollections = await models.StoreCollection.findAll({
       where: {
-        ...(isFreePlan ? { tenant_id: tenant_id } : { online_store_id: onlineStore.id }),
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : { online_store_id: onlineStore.id }),
         is_visible: true,
         collection_type: 'service'
       },
@@ -246,17 +252,20 @@ async function getPublicStore(req, res) {
           include: [
             {
               model: models.StoreService,
-              where: { is_active: true },
+              where: {
+                is_active: true,
+                ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
+              },
               required: false,
               attributes: ['id', 'service_title', 'description', 'price', 'service_image_url', 'duration_minutes']
             }
           ],
-          limit: previewLimit, // Limit services per collection
+          limit: previewLimit,
           order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']]
         }
       ],
       order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']],
-      limit: 10 // Limit number of collections shown
+      limit: 10
     });
 
     // Get products NOT in any collection (preview)
@@ -266,7 +275,7 @@ async function getPublicStore(req, res) {
       // Free users: use raw SQL
       const productRows = await sequelize.query(`
         SELECT DISTINCT sp.id, sp.tenant_id, sp.product_id, sp.is_published, sp.featured, sp.sort_order, sp.created_at, sp.updated_at,
-               p.id as 'Product.id', p.tenant_id as 'Product.tenant_id', p.name as 'Product.name', 
+               p.id as 'Product.id', p.tenant_id as 'Product.tenant_id', p.name as 'Product.name',
                p.description as 'Product.description', p.sku as 'Product.sku', p.barcode as 'Product.barcode',
                p.price as 'Product.price', p.stock as 'Product.stock', p.low_stock_threshold as 'Product.low_stock_threshold',
                p.category as 'Product.category', p.image_url as 'Product.image_url', p.expiry_date as 'Product.expiry_date',
@@ -275,13 +284,14 @@ async function getPublicStore(req, res) {
         INNER JOIN products p ON sp.product_id = p.id
         LEFT JOIN store_collection_products scp ON p.id = scp.product_id
         WHERE sp.tenant_id = :tenantId
+          AND p.tenant_id = :tenantId
           AND sp.is_published = 1
           AND p.is_active = 1
           AND scp.id IS NULL
         ORDER BY sp.created_at DESC
         LIMIT :limit
       `, {
-        replacements: { tenantId: tenant_id, limit: previewLimit },
+        replacements: { tenantId: effectiveTenantId, limit: previewLimit },
         type: Sequelize.QueryTypes.SELECT
       });
       
@@ -365,9 +375,9 @@ async function getPublicStore(req, res) {
         ORDER BY ss.created_at DESC
         LIMIT :limit
       `, {
-        replacements: { 
+        replacements: {
           onlineStoreId: onlineStore.id,
-          tenantId: tenant_id,
+          tenantId: effectiveTenantId,
           limit: previewLimit
         },
         type: Sequelize.QueryTypes.SELECT
@@ -452,11 +462,11 @@ async function getPublicStore(req, res) {
           AND is_visible = 1
           AND collection_type = 'product'
       `, {
-        replacements: { tenantId: tenant_id },
+        replacements: { tenantId: effectiveTenantId },
         type: Sequelize.QueryTypes.SELECT
       });
       totalProductCollections = parseInt(productCollectionsResult?.count || 0);
-      
+
       const [serviceCollectionsResult] = await sequelize.query(`
         SELECT COUNT(*) as count
         FROM store_collections
@@ -464,7 +474,7 @@ async function getPublicStore(req, res) {
           AND is_visible = 1
           AND collection_type = 'service'
       `, {
-        replacements: { tenantId: tenant_id },
+        replacements: { tenantId: effectiveTenantId },
         type: Sequelize.QueryTypes.SELECT
       });
       totalServiceCollections = parseInt(serviceCollectionsResult?.count || 0);
@@ -497,11 +507,12 @@ async function getPublicStore(req, res) {
         INNER JOIN products p ON sp.product_id = p.id
         LEFT JOIN store_collection_products scp ON p.id = scp.product_id
         WHERE sp.tenant_id = :tenantId
+          AND p.tenant_id = :tenantId
           AND sp.is_published = 1
           AND p.is_active = 1
           AND scp.id IS NULL
       `, {
-        replacements: { tenantId: tenant_id },
+        replacements: { tenantId: effectiveTenantId },
         type: Sequelize.QueryTypes.SELECT
       });
       totalProductsNotInCollections = parseInt(productsNotInCollectionsCountResult?.count || 0);
@@ -537,9 +548,9 @@ async function getPublicStore(req, res) {
           AND oss.is_visible = 1
           AND scs.id IS NULL
       `, {
-        replacements: { 
+        replacements: {
           onlineStoreId: onlineStore.id,
-          tenantId: tenant_id
+          tenantId: effectiveTenantId
         },
         type: Sequelize.QueryTypes.SELECT
       });
@@ -1317,10 +1328,12 @@ async function getPublicProducts(req, res) {
     }
 
     // Find online store
+    // For free users: also filter by tenant_id to prevent cross-tenant store resolution
     const onlineStore = await models.OnlineStore.findOne({
-      where: { 
-        username: username.toLowerCase(), 
-        is_published: true 
+      where: {
+        username: effectiveUsername,
+        is_published: true,
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
       },
       attributes: ['id']
     });
@@ -1354,10 +1367,11 @@ async function getPublicProducts(req, res) {
       // Build WHERE conditions
       let whereConditions = [
         'sp.tenant_id = :tenantId',
+        'p.tenant_id = :tenantId',
         'sp.is_published = 1',
         'p.is_active = 1'
       ];
-      const replacements = { tenantId: tenant_id };
+      const replacements = { tenantId: effectiveTenantId };
 
       // Add search filter
       if (search) {
@@ -1602,10 +1616,12 @@ async function getPublicProduct(req, res) {
     const isFreePlan = subscriptionPlan !== 'enterprise';
 
     // Find online store
+    // For free users: also filter by tenant_id to prevent cross-tenant store resolution
     const onlineStore = await models.OnlineStore.findOne({
-      where: { 
-        username: effectiveUsername, 
-        is_published: true 
+      where: {
+        username: effectiveUsername,
+        is_published: true,
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
       },
       attributes: ['id']
     });
@@ -1640,13 +1656,14 @@ async function getPublicProduct(req, res) {
         INNER JOIN store_products sp ON p.id = sp.product_id
         WHERE p.id = :productId
           AND p.is_active = 1
+          AND p.tenant_id = :tenantId
           AND sp.tenant_id = :tenantId
           AND sp.is_published = 1
         LIMIT 1
       `, {
-        replacements: { 
+        replacements: {
           productId: product_id,
-          tenantId: tenant_id
+          tenantId: effectiveTenantId
         },
         type: Sequelize.QueryTypes.SELECT
       });
@@ -1678,9 +1695,9 @@ async function getPublicProduct(req, res) {
         ${variationWhereClause}
         ORDER BY pv.sort_order ASC, pvo.sort_order ASC
       `, {
-        replacements: { 
+        replacements: {
           productId: product_id,
-          ...(isFreePlan ? { tenantId: tenant_id } : {})
+          ...(isFreePlan ? { tenantId: effectiveTenantId } : {})
         },
         type: Sequelize.QueryTypes.SELECT
       });

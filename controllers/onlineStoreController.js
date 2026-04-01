@@ -3321,6 +3321,11 @@ async function getOnlineStoreProducts(req, res) {
       is_active: true
     };
 
+    // Free users share a database — must always scope to their tenant_id
+    if (isFreePlan) {
+      where.tenant_id = tenantId;
+    }
+
     if (search) {
       where[Sequelize.Op.or] = [
         { name: { [Sequelize.Op.like]: `%${search}%` } },
@@ -3481,9 +3486,16 @@ async function getOnlineStoreProductDetails(req, res) {
       : ['id', 'tenant_id', 'store_id', 'name', 'description', 'sku', 'barcode', 'price', 'cost', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'batch_number', 'unit_of_measure', 'is_active', 'created_at', 'updated_at'];
 
     // Get product with all details
-    // Note: StoreProduct hasMany relationship, but for online store we only need one (per tenant)
-    const product = await models.Product.findByPk(product_id, {
-      attributes: productAttributes, // Explicitly set attributes to exclude store_id for free users
+    // For free users (shared DB): use findOne with tenant_id to prevent cross-tenant access
+    // For enterprise users (dedicated DB): findByPk is safe
+    const productWhere = { id: product_id };
+    if (isFreePlan) {
+      productWhere.tenant_id = tenantId;
+    }
+
+    const product = await models.Product.findOne({
+      where: productWhere,
+      attributes: productAttributes,
       include: [
         {
           model: models.StoreProduct,
@@ -3497,7 +3509,7 @@ async function getOnlineStoreProductDetails(req, res) {
             {
               model: models.ProductVariationOption,
               attributes: [
-                'id', 'option_value', 'option_display_name', 'price_adjustment', 
+                'id', 'option_value', 'option_display_name', 'price_adjustment',
                 'stock', 'sku', 'image_url', 'is_default', 'is_available', 'sort_order'
               ],
               order: [['sort_order', 'ASC']]
@@ -3925,9 +3937,12 @@ async function getStorePreview(req, res) {
           include: [
             {
               model: models.Product,
-              where: { is_active: true },
+              where: {
+                is_active: true,
+                ...(useRawSQL ? { tenant_id: req.user.tenantId } : {})
+              },
               required: false,
-              attributes: useRawSQL 
+              attributes: useRawSQL
                 ? ['id', 'name', 'sku', 'price', 'image_url', 'category']
                 : ['id', 'name', 'sku', 'price', 'image_url', 'category', 'store_id']
             }
@@ -3953,7 +3968,10 @@ async function getStorePreview(req, res) {
           include: [
             {
               model: models.StoreService,
-              where: { is_active: true },
+              where: {
+                is_active: true,
+                ...(useRawSQL ? { tenant_id: req.user.tenantId } : {})
+              },
               required: false,
               attributes: ['id', 'service_title', 'description', 'price', 'service_image_url', 'duration_minutes']
             }
@@ -3984,6 +4002,7 @@ async function getStorePreview(req, res) {
         INNER JOIN products p ON sp.product_id = p.id
         LEFT JOIN store_collection_products scp ON p.id = scp.product_id
         WHERE sp.tenant_id = :tenantId
+          AND p.tenant_id = :tenantId
           AND p.is_active = 1
           AND scp.id IS NULL
         ORDER BY sp.created_at DESC
@@ -4878,14 +4897,14 @@ async function getPreviewProducts(req, res) {
         replacements.collectionId = collection_id;
       }
       
-      query += ` WHERE sp.tenant_id = :tenantId AND p.is_active = 1`;
-      
+      query += ` WHERE sp.tenant_id = :tenantId AND p.tenant_id = :tenantId AND p.is_active = 1`;
+
       // Add search filter
       if (search) {
         query += ` AND (p.name LIKE :search OR p.sku LIKE :search)`;
         replacements.search = `%${search}%`;
       }
-      
+
       // Add category filter
       if (category) {
         query += ` AND p.category = :category`;

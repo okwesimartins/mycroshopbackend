@@ -363,10 +363,82 @@ async function getDashboardOverview(req, res) {
   }
 }
 
+/**
+ * Get dashboard stats
+ * Returns total products, active products, total revenue, active orders, and recent orders.
+ * Works for both free (shared DB, filtered by tenant_id) and enterprise (dedicated DB) users.
+ */
+async function getDashboardStats(req, res) {
+  try {
+    const isFreePlan = req.tenant.subscription_plan === 'free';
+    const tenantId = req.user.tenantId;
+
+    // For free users on the shared DB, every query must be scoped to this tenant
+    const tenantFilter = isFreePlan ? { tenant_id: tenantId } : {};
+
+    // Total products (all, regardless of active status)
+    const totalProducts = await req.db.models.Product.count({
+      where: { ...tenantFilter }
+    });
+
+    // Total active products
+    const totalActiveProducts = await req.db.models.Product.count({
+      where: { ...tenantFilter, is_active: true }
+    });
+
+    // Total revenue — sum of all paid online store orders
+    const totalRevenue = await req.db.models.OnlineStoreOrder.sum('total', {
+      where: { ...tenantFilter, payment_status: 'paid' }
+    }) || 0;
+
+    // Total active orders — orders not yet cancelled or delivered
+    const totalActiveOrders = await req.db.models.OnlineStoreOrder.count({
+      where: {
+        ...tenantFilter,
+        status: { [Sequelize.Op.notIn]: ['cancelled', 'delivered'] }
+      }
+    });
+
+    // Recent orders (last 10) for the "Recent Activity" section
+    const recentOrders = await req.db.models.OnlineStoreOrder.findAll({
+      where: { ...tenantFilter },
+      order: [['created_at', 'DESC']],
+      limit: 10,
+      attributes: [
+        'id',
+        'order_number',
+        'customer_name',
+        'total',
+        'status',
+        'payment_status',
+        'created_at'
+      ]
+    });
+
+    res.json({
+      success: true,
+      data: {
+        total_products: totalProducts,
+        total_active_products: totalActiveProducts,
+        total_revenue: parseFloat(totalRevenue),
+        total_active_orders: totalActiveOrders,
+        recent_orders: recentOrders
+      }
+    });
+  } catch (error) {
+    console.error('Error getting dashboard stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get dashboard stats'
+    });
+  }
+}
+
 module.exports = {
   getSalesReport,
   getProductPerformanceReport,
   getCustomerAnalytics,
-  getDashboardOverview
+  getDashboardOverview,
+  getDashboardStats
 };
 
