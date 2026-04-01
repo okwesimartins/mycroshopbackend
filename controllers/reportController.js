@@ -139,8 +139,8 @@ async function getProductPerformanceReport(req, res) {
         attributes: [
           'product_id',
           'product_name',
-          [Sequelize.fn('SUM', Sequelize.col('quantity')), 'total_quantity'],
-          [Sequelize.fn('SUM', Sequelize.col('total')), 'total_revenue']
+          [Sequelize.fn('SUM', Sequelize.col('OnlineStoreOrderItem.quantity')), 'total_quantity'],
+          [Sequelize.fn('SUM', Sequelize.col('OnlineStoreOrderItem.total')), 'total_revenue']
         ],
         include: [{
           model: req.db.models.OnlineStoreOrder,
@@ -148,10 +148,10 @@ async function getProductPerformanceReport(req, res) {
           attributes: []
         }],
         where: { product_id: { [Sequelize.Op.ne]: null } },
-        group: ['product_id', 'product_name'],
+        group: ['OnlineStoreOrderItem.product_id', 'OnlineStoreOrderItem.product_name'],
         order: [[Sequelize.fn('SUM', Sequelize.col('OnlineStoreOrderItem.total')), 'DESC']],
         limit: parseInt(limit),
-        raw: false
+        raw: true
       });
 
       return res.json({
