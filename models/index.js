@@ -1511,10 +1511,6 @@ function initializeModels(sequelize) {
       type: DataTypes.STRING(500),
       allowNull: true
     },
-    background_image_url: {
-      type: DataTypes.STRING(500),
-      allowNull: true
-    },
     selected_theme: {
       type: DataTypes.JSON,
       allowNull: true,

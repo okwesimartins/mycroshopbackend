@@ -136,7 +136,6 @@ async function getPublicStore(req, res) {
     // Normalize store image URLs
     if (storeData.profile_logo_url) storeData.profile_logo_url = getFullUrl(storeData.profile_logo_url);
     if (storeData.banner_image_url) storeData.banner_image_url = getFullUrl(storeData.banner_image_url);
-    if (storeData.background_image_url) storeData.background_image_url = getFullUrl(storeData.background_image_url);
 
     // Parse selected_theme if stored as a JSON string
     if (storeData.selected_theme && typeof storeData.selected_theme === 'string') {

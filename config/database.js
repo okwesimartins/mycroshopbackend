@@ -522,7 +522,6 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       store_description TEXT,
       profile_logo_url VARCHAR(500),
       banner_image_url VARCHAR(500),
-      background_image_url VARCHAR(500),
       selected_theme JSON,
       is_location_based BOOLEAN DEFAULT FALSE,
       show_location BOOLEAN DEFAULT TRUE,
@@ -1523,7 +1522,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
   }
 
   // Migration: drop legacy appearance columns (replaced by selected_theme)
-  const legacyAppearanceCols = ['background_color', 'button_style', 'button_color', 'button_font_color'];
+  const legacyAppearanceCols = ['background_color', 'button_style', 'button_color', 'button_font_color', 'background_image_url'];
   for (const col of legacyAppearanceCols) {
     try {
       const [existing] = await connection.query(`

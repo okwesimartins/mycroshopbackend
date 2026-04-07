@@ -1073,9 +1073,6 @@ function normalizeOnlineStoreData(req, onlineStore) {
   if (storeData.banner_image_url) {
     storeData.banner_image_url = getFullUrl(req, storeData.banner_image_url);
   }
-  if (storeData.background_image_url) {
-    storeData.background_image_url = getFullUrl(req, storeData.background_image_url);
-  }
 
   // Subdomain is the default domain for MycroShop online stores (e.g. mystore.mycroshop.com)
   storeData.default_store_url = getDefaultStoreUrl(storeData.username);
@@ -1169,19 +1166,6 @@ async function uploadStoreImage(req, res) {
           uploadedImages.banner = getFullUrl(req, relativeBannerUrl);
         }
         
-        // Process background
-        if (files.background && files.background[0]) {
-          const oldImagePath = onlineStore.background_image_url 
-            ? path.join(__dirname, '../', onlineStore.background_image_url) 
-            : null;
-          if (oldImagePath && fs.existsSync(oldImagePath)) {
-            fs.unlinkSync(oldImagePath);
-          }
-          const relativeBackgroundUrl = `/uploads/stores/${files.background[0].filename}`;
-          updates.background_image_url = relativeBackgroundUrl;
-          uploadedImages.background = getFullUrl(req, relativeBackgroundUrl);
-        }
-        
         if (Object.keys(updates).length === 0) {
           return res.status(400).json({
             success: false,
@@ -1216,18 +1200,16 @@ async function uploadStoreImage(req, res) {
       }
       // Support legacy format: single file with image_type field
       else if (files.image && files.image[0]) {
-        if (!image_type || !['logo', 'banner', 'background'].includes(image_type)) {
+        if (!image_type || !['logo', 'banner'].includes(image_type)) {
           fs.unlinkSync(files.image[0].path);
           return res.status(400).json({
             success: false,
-            message: 'image_type must be one of: logo, banner, background'
+            message: 'image_type must be one of: logo, banner'
           });
         }
 
         // Delete old image if exists
-        const oldImageField = image_type === 'logo' ? 'profile_logo_url' : 
-                             image_type === 'banner' ? 'banner_image_url' : 
-                             'background_image_url';
+        const oldImageField = image_type === 'logo' ? 'profile_logo_url' : 'banner_image_url';
         
         if (onlineStore[oldImageField]) {
           const oldImagePath = path.join(__dirname, '../', onlineStore[oldImageField]);
@@ -1322,19 +1304,18 @@ async function deleteStoreImage(req, res) {
     }
 
     const { image_type } = req.body;
-    const validTypes = ['logo', 'banner', 'background'];
+    const validTypes = ['logo', 'banner'];
     if (!image_type || !validTypes.includes(image_type)) {
       return res.status(400).json({
         success: false,
-        message: 'image_type must be one of: logo, banner, background'
+        message: 'image_type must be one of: logo, banner'
       });
     }
 
     // Map image_type to the database field name
     const fieldMap = {
       logo: 'profile_logo_url',
-      banner: 'banner_image_url',
-      background: 'background_image_url'
+      banner: 'banner_image_url'
     };
     const dbField = fieldMap[image_type];
 
@@ -1553,7 +1534,6 @@ async function getPublicStorePreview(req, res) {
 
     if (storeData.profile_logo_url) storeData.profile_logo_url = getFullUrl(storeData.profile_logo_url);
     if (storeData.banner_image_url) storeData.banner_image_url = getFullUrl(storeData.banner_image_url);
-    if (storeData.background_image_url) storeData.background_image_url = getFullUrl(storeData.background_image_url);
 
     // Normalize product/service images within collections
     if (storeData.StoreCollections) {
@@ -4201,7 +4181,6 @@ async function getStorePreview(req, res) {
     // Normalize store image URLs
     if (storeData.profile_logo_url) storeData.profile_logo_url = getFullUrl(storeData.profile_logo_url);
     if (storeData.banner_image_url) storeData.banner_image_url = getFullUrl(storeData.banner_image_url);
-    if (storeData.background_image_url) storeData.background_image_url = getFullUrl(storeData.background_image_url);
 
     // Parse selected_theme if stored as a JSON string
     if (storeData.selected_theme && typeof storeData.selected_theme === 'string') {
@@ -4773,7 +4752,6 @@ async function getStorePreview(req, res) {
           store_description: storeData.store_description,
           profile_logo_url: storeData.profile_logo_url,
           banner_image_url: storeData.banner_image_url,
-          background_image_url: storeData.background_image_url,
           selected_theme: storeData.selected_theme || null,
           social_links: storeData.social_links,
           is_location_based: storeData.is_location_based,
