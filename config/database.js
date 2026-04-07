@@ -1504,6 +1504,27 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     console.warn('Could not add custom_domain column to online_stores:', alterError.message);
   }
 
+  // Migration: add selected_theme column if it doesn't exist
+  try {
+    const [themeColumns] = await connection.query(`
+      SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'online_stores'
+      AND COLUMN_NAME = 'selected_theme'
+    `);
+
+    if (!themeColumns || themeColumns.length === 0) {
+      console.log('Adding selected_theme column to online_stores table...');
+      await connection.query(`
+        ALTER TABLE online_stores
+        ADD COLUMN selected_theme JSON NULL AFTER button_font_color
+      `);
+      console.log('✅ selected_theme column added to online_stores table');
+    }
+  } catch (alterError) {
+    console.warn('Could not add selected_theme column to online_stores:', alterError.message);
+  }
+
   // All online store tables are now complete!
   // Note: Additional enterprise-only tables (roles, suppliers, purchase_orders, pos_transactions, etc.)
   // are not included here as free users only need online store functionality

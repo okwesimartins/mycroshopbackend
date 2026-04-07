@@ -88,8 +88,12 @@ router.put('/:id/appearance', onlineStoreController.updateStoreAppearance);
 // Upload store image (logo, banner, background)
 router.post('/:id/image', onlineStoreController.uploadStoreImage);
 
+// Delete store image (logo, banner, background)
+router.delete('/:id/image', onlineStoreController.deleteStoreImage);
+
 // Publish/unpublish store
 router.patch('/:id/publish', onlineStoreController.publishOnlineStore);
+
 
 // Create product directly for online store (free users only - auto-published)
 // Configure multer for variation option images

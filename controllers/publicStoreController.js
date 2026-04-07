@@ -139,6 +139,11 @@ async function getPublicStore(req, res) {
     if (storeData.banner_image_url) storeData.banner_image_url = getFullUrl(storeData.banner_image_url);
     if (storeData.background_image_url) storeData.background_image_url = getFullUrl(storeData.background_image_url);
 
+    // Parse selected_theme if stored as a JSON string
+    if (storeData.selected_theme && typeof storeData.selected_theme === 'string') {
+      try { storeData.selected_theme = JSON.parse(storeData.selected_theme); } catch (e) { storeData.selected_theme = null; }
+    }
+
     // Check if products and services exist to determine toggle visibility
     // For free users: use raw SQL to avoid online_store_id issues
     let hasProducts = false;
@@ -687,6 +692,7 @@ async function getPublicStore(req, res) {
           button_style: storeData.button_style,
           button_color: storeData.button_color,
           button_font_color: storeData.button_font_color,
+          selected_theme: storeData.selected_theme || null,
           social_links: storeData.social_links,
           is_location_based: storeData.is_location_based,
           show_location: storeData.show_location,
@@ -775,12 +781,15 @@ async function getPublicCollectionProducts(req, res) {
 
     const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
+    const { Sequelize } = require('sequelize');
+    const isFreePlan = (tenant.subscription_plan || 'free') !== 'enterprise';
 
-    // Find online store
+    // Find online store — scope to tenant for free users
     const onlineStore = await models.OnlineStore.findOne({
-      where: { 
-        username: effectiveUsername, 
-        is_published: true 
+      where: {
+        username: effectiveUsername,
+        is_published: true,
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
       }
     });
 
@@ -790,24 +799,6 @@ async function getPublicCollectionProducts(req, res) {
         message: 'Store not found or not published'
       });
     }
-
-    // Get collection products with pagination
-    const { count, rows } = await models.StoreCollectionProduct.findAndCountAll({
-      where: {
-        collection_id: collection_id
-      },
-      include: [
-        {
-          model: models.Product,
-          where: { is_active: true },
-          required: true
-        }
-      ],
-      order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']],
-      limit: limitNum,
-      offset: offset,
-      distinct: true
-    });
 
     // Normalize image URLs
     function getFullUrl(relativePath) {
@@ -820,26 +811,164 @@ async function getPublicCollectionProducts(req, res) {
       return `${protocol}://${host}${relativePath}`;
     }
 
-    const products = rows.map(cp => {
-      const productData = cp.Product ? cp.Product.toJSON() : null;
-      if (productData && productData.image_url) {
-        productData.image_url = getFullUrl(productData.image_url);
+    let products = [];
+    let totalCount = 0;
+
+    if (isFreePlan) {
+      // Free users: raw SQL — store_products has no online_store_id
+      const replacements = { tenantId: effectiveTenantId, collectionId: collection_id, limit: limitNum, offset };
+
+      const [countResult] = await sequelize.query(`
+        SELECT COUNT(DISTINCT p.id) as count
+        FROM store_collection_products scp
+        INNER JOIN products p ON scp.product_id = p.id
+        WHERE scp.collection_id = :collectionId
+          AND p.tenant_id = :tenantId
+          AND p.is_active = 1
+      `, { replacements, type: Sequelize.QueryTypes.SELECT });
+      totalCount = parseInt(countResult?.count || 0);
+
+      const rows = await sequelize.query(`
+        SELECT scp.id as scp_id, scp.sort_order, scp.is_pinned,
+               p.id, p.name, p.description, p.sku, p.price, p.stock,
+               p.category, p.image_url, p.is_active, p.created_at
+        FROM store_collection_products scp
+        INNER JOIN products p ON scp.product_id = p.id
+        WHERE scp.collection_id = :collectionId
+          AND p.tenant_id = :tenantId
+          AND p.is_active = 1
+        ORDER BY scp.is_pinned DESC, scp.sort_order ASC
+        LIMIT :limit OFFSET :offset
+      `, { replacements, type: Sequelize.QueryTypes.SELECT });
+
+      const productIdList = [];
+      products = rows.map(row => {
+        if (row.id) productIdList.push(row.id);
+        return {
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          sku: row.sku,
+          price: row.price,
+          stock: row.stock,
+          category: row.category,
+          image_url: row.image_url ? getFullUrl(row.image_url) : null,
+          is_active: row.is_active,
+          created_at: row.created_at,
+          sort_order: row.sort_order,
+          is_pinned: row.is_pinned,
+          variations: []
+        };
+      });
+
+      // Batch-fetch variations
+      if (productIdList.length > 0) {
+        const variationRows = await sequelize.query(`
+          SELECT pv.id, pv.product_id, pv.variation_name, pv.variation_type, pv.is_required, pv.sort_order,
+                 pvo.id as option_id, pvo.option_value, pvo.option_display_name,
+                 pvo.price_adjustment, pvo.stock as option_stock, pvo.sku as option_sku,
+                 pvo.image_url as option_image_url, pvo.is_default, pvo.is_available,
+                 pvo.sort_order as option_sort_order
+          FROM product_variations pv
+          LEFT JOIN product_variation_options pvo ON pv.id = pvo.variation_id
+            AND pvo.tenant_id = :tenantId
+          WHERE pv.product_id IN (:productIds)
+            AND pv.tenant_id = :tenantId
+          ORDER BY pv.product_id, pv.sort_order ASC, pvo.sort_order ASC
+        `, { replacements: { tenantId: effectiveTenantId, productIds: productIdList }, type: Sequelize.QueryTypes.SELECT });
+
+        const variationsByProduct = {};
+        variationRows.forEach(v => {
+          if (!variationsByProduct[v.product_id]) variationsByProduct[v.product_id] = {};
+          if (!variationsByProduct[v.product_id][v.id]) {
+            variationsByProduct[v.product_id][v.id] = {
+              id: v.id,
+              variation_name: v.variation_name,
+              variation_type: v.variation_type,
+              is_required: v.is_required,
+              sort_order: v.sort_order,
+              options: []
+            };
+          }
+          if (v.option_id) {
+            variationsByProduct[v.product_id][v.id].options.push({
+              id: v.option_id,
+              option_value: v.option_value,
+              option_display_name: v.option_display_name,
+              price_adjustment: v.price_adjustment,
+              stock: v.option_stock,
+              sku: v.option_sku,
+              image_url: v.option_image_url ? getFullUrl(v.option_image_url) : null,
+              is_default: v.is_default,
+              is_available: v.is_available,
+              sort_order: v.option_sort_order
+            });
+          }
+        });
+
+        products = products.map(p => ({
+          ...p,
+          variations: variationsByProduct[p.id] ? Object.values(variationsByProduct[p.id]) : []
+        }));
       }
-      return {
-        ...cp.toJSON(),
-        Product: productData
-      };
-    });
+    } else {
+      // Enterprise users: Sequelize
+      const { count, rows } = await models.StoreCollectionProduct.findAndCountAll({
+        where: { collection_id },
+        include: [{
+          model: models.Product,
+          where: { is_active: true },
+          required: true,
+          include: [
+            {
+              model: models.ProductVariation,
+              required: false,
+              attributes: ['id', 'variation_name', 'variation_type', 'is_required', 'sort_order'],
+              include: [{
+                model: models.ProductVariationOption,
+                required: false,
+                attributes: ['id', 'option_value', 'option_display_name', 'price_adjustment', 'stock', 'sku', 'image_url', 'is_default', 'is_available', 'sort_order']
+              }]
+            }
+          ]
+        }],
+        order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']],
+        limit: limitNum,
+        offset,
+        distinct: true
+      });
+      totalCount = count;
+      products = rows.map(cp => {
+        const productData = cp.Product ? cp.Product.toJSON() : null;
+        if (productData && productData.image_url) productData.image_url = getFullUrl(productData.image_url);
+        if (productData && productData.ProductVariations) {
+          productData.variations = productData.ProductVariations.map(pv => {
+            const pvData = pv.toJSON ? pv.toJSON() : pv;
+            if (pvData.ProductVariationOptions) {
+              pvData.options = pvData.ProductVariationOptions.map(opt => {
+                const o = opt.toJSON ? opt.toJSON() : opt;
+                if (o.image_url) o.image_url = getFullUrl(o.image_url);
+                return o;
+              });
+              delete pvData.ProductVariationOptions;
+            }
+            return pvData;
+          });
+          delete productData.ProductVariations;
+        }
+        return { ...cp.toJSON(), Product: productData };
+      });
+    }
 
     res.json({
       success: true,
-      data: { 
+      data: {
         products,
         pagination: {
           page: pageNum,
           limit: limitNum,
-          total_pages: Math.ceil(count / limitNum),
-          total_items: count
+          total_pages: Math.ceil(totalCount / limitNum),
+          total_items: totalCount
         }
       }
     });
@@ -1441,6 +1570,7 @@ async function getPublicProducts(req, res) {
       });
 
       // Transform raw results to match expected format
+      const productIdList = [];
       products = productRows.map(row => {
         const productData = {
           id: row['Product.id'],
@@ -1457,15 +1587,73 @@ async function getPublicProducts(req, res) {
           expiry_date: row['Product.expiry_date'],
           is_active: row['Product.is_active'],
           created_at: row['Product.created_at'],
-          updated_at: row['Product.updated_at']
+          updated_at: row['Product.updated_at'],
+          variations: []
         };
-        
         if (productData.image_url) {
           productData.image_url = getFullUrl(productData.image_url);
         }
-        
+        if (productData.id) productIdList.push(productData.id);
         return productData;
       });
+
+      // Batch-fetch variations for all returned products (free users)
+      if (productIdList.length > 0) {
+        const variationRows = await sequelize.query(`
+          SELECT pv.id, pv.product_id, pv.variation_name, pv.variation_type, pv.is_required, pv.sort_order,
+                 pvo.id as option_id, pvo.option_value, pvo.option_display_name,
+                 pvo.price_adjustment, pvo.stock as option_stock, pvo.sku as option_sku,
+                 pvo.image_url as option_image_url, pvo.is_default, pvo.is_available,
+                 pvo.sort_order as option_sort_order
+          FROM product_variations pv
+          LEFT JOIN product_variation_options pvo ON pv.id = pvo.variation_id
+            AND pvo.tenant_id = :tenantId
+          WHERE pv.product_id IN (:productIds)
+            AND pv.tenant_id = :tenantId
+          ORDER BY pv.product_id, pv.sort_order ASC, pvo.sort_order ASC
+        `, {
+          replacements: { tenantId: effectiveTenantId, productIds: productIdList },
+          type: Sequelize.QueryTypes.SELECT
+        });
+
+        // Group variations by product_id
+        const variationsByProduct = {};
+        variationRows.forEach(v => {
+          if (!variationsByProduct[v.product_id]) variationsByProduct[v.product_id] = {};
+          if (!variationsByProduct[v.product_id][v.id]) {
+            variationsByProduct[v.product_id][v.id] = {
+              id: v.id,
+              variation_name: v.variation_name,
+              variation_type: v.variation_type,
+              is_required: v.is_required,
+              sort_order: v.sort_order,
+              options: []
+            };
+          }
+          if (v.option_id) {
+            variationsByProduct[v.product_id][v.id].options.push({
+              id: v.option_id,
+              option_value: v.option_value,
+              option_display_name: v.option_display_name,
+              price_adjustment: v.price_adjustment,
+              stock: v.option_stock,
+              sku: v.option_sku,
+              image_url: v.option_image_url ? getFullUrl(v.option_image_url) : null,
+              is_default: v.is_default,
+              is_available: v.is_available,
+              sort_order: v.option_sort_order
+            });
+          }
+        });
+
+        // Attach variations to each product
+        products = products.map(p => ({
+          ...p,
+          variations: variationsByProduct[p.id]
+            ? Object.values(variationsByProduct[p.id])
+            : []
+        }));
+      }
     } else {
       // Enterprise users: use Sequelize
       // SAFETY CHECK: If somehow we got here for a free user, use raw SQL instead
@@ -1516,18 +1704,30 @@ async function getPublicProducts(req, res) {
       
       const { count, rows } = await models.StoreProduct.findAndCountAll({
         where: storeProductWhere,
-        attributes: storeProductAttributes, // Explicitly set attributes to avoid SEO columns
+        attributes: storeProductAttributes,
         include: [
           {
             model: models.Product,
             where: productWhere,
             required: true,
-            include: [{
-              model: models.StoreCollectionProduct,
-              required: collection_id ? true : false, // Required only if filtering by collection
-              attributes: ['id', 'collection_id'],
-              ...(collection_id ? { where: { collection_id } } : {})
-            }]
+            include: [
+              {
+                model: models.StoreCollectionProduct,
+                required: collection_id ? true : false,
+                attributes: ['id', 'collection_id'],
+                ...(collection_id ? { where: { collection_id } } : {})
+              },
+              {
+                model: models.ProductVariation,
+                attributes: ['id', 'variation_name', 'variation_type', 'is_required', 'sort_order'],
+                required: false,
+                include: [{
+                  model: models.ProductVariationOption,
+                  attributes: ['id', 'option_value', 'option_display_name', 'price_adjustment', 'stock', 'sku', 'image_url', 'is_default', 'is_available', 'sort_order'],
+                  required: false
+                }]
+              }
+            ]
           }
         ],
         limit: limitNum,
@@ -1539,12 +1739,34 @@ async function getPublicProducts(req, res) {
       });
 
       totalCount = Array.isArray(count) ? count.length : count;
-      
+
       products = rows.map(sp => {
         const productData = sp.Product.toJSON();
         if (productData.image_url) {
           productData.image_url = getFullUrl(productData.image_url);
         }
+        // Normalize variations
+        productData.variations = (productData.ProductVariations || []).map(variation => ({
+          id: variation.id,
+          variation_name: variation.variation_name,
+          variation_type: variation.variation_type,
+          is_required: variation.is_required,
+          sort_order: variation.sort_order,
+          options: (variation.ProductVariationOptions || []).map(opt => ({
+            id: opt.id,
+            option_value: opt.option_value,
+            option_display_name: opt.option_display_name,
+            price_adjustment: opt.price_adjustment,
+            stock: opt.stock,
+            sku: opt.sku,
+            image_url: opt.image_url ? getFullUrl(opt.image_url) : null,
+            is_default: opt.is_default,
+            is_available: opt.is_available,
+            sort_order: opt.sort_order
+          }))
+        }));
+        delete productData.ProductVariations;
+        delete productData.StoreCollectionProducts;
         return productData;
       });
     }

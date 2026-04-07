@@ -1531,6 +1531,11 @@ function initializeModels(sequelize) {
       type: DataTypes.STRING(7),
       defaultValue: '#FFFFFF'
     },
+    selected_theme: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: 'The theme variant the store owner selected from generated logo themes'
+    },
     is_location_based: {
       type: DataTypes.BOOLEAN,
       defaultValue: false

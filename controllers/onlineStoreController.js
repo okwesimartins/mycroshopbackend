@@ -2,6 +2,260 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const initModels = require('../models');
+const sharp = require('sharp');
+
+// ─── Theme generation helpers ────────────────────────────────────────────────
+
+function hexToRgb(hex) {
+  const clean = hex.replace('#', '');
+  return {
+    r: parseInt(clean.substring(0, 2), 16),
+    g: parseInt(clean.substring(2, 4), 16),
+    b: parseInt(clean.substring(4, 6), 16)
+  };
+}
+
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+}
+
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+  if (max === min) {
+    h = s = 0;
+  } else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      default: h = ((r - g) / d + 4) / 6;
+    }
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+function hslToRgb(h, s, l) {
+  h /= 360; s /= 100; l /= 100;
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+}
+
+function hslHex(h, s, l) {
+  const { r, g, b } = hslToRgb(h, s, l);
+  return rgbToHex(r, g, b);
+}
+
+/**
+ * Extract the dominant (most representative) color from an image file using sharp.
+ * Filters out near-white, near-black, and transparent pixels to avoid picking backgrounds.
+ * Returns a hex color string, e.g. "#3B82F6".
+ */
+async function extractDominantColor(filePath) {
+  // Resize to small thumbnail for speed, get raw RGBA pixels
+  const { data } = await sharp(filePath)
+    .resize(80, 80, { fit: 'cover' })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  let rSum = 0, gSum = 0, bSum = 0, count = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+    if (a < 128) continue; // skip transparent pixels
+
+    const brightness = (r + g + b) / 3;
+    if (brightness > 235) continue; // skip near-white
+    if (brightness < 20) continue;  // skip near-black
+
+    // Skip very desaturated (grey) pixels
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const saturation = max === 0 ? 0 : (max - min) / max;
+    if (saturation < 0.12) continue;
+
+    rSum += r; gSum += g; bSum += b; count++;
+  }
+
+  if (count === 0) {
+    // Fallback: average all non-transparent pixels without saturation filter
+    for (let i = 0; i < data.length; i += 4) {
+      const a = data[i + 3];
+      if (a < 128) continue;
+      rSum += data[i]; gSum += data[i + 1]; bSum += data[i + 2]; count++;
+    }
+  }
+
+  if (count === 0) return '#78716C'; // ultimate fallback
+
+  return rgbToHex(Math.round(rSum / count), Math.round(gSum / count), Math.round(bSum / count));
+}
+
+/**
+ * Generate 5 theme variants from a dominant brand color hex string.
+ */
+/**
+ * Build a complete theme object from derived palette colours.
+ * Keys map 1-to-1 with the storefront CSS variables:
+ *   accent        → --accent
+ *   accent_light  → --accent-light
+ *   background    → --dark   (main page background)
+ *   surface       → --mid    (toggle bar, bottom nav background)
+ *   card          → --card   (product / service card background)
+ *   text          → --text
+ *   muted         → --muted
+ *   border        → --border
+ * Plus button_color / button_font_color for CTA buttons.
+ */
+function buildTheme({ id, name, description, accent, accentLight, background, surface, card, text, muted, border, buttonColor, buttonFontColor }) {
+  return {
+    id,
+    name,
+    description,
+    // CSS variable mappings
+    accent,           // --accent
+    accent_light: accentLight,  // --accent-light
+    background,       // --dark
+    surface,          // --mid
+    card,             // --card
+    text,             // --text
+    muted,            // --muted
+    border,           // --border
+    // Button-specific (accent usually doubles as button_color)
+    button_color: buttonColor,
+    button_font_color: buttonFontColor,
+    // Convenience: 3 swatches for the theme picker UI
+    preview_colors: [background, accent, card]
+  };
+}
+
+function hexToRgbaStr(hex, alpha) {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/**
+ * Generate 5 theme variants from a dominant brand color hex string.
+ * Every theme carries ALL CSS variables the storefront template needs.
+ */
+function generateThemesFromColor(dominantHex) {
+  const { r, g, b } = hexToRgb(dominantHex);
+  const { h, s, l } = rgbToHsl(r, g, b);
+
+  const brandS    = Math.min(Math.max(s, 40), 85);
+  const brandL    = Math.min(Math.max(l, 30), 65);
+
+  const brand        = hslHex(h, brandS, brandL);
+  const brandLight   = hslHex(h, Math.min(brandS, 55), Math.min(brandL + 32, 90));
+  const brandDark    = hslHex(h, Math.min(brandS, 70), Math.max(brandL - 20, 15));
+  const brandVibrant = hslHex(h, Math.min(brandS + 15, 100), Math.min(Math.max(brandL, 45), 55));
+  const brandMuted   = hslHex(h, Math.max(brandS - 25, 15), Math.min(brandL + 15, 70));
+  const brandPastel  = hslHex(h, Math.max(brandS - 20, 20), Math.min(brandL + 35, 90));
+
+  const lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+  const brandFontColor = lum > 0.55 ? '#1a1a1a' : '#FFFFFF';
+
+  return [
+    // ── CLASSIC ── warm white, brand accent
+    buildTheme({
+      id: 'classic', name: 'Classic',
+      description: 'Clean and timeless — brand accent on a warm white base',
+      accent: brand,
+      accentLight: brandLight,
+      background: '#F2EFEF',
+      surface: '#E8E5E2',
+      card: '#FFFFFF',
+      text: '#2D2D2D',
+      muted: 'rgba(45,45,45,0.55)',
+      border: hexToRgbaStr(brand, 0.2),
+      buttonColor: brand,
+      buttonFontColor: brandFontColor
+    }),
+
+    // ── LIGHT ── pastel-tinted background
+    buildTheme({
+      id: 'light', name: 'Light',
+      description: 'Airy and minimal — soft tinted background with brand buttons',
+      accent: brand,
+      accentLight: brandLight,
+      background: brandPastel,
+      surface: hslHex(h, Math.max(brandS - 25, 10), Math.min(brandL + 25, 84)),
+      card: '#FFFFFF',
+      text: '#333333',
+      muted: 'rgba(51,51,51,0.55)',
+      border: hexToRgbaStr(brand, 0.2),
+      buttonColor: brand,
+      buttonFontColor: '#FFFFFF'
+    }),
+
+    // ── DARK ── deep brand-tinted dark (mirrors the storefront template palette)
+    buildTheme({
+      id: 'dark', name: 'Dark',
+      description: 'Bold and dramatic — dark background with brand highlights',
+      accent: brandVibrant,
+      accentLight: hslHex(h, Math.min(brandS, 55), Math.min(brandL + 25, 78)),
+      background: hslHex(h, Math.min(brandS * 0.4, 28), 10),
+      surface:    hslHex(h, Math.min(brandS * 0.45, 30), 16),
+      card:       hslHex(h, Math.min(brandS * 0.5, 32), 20),
+      text: '#F5F2EE',
+      muted: 'rgba(245,242,238,0.55)',
+      border: hexToRgbaStr(brandVibrant, 0.2),
+      buttonColor: brandVibrant,
+      buttonFontColor: '#FFFFFF'
+    }),
+
+    // ── BOLD ── brand colour fills the canvas
+    buildTheme({
+      id: 'bold', name: 'Bold',
+      description: 'High-impact — vibrant brand colour fills the canvas',
+      accent: '#FFFFFF',
+      accentLight: 'rgba(255,255,255,0.75)',
+      background: brandVibrant,
+      surface:    hslHex(h, Math.min(brandS + 5, 100), Math.max(brandL - 8, 28)),
+      card:       hslHex(h, Math.min(brandS + 8, 100), Math.max(brandL - 4, 34)),
+      text: '#FFFFFF',
+      muted: 'rgba(255,255,255,0.6)',
+      border: 'rgba(255,255,255,0.2)',
+      buttonColor: '#FFFFFF',
+      buttonFontColor: brandDark
+    }),
+
+    // ── SOFT ── neutral base, muted brand accents
+    buildTheme({
+      id: 'soft', name: 'Soft',
+      description: 'Gentle and welcoming — muted tones with subtle brand accents',
+      accent: brandMuted,
+      accentLight: brandPastel,
+      background: '#FAFAFA',
+      surface: '#F0EDEA',
+      card: '#FFFFFF',
+      text: '#555555',
+      muted: 'rgba(85,85,85,0.55)',
+      border: hexToRgbaStr(brandMuted, 0.2),
+      buttonColor: brandMuted,
+      buttonFontColor: '#FFFFFF'
+    })
+  ];
+}
 
 /**
  * Get the default store URL (subdomain on MycroShop: username.mycroshop.com).
@@ -697,19 +951,16 @@ async function updateStoreAppearance(req, res) {
       });
     }
 
-    const {
-      background_color,
-      button_style,
-      button_color,
-      button_font_color
-    } = req.body;
+    const { selected_theme } = req.body;
 
-    await onlineStore.update({
-      ...(background_color !== undefined && { background_color }),
-      ...(button_style !== undefined && { button_style }),
-      ...(button_color !== undefined && { button_color }),
-      ...(button_font_color !== undefined && { button_font_color })
-    });
+    if (!selected_theme || typeof selected_theme !== 'object') {
+      return res.status(400).json({
+        success: false,
+        message: 'selected_theme is required and must be a theme object'
+      });
+    }
+
+    await onlineStore.update({ selected_theme });
 
     await onlineStore.reload();
     const normalizedStore = normalizeOnlineStoreData(req, onlineStore);
@@ -769,6 +1020,15 @@ function normalizeOnlineStoreData(req, onlineStore) {
     storeData.social_links = [];
   }
   
+  // Parse selected_theme if MySQL returned it as a JSON string
+  if (storeData.selected_theme && typeof storeData.selected_theme === 'string') {
+    try {
+      storeData.selected_theme = JSON.parse(storeData.selected_theme);
+    } catch (e) {
+      storeData.selected_theme = null;
+    }
+  }
+
   // Convert image URLs to full URLs
   if (storeData.profile_logo_url) {
     storeData.profile_logo_url = getFullUrl(req, storeData.profile_logo_url);
@@ -838,9 +1098,10 @@ async function uploadStoreImage(req, res) {
         const uploadedImages = {};
         
         // Process logo
+        let generatedThemes = null;
         if (files.logo && files.logo[0]) {
-          const oldImagePath = onlineStore.profile_logo_url 
-            ? path.join(__dirname, '../', onlineStore.profile_logo_url) 
+          const oldImagePath = onlineStore.profile_logo_url
+            ? path.join(__dirname, '../', onlineStore.profile_logo_url)
             : null;
           if (oldImagePath && fs.existsSync(oldImagePath)) {
             fs.unlinkSync(oldImagePath);
@@ -848,6 +1109,14 @@ async function uploadStoreImage(req, res) {
           const relativeLogoUrl = `/uploads/stores/${files.logo[0].filename}`;
           updates.profile_logo_url = relativeLogoUrl;
           uploadedImages.logo = getFullUrl(req, relativeLogoUrl);
+
+          // Extract dominant color and generate theme suggestions
+          try {
+            const dominantColor = await extractDominantColor(files.logo[0].path);
+            generatedThemes = generateThemesFromColor(dominantColor);
+          } catch (themeErr) {
+            console.warn('Theme generation failed (non-fatal):', themeErr.message);
+          }
         }
         
         // Process banner
@@ -894,13 +1163,18 @@ async function uploadStoreImage(req, res) {
         const uploadedCount = Object.keys(uploadedImages).length;
         const uploadedTypes = Object.keys(uploadedImages).join(', ');
         
+        const responseData = {
+          uploaded_images: uploadedImages,
+          onlineStore: normalizedStore
+        };
+        if (generatedThemes) {
+          responseData.suggested_themes = generatedThemes;
+        }
+
         res.json({
           success: true,
           message: `${uploadedCount} image(s) uploaded successfully: ${uploadedTypes}`,
-          data: {
-            uploaded_images: uploadedImages,
-            onlineStore: normalizedStore
-          }
+          data: responseData
         });
       }
       // Support legacy format: single file with image_type field
@@ -933,17 +1207,33 @@ async function uploadStoreImage(req, res) {
 
         // Refresh the onlineStore to get updated values
         await onlineStore.reload();
-        
+
         // Normalize the onlineStore data (parses social_links, converts URLs)
         const normalizedStore = normalizeOnlineStoreData(req, onlineStore);
+
+        // Generate themes if logo was uploaded
+        let legacyThemes = null;
+        if (image_type === 'logo') {
+          try {
+            const dominantColor = await extractDominantColor(files.image[0].path);
+            legacyThemes = generateThemesFromColor(dominantColor);
+          } catch (themeErr) {
+            console.warn('Theme generation failed (non-fatal):', themeErr.message);
+          }
+        }
+
+        const legacyResponseData = {
+          image_url: getFullUrl(req, relativeImageUrl),
+          onlineStore: normalizedStore
+        };
+        if (legacyThemes) {
+          legacyResponseData.suggested_themes = legacyThemes;
+        }
 
         res.json({
           success: true,
           message: `${image_type} uploaded successfully`,
-          data: {
-            image_url: getFullUrl(req, relativeImageUrl),
-            onlineStore: normalizedStore
-          }
+          data: legacyResponseData
         });
       }
       else {
@@ -969,6 +1259,83 @@ async function uploadStoreImage(req, res) {
       });
     }
   });
+}
+
+/**
+ * Delete store image (logo, banner, or background)
+ * DELETE /api/v1/stores/online/:id/image
+ * Body: { image_type: 'logo' | 'banner' | 'background' }
+ */
+async function deleteStoreImage(req, res) {
+  try {
+    if (!req.db) {
+      return res.status(500).json({
+        success: false,
+        message: 'Database connection not available'
+      });
+    }
+
+    const models = initModels(req.db);
+    const onlineStore = await findTenantOnlineStoreById(req, models, req.params.id);
+    if (!onlineStore) {
+      return res.status(404).json({
+        success: false,
+        message: 'Online store not found or access denied'
+      });
+    }
+
+    const { image_type } = req.body;
+    const validTypes = ['logo', 'banner', 'background'];
+    if (!image_type || !validTypes.includes(image_type)) {
+      return res.status(400).json({
+        success: false,
+        message: 'image_type must be one of: logo, banner, background'
+      });
+    }
+
+    // Map image_type to the database field name
+    const fieldMap = {
+      logo: 'profile_logo_url',
+      banner: 'banner_image_url',
+      background: 'background_image_url'
+    };
+    const dbField = fieldMap[image_type];
+
+    if (!onlineStore[dbField]) {
+      return res.status(404).json({
+        success: false,
+        message: `No ${image_type} image found to delete`
+      });
+    }
+
+    // Delete the physical file from disk (only for locally uploaded files)
+    const currentUrl = onlineStore[dbField];
+    if (currentUrl && currentUrl.startsWith('/uploads/')) {
+      const filePath = path.join(__dirname, '../', currentUrl);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    // Clear the URL in the database
+    await onlineStore.update({ [dbField]: null });
+    await onlineStore.reload();
+
+    const normalizedStore = normalizeOnlineStoreData(req, onlineStore);
+
+    res.json({
+      success: true,
+      message: `${image_type} image deleted successfully`,
+      data: { onlineStore: normalizedStore }
+    });
+  } catch (error) {
+    console.error('Error deleting store image:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete store image',
+      error: error.message
+    });
+  }
 }
 
 /**
@@ -3799,6 +4166,11 @@ async function getStorePreview(req, res) {
     if (storeData.banner_image_url) storeData.banner_image_url = getFullUrl(storeData.banner_image_url);
     if (storeData.background_image_url) storeData.background_image_url = getFullUrl(storeData.background_image_url);
 
+    // Parse selected_theme if stored as a JSON string
+    if (storeData.selected_theme && typeof storeData.selected_theme === 'string') {
+      try { storeData.selected_theme = JSON.parse(storeData.selected_theme); } catch (e) { storeData.selected_theme = null; }
+    }
+
     // Check if products and services exist to determine toggle visibility
     // Can preview even if not published
     // CRITICAL: For free users, store_products table does NOT have online_store_id column
@@ -4369,11 +4741,12 @@ async function getStorePreview(req, res) {
           button_style: storeData.button_style,
           button_color: storeData.button_color,
           button_font_color: storeData.button_font_color,
+          selected_theme: storeData.selected_theme || null,
           social_links: storeData.social_links,
           is_location_based: storeData.is_location_based,
           show_location: storeData.show_location,
           allow_delivery_datetime: storeData.allow_delivery_datetime,
-          is_published: storeData.is_published, // Include published status for preview
+          is_published: storeData.is_published,
           OnlineStoreLocations: storeData.OnlineStoreLocations
         },
         toggles: {
@@ -5029,22 +5402,28 @@ async function getPreviewProducts(req, res) {
     }
 
     // Normalize products - handle both Sequelize instances and plain objects
+    const productIds = [];
     const products = rows.map(sp => {
-      const productData = sp.Product && typeof sp.Product.toJSON === 'function' 
-        ? sp.Product.toJSON() 
+      const productData = sp.Product && typeof sp.Product.toJSON === 'function'
+        ? sp.Product.toJSON()
         : (sp.Product || sp);
       if (productData && productData.image_url) {
         productData.image_url = getFullUrl(productData.image_url);
       }
+      if (productData && productData.id) productIds.push(productData.id);
       return productData;
     });
+
+    // Batch-fetch variants for all products
+    const variantsByProduct = await fetchVariantsForProductIds(req.db, productIds, getFullUrl);
+    products.forEach(p => { p.variants = variantsByProduct.get(p.id) || []; });
 
     // Calculate total count
     const totalCount = Array.isArray(count) ? count[0]?.count || count.length : count;
 
     res.json({
       success: true,
-      data: { 
+      data: {
         products,
         pagination: {
           page: pageNum,
@@ -5373,6 +5752,7 @@ module.exports = {
   updateStoreInformation,
   updateStoreAppearance,
   uploadStoreImage,
+  deleteStoreImage,
   publishOnlineStore,
   getPublicStorePreview,
   getStorePreview,
