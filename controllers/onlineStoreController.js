@@ -828,6 +828,19 @@ async function updateStorefront(req, res) {
       ...(store_description !== undefined && { store_description })
     });
 
+    // Mirror store_description to tenant.business_bio
+    if (store_description !== undefined) {
+      try {
+        const { getTenantById } = require('../config/tenant');
+        const tenant = await getTenantById(req.user.tenantId);
+        if (tenant) {
+          await tenant.update({ business_bio: store_description });
+        }
+      } catch (bioErr) {
+        console.warn('Could not sync store_description to business_bio:', bioErr.message);
+      }
+    }
+
     await onlineStore.reload();
     const normalizedStore = normalizeOnlineStoreData(req, onlineStore);
     res.json({
