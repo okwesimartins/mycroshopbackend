@@ -523,10 +523,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       profile_logo_url VARCHAR(500),
       banner_image_url VARCHAR(500),
       background_image_url VARCHAR(500),
-      background_color VARCHAR(7) DEFAULT '#F2EFEF',
-      button_style ENUM('rounded', 'square', 'pill') DEFAULT 'rounded',
-      button_color VARCHAR(7) DEFAULT '#78716C',
-      button_font_color VARCHAR(7) DEFAULT '#FFFFFF',
+      selected_theme JSON,
       is_location_based BOOLEAN DEFAULT FALSE,
       show_location BOOLEAN DEFAULT TRUE,
       allow_delivery_datetime BOOLEAN DEFAULT FALSE,
@@ -1517,12 +1514,31 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       console.log('Adding selected_theme column to online_stores table...');
       await connection.query(`
         ALTER TABLE online_stores
-        ADD COLUMN selected_theme JSON NULL AFTER button_font_color
+        ADD COLUMN selected_theme JSON NULL
       `);
       console.log('✅ selected_theme column added to online_stores table');
     }
   } catch (alterError) {
     console.warn('Could not add selected_theme column to online_stores:', alterError.message);
+  }
+
+  // Migration: drop legacy appearance columns (replaced by selected_theme)
+  const legacyAppearanceCols = ['background_color', 'button_style', 'button_color', 'button_font_color'];
+  for (const col of legacyAppearanceCols) {
+    try {
+      const [existing] = await connection.query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'online_stores'
+        AND COLUMN_NAME = '${col}'
+      `);
+      if (existing && existing.length > 0) {
+        await connection.query(`ALTER TABLE online_stores DROP COLUMN \`${col}\``);
+        console.log(`✅ Dropped legacy column online_stores.${col}`);
+      }
+    } catch (dropError) {
+      console.warn(`Could not drop legacy column ${col}:`, dropError.message);
+    }
   }
 
   // All online store tables are now complete!

@@ -15,12 +15,18 @@ router.get('/:username/products', publicStoreController.getPublicProducts);
 // Get product by ID (public)
 router.get('/:username/products/:product_id', publicStoreController.getPublicProduct);
 
+// Get products in a specific collection (public)
+router.get('/:username/collections/:collection_id/products', publicStoreController.getPublicCollectionProducts);
+
 // Get all services for an online store (public - ALL services with filters)
 // Filters: collection_id, search
 router.get('/:username/services', publicStoreController.getPublicServices);
 
 // Get service by ID (public)
 router.get('/:username/services/:service_id', publicStoreController.getPublicService);
+
+// Get services in a specific collection (public)
+router.get('/:username/collections/:collection_id/services', publicStoreController.getPublicCollectionServices);
 
 module.exports = router;
 

@@ -1515,22 +1515,6 @@ function initializeModels(sequelize) {
       type: DataTypes.STRING(500),
       allowNull: true
     },
-    background_color: {
-      type: DataTypes.STRING(7),
-      defaultValue: '#F2EFEF'
-    },
-    button_style: {
-      type: DataTypes.ENUM('rounded', 'square', 'pill'),
-      defaultValue: 'rounded'
-    },
-    button_color: {
-      type: DataTypes.STRING(7),
-      defaultValue: '#78716C'
-    },
-    button_font_color: {
-      type: DataTypes.STRING(7),
-      defaultValue: '#FFFFFF'
-    },
     selected_theme: {
       type: DataTypes.JSON,
       allowNull: true,

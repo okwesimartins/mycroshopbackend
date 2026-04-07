@@ -12,7 +12,6 @@
  */
 
 const { getTenantConnection } = require('../config/database');
-const { getTenantBySubdomain } = require('../config/tenant');
 const initModels = require('../models');
 
 /**
@@ -688,10 +687,6 @@ async function getPublicStore(req, res) {
           profile_logo_url: storeData.profile_logo_url,
           banner_image_url: storeData.banner_image_url,
           background_image_url: storeData.background_image_url,
-          background_color: storeData.background_color,
-          button_style: storeData.button_style,
-          button_color: storeData.button_color,
-          button_font_color: storeData.button_font_color,
           selected_theme: storeData.selected_theme || null,
           social_links: storeData.social_links,
           is_location_based: storeData.is_location_based,
@@ -2082,7 +2077,9 @@ module.exports = {
   getPublicStore,
   getPublicProducts,
   getPublicProduct,
+  getPublicCollectionProducts,
   getPublicServices,
-  getPublicService
+  getPublicService,
+  getPublicCollectionServices
 };
 
