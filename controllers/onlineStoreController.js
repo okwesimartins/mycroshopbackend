@@ -113,49 +113,60 @@ async function extractDominantColor(filePath) {
 /**
  * Generate 5 theme variants from a dominant brand color hex string.
  */
-/**
- * Build a complete theme object from derived palette colours.
- * Keys map 1-to-1 with the storefront CSS variables:
- *   accent        → --accent
- *   accent_light  → --accent-light
- *   background    → --dark   (main page background)
- *   surface       → --mid    (toggle bar, bottom nav background)
- *   card          → --card   (product / service card background)
- *   text          → --text
- *   muted         → --muted
- *   border        → --border
- * Plus button_color / button_font_color for CTA buttons.
- */
-function buildTheme({ id, name, description, accent, accentLight, background, surface, card, text, muted, border, buttonColor, buttonFontColor }) {
-  return {
-    id,
-    name,
-    description,
-    // CSS variable mappings
-    accent,           // --accent
-    accent_light: accentLight,  // --accent-light
-    background,       // --dark
-    surface,          // --mid
-    card,             // --card
-    text,             // --text
-    muted,            // --muted
-    border,           // --border
-    // Button-specific (accent usually doubles as button_color)
-    button_color: buttonColor,
-    button_font_color: buttonFontColor,
-    // Convenience: 3 swatches for the theme picker UI
-    preview_colors: [background, accent, card]
-  };
-}
-
 function hexToRgbaStr(hex, alpha) {
   const { r, g, b } = hexToRgb(hex);
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
 /**
+ * Build a complete, fully-specified theme object.
+ * Every key the storefront needs is present — no CSS fallbacks required.
+ */
+function buildTheme({
+  id, name, description,
+  // Backgrounds
+  background_color, surface, card,
+  // Primary brand colour scale
+  primary, primary_light, primary_dark, primary_muted,
+  // Buttons
+  button_color, button_font_color,
+  // Text hierarchy
+  text_primary, text_secondary, text_tertiary,
+  // Borders
+  border_default, border_accent,
+  // Picker swatches (3 colours)
+  preview_colors
+}) {
+  return {
+    id,
+    name,
+    description,
+    // Backgrounds
+    background_color,
+    surface,
+    card,
+    // Primary colour scale
+    primary,
+    primary_light,
+    primary_dark,
+    primary_muted,
+    // Buttons
+    button_color,
+    button_font_color,
+    // Text
+    text_primary,
+    text_secondary,
+    text_tertiary,
+    // Borders
+    border_default,
+    border_accent,
+    // Picker swatches
+    preview_colors: preview_colors || [background_color, primary, card]
+  };
+}
+
+/**
  * Generate 5 theme variants from a dominant brand color hex string.
- * Every theme carries ALL CSS variables the storefront template needs.
  */
 function generateThemesFromColor(dominantHex) {
   const { r, g, b } = hexToRgb(dominantHex);
@@ -164,95 +175,121 @@ function generateThemesFromColor(dominantHex) {
   const brandS    = Math.min(Math.max(s, 40), 85);
   const brandL    = Math.min(Math.max(l, 30), 65);
 
-  const brand        = hslHex(h, brandS, brandL);
-  const brandLight   = hslHex(h, Math.min(brandS, 55), Math.min(brandL + 32, 90));
-  const brandDark    = hslHex(h, Math.min(brandS, 70), Math.max(brandL - 20, 15));
-  const brandVibrant = hslHex(h, Math.min(brandS + 15, 100), Math.min(Math.max(brandL, 45), 55));
-  const brandMuted   = hslHex(h, Math.max(brandS - 25, 15), Math.min(brandL + 15, 70));
-  const brandPastel  = hslHex(h, Math.max(brandS - 20, 20), Math.min(brandL + 35, 90));
+  // Brand colour scale
+  const primary        = hslHex(h, brandS, brandL);
+  const primaryLight   = hslHex(h, Math.min(brandS, 55), Math.min(brandL + 28, 88));
+  const primaryDark    = hslHex(h, Math.min(brandS, 70), Math.max(brandL - 20, 14));
+  const primaryVibrant = hslHex(h, Math.min(brandS + 15, 100), Math.min(Math.max(brandL, 45), 55));
+  const primaryMuted   = hslHex(h, Math.max(brandS - 25, 15), Math.min(brandL + 15, 70));
+  const primaryPastel  = hslHex(h, Math.max(brandS - 20, 20), Math.min(brandL + 35, 90));
 
   const lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
-  const brandFontColor = lum > 0.55 ? '#1a1a1a' : '#FFFFFF';
+  const primaryFontColor = lum > 0.55 ? '#111111' : '#FFFFFF';
 
   return [
-    // ── CLASSIC ── warm white, brand accent
+    // ── CLASSIC ── warm white canvas, brand accent
     buildTheme({
       id: 'classic', name: 'Classic',
       description: 'Clean and timeless — brand accent on a warm white base',
-      accent: brand,
-      accentLight: brandLight,
-      background: '#F2EFEF',
-      surface: '#E8E5E2',
-      card: '#FFFFFF',
-      text: '#2D2D2D',
-      muted: 'rgba(45,45,45,0.55)',
-      border: hexToRgbaStr(brand, 0.2),
-      buttonColor: brand,
-      buttonFontColor: brandFontColor
+      background_color: '#F2EFEF',
+      surface:          '#E8E5E2',
+      card:             '#FFFFFF',
+      primary,
+      primary_light:  primaryLight,
+      primary_dark:   primaryDark,
+      primary_muted:  hexToRgbaStr(primary, 0.08),
+      button_color:       primary,
+      button_font_color:  primaryFontColor,
+      text_primary:       '#111111',
+      text_secondary:     'rgba(17,17,17,0.58)',
+      text_tertiary:      'rgba(17,17,17,0.35)',
+      border_default:     'rgba(0,0,0,0.08)',
+      border_accent:      hexToRgbaStr(primary, 0.25),
+      preview_colors: ['#F2EFEF', primary, primaryLight]
     }),
 
-    // ── LIGHT ── pastel-tinted background
+    // ── LIGHT ── soft pastel tint, clean cards
     buildTheme({
       id: 'light', name: 'Light',
-      description: 'Airy and minimal — soft tinted background with brand buttons',
-      accent: brand,
-      accentLight: brandLight,
-      background: brandPastel,
-      surface: hslHex(h, Math.max(brandS - 25, 10), Math.min(brandL + 25, 84)),
-      card: '#FFFFFF',
-      text: '#333333',
-      muted: 'rgba(51,51,51,0.55)',
-      border: hexToRgbaStr(brand, 0.2),
-      buttonColor: brand,
-      buttonFontColor: '#FFFFFF'
+      description: 'Clean and minimal — soft tinted background with brand buttons',
+      background_color: '#FFFFFF',
+      surface:          primaryPastel,
+      card:             hslHex(h, Math.max(brandS - 30, 8), Math.min(brandL + 30, 94)),
+      primary,
+      primary_light:  primaryLight,
+      primary_dark:   primaryDark,
+      primary_muted:  hexToRgbaStr(primary, 0.08),
+      button_color:       primary,
+      button_font_color:  '#FFFFFF',
+      text_primary:       '#111111',
+      text_secondary:     'rgba(17,17,17,0.58)',
+      text_tertiary:      'rgba(17,17,17,0.35)',
+      border_default:     'rgba(0,0,0,0.08)',
+      border_accent:      hexToRgbaStr(primary, 0.25),
+      preview_colors: ['#FFFFFF', primary, primaryPastel]
     }),
 
-    // ── DARK ── deep brand-tinted dark (mirrors the storefront template palette)
+    // ── DARK ── deep brand-tinted dark
     buildTheme({
       id: 'dark', name: 'Dark',
       description: 'Bold and dramatic — dark background with brand highlights',
-      accent: brandVibrant,
-      accentLight: hslHex(h, Math.min(brandS, 55), Math.min(brandL + 25, 78)),
-      background: hslHex(h, Math.min(brandS * 0.4, 28), 10),
-      surface:    hslHex(h, Math.min(brandS * 0.45, 30), 16),
-      card:       hslHex(h, Math.min(brandS * 0.5, 32), 20),
-      text: '#F5F2EE',
-      muted: 'rgba(245,242,238,0.55)',
-      border: hexToRgbaStr(brandVibrant, 0.2),
-      buttonColor: brandVibrant,
-      buttonFontColor: '#FFFFFF'
+      background_color: hslHex(h, Math.min(brandS * 0.4, 28), 10),
+      surface:          hslHex(h, Math.min(brandS * 0.45, 30), 16),
+      card:             hslHex(h, Math.min(brandS * 0.5, 32), 20),
+      primary:          primaryVibrant,
+      primary_light:    hslHex(h, Math.min(brandS, 55), Math.min(brandL + 25, 78)),
+      primary_dark:     primaryDark,
+      primary_muted:    hexToRgbaStr(primaryVibrant, 0.12),
+      button_color:       primaryVibrant,
+      button_font_color:  '#FFFFFF',
+      text_primary:       '#F5F2EE',
+      text_secondary:     'rgba(245,242,238,0.58)',
+      text_tertiary:      'rgba(245,242,238,0.35)',
+      border_default:     'rgba(255,255,255,0.08)',
+      border_accent:      hexToRgbaStr(primaryVibrant, 0.25),
+      preview_colors: [hslHex(h, Math.min(brandS * 0.4, 28), 10), primaryVibrant, hslHex(h, Math.min(brandS * 0.5, 32), 20)]
     }),
 
-    // ── BOLD ── brand colour fills the canvas
+    // ── BOLD ── vibrant brand colour fills the canvas
     buildTheme({
       id: 'bold', name: 'Bold',
       description: 'High-impact — vibrant brand colour fills the canvas',
-      accent: '#FFFFFF',
-      accentLight: 'rgba(255,255,255,0.75)',
-      background: brandVibrant,
-      surface:    hslHex(h, Math.min(brandS + 5, 100), Math.max(brandL - 8, 28)),
-      card:       hslHex(h, Math.min(brandS + 8, 100), Math.max(brandL - 4, 34)),
-      text: '#FFFFFF',
-      muted: 'rgba(255,255,255,0.6)',
-      border: 'rgba(255,255,255,0.2)',
-      buttonColor: '#FFFFFF',
-      buttonFontColor: brandDark
+      background_color: primaryVibrant,
+      surface:          hslHex(h, Math.min(brandS + 5, 100), Math.max(brandL - 8, 28)),
+      card:             hslHex(h, Math.min(brandS + 8, 100), Math.max(brandL - 4, 34)),
+      primary:          '#FFFFFF',
+      primary_light:    'rgba(255,255,255,0.75)',
+      primary_dark:     primaryDark,
+      primary_muted:    'rgba(255,255,255,0.12)',
+      button_color:       '#FFFFFF',
+      button_font_color:  primaryDark,
+      text_primary:       '#FFFFFF',
+      text_secondary:     'rgba(255,255,255,0.65)',
+      text_tertiary:      'rgba(255,255,255,0.4)',
+      border_default:     'rgba(255,255,255,0.15)',
+      border_accent:      'rgba(255,255,255,0.35)',
+      preview_colors: [primaryVibrant, '#FFFFFF', hslHex(h, Math.min(brandS + 5, 100), Math.max(brandL - 8, 28))]
     }),
 
     // ── SOFT ── neutral base, muted brand accents
     buildTheme({
       id: 'soft', name: 'Soft',
       description: 'Gentle and welcoming — muted tones with subtle brand accents',
-      accent: brandMuted,
-      accentLight: brandPastel,
-      background: '#FAFAFA',
-      surface: '#F0EDEA',
-      card: '#FFFFFF',
-      text: '#555555',
-      muted: 'rgba(85,85,85,0.55)',
-      border: hexToRgbaStr(brandMuted, 0.2),
-      buttonColor: brandMuted,
-      buttonFontColor: '#FFFFFF'
+      background_color: '#FAFAFA',
+      surface:          '#F0EDEA',
+      card:             '#FFFFFF',
+      primary:          primaryMuted,
+      primary_light:    primaryPastel,
+      primary_dark:     primaryDark,
+      primary_muted:    hexToRgbaStr(primaryMuted, 0.08),
+      button_color:       primaryMuted,
+      button_font_color:  '#FFFFFF',
+      text_primary:       '#111111',
+      text_secondary:     'rgba(17,17,17,0.55)',
+      text_tertiary:      'rgba(17,17,17,0.32)',
+      border_default:     'rgba(0,0,0,0.07)',
+      border_accent:      hexToRgbaStr(primaryMuted, 0.22),
+      preview_colors: ['#FAFAFA', primaryMuted, primaryPastel]
     })
   ];
 }
