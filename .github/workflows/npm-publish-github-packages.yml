@@ -36,4 +36,4 @@ jobs:
         username: ${{ secrets.USERNAME }}
         password: ${{ secrets.PASSWORD }}
         local-dir: dist/
-        server-dir: /public_html/backend.mycroshop.com
+        server-dir: /public_html/backend.mycroshop.com/
