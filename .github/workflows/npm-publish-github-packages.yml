@@ -35,5 +35,5 @@ jobs:
         server: ftp.legithairng.com
         username: ${{ secrets.USERNAME }}
         password: ${{ secrets.PASSWORD }}
-        local-dir: dist/
+        local-dir: /
         server-dir: /public_html/backend.mycroshop.com/
