@@ -1495,6 +1495,25 @@ async function getAvailableServices(req, res) {
     // Get services linked to this online store via OnlineStoreService
     // Free users: also scope StoreService to their tenant_id
     const { Op } = require('sequelize');
+
+    // Find service_ids already assigned to a collection in this online store
+    const collectionServices = await models.StoreCollectionService.findAll({
+      attributes: ['service_id'],
+      include: [
+        {
+          model: models.StoreCollection,
+          attributes: [],
+          where: {
+            online_store_id,
+            ...(isFreePlan ? { tenant_id: tenantId } : {})
+          },
+          required: true
+        }
+      ],
+      ...(isFreePlan ? { where: { tenant_id: tenantId } } : {})
+    });
+    const serviceIdsInCollections = collectionServices.map(cs => cs.service_id);
+
     const onlineStoreServices = await models.OnlineStoreService.findAll({
       where: { online_store_id },
       include: [
@@ -1503,6 +1522,7 @@ async function getAvailableServices(req, res) {
           where: {
             is_active: true,
             ...(isFreePlan ? { tenant_id: tenantId } : {}),
+            ...(serviceIdsInCollections.length > 0 ? { id: { [Op.notIn]: serviceIdsInCollections } } : {}),
             ...(search && { service_title: { [Op.like]: `%${search}%` } }),
             ...(location_type && { location_type })
           },
