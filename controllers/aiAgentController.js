@@ -91,6 +91,9 @@ function validateProductMetadata(md, amountNum) {
   if (!md.customer_phone || !String(md.customer_phone).trim()) {
     errs.push('metadata.customer_phone is required');
   }
+  if (!md.online_store_id || Number.isNaN(Number(md.online_store_id))) {
+    errs.push('metadata.online_store_id is required for product payments');
+  }
   const items = Array.isArray(md.items) ? md.items : null;
   if (!items || items.length === 0) {
     errs.push('metadata.items is required for product payments');

@@ -1869,6 +1869,8 @@ async function initializePaystackPayment(paymentData, secretKey, testMode, split
     } else if (splitOptions && splitOptions.subaccount) {
       // Use subaccount directly with charge_amount (fixed amount in kobo)
       payload.subaccount = splitOptions.subaccount;
+      // bearer: 'account' means the main account (platform) bears the Paystack transaction fee
+      payload.bearer = splitOptions.bearer || 'account';
       if (splitOptions.charge_amount) {
         // Use charge_amount (fixed amount) - this is the capped fee
         payload.charge_amount = splitOptions.charge_amount;
@@ -2233,7 +2235,7 @@ async function handlePaymentWebhook(req, res) {
           {
             payment_status: 'paid',
             status: 'confirmed',
-            paid_at: new Date()
+            payment_method: data.authorization?.channel || 'card'
           },
           { where: orderWhere }
         );
@@ -2273,6 +2275,91 @@ async function handlePaymentWebhook(req, res) {
               // Don't fail webhook processing if email fails
             }
           }
+        }
+      }
+
+      // Handle WhatsApp AI product order creation
+      // When AI agent sends flow='product_order', no OnlineStoreOrder exists yet.
+      // Create order + items from metadata.items now that payment is confirmed.
+      if (!transaction.order_id && metadata.flow === 'product_order' && Array.isArray(metadata.items) && metadata.items.length > 0) {
+        try {
+          const waOnlineStoreId = metadata.online_store_id ? parseInt(metadata.online_store_id, 10) : null;
+
+          if (!waOnlineStoreId) {
+            console.warn('WhatsApp product order: metadata.online_store_id missing — skipping order creation');
+          } else {
+            const orderNumber = `WA-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+            const items = metadata.items;
+            const subtotal = items.reduce((sum, it) => sum + ((Number(it.unit_price) || 0) * (Number(it.quantity) || 1)), 0);
+            const deliveryFee = Number(metadata.delivery_fee || 0);
+            const discountAmt = Number(metadata.discount || 0);
+            const taxAmt = Number(metadata.tax || 0);
+
+            const waOrder = await models.OnlineStoreOrder.create({
+              tenant_id: isFreePlan ? parsedTenantId : null,
+              online_store_id: waOnlineStoreId,
+              order_number: orderNumber,
+              customer_name: transaction.customer_name || metadata.customer_name || 'WhatsApp Customer',
+              customer_email: transaction.customer_email || metadata.customer_email || null,
+              customer_phone: metadata.customer_phone || null,
+              customer_address: metadata.delivery_address || metadata.customer_address || null,
+              city: metadata.city || null,
+              state: metadata.state || null,
+              country: metadata.country || 'Nigeria',
+              subtotal,
+              tax_amount: taxAmt,
+              shipping_amount: deliveryFee,
+              discount_amount: discountAmt,
+              total: transaction.amount,
+              payment_status: 'paid',
+              status: 'confirmed',
+              payment_method: data.authorization?.channel || 'card',
+              notes: metadata.notes || null,
+            });
+
+            await Promise.all(items.map(it => models.OnlineStoreOrderItem.create({
+              order_id: waOrder.id,
+              product_id: it.product_id || null,
+              product_name: it.product_name || `Product #${it.product_id}`,
+              product_sku: it.sku || null,
+              quantity: Number(it.quantity) || 1,
+              unit_price: Number(it.unit_price) || 0,
+              total: (Number(it.unit_price) || 0) * (Number(it.quantity) || 1),
+              variation_name: it.variation_name || null,
+              variation_option_value: it.variation_option_value || null,
+              variant_id: it.variant_id || null,
+            })));
+
+            // Link transaction to the new order
+            await transaction.update({ order_id: waOrder.id });
+
+            console.log(`✅ WhatsApp product order created from webhook: #${waOrder.order_number} (id: ${waOrder.id})`);
+
+            // Send order confirmation email
+            try {
+              const customerEmailAddr = transaction.customer_email || metadata.customer_email;
+              if (customerEmailAddr && tenant) {
+                const { sendOrderConfirmationEmail } = require('../services/emailService');
+                const fullOrder = await models.OnlineStoreOrder.findByPk(waOrder.id, {
+                  include: [{ model: models.OnlineStoreOrderItem }]
+                });
+                if (fullOrder) {
+                  await sendOrderConfirmationEmail({
+                    tenant,
+                    order: fullOrder.toJSON(),
+                    customerEmail: customerEmailAddr,
+                    customerName: transaction.customer_name || metadata.customer_name || 'Customer',
+                    items: fullOrder.OnlineStoreOrderItems || []
+                  });
+                }
+              }
+            } catch (emailErr) {
+              console.error('Error sending WhatsApp order confirmation email:', emailErr);
+            }
+          }
+        } catch (waOrderErr) {
+          console.error('Error creating WhatsApp product order from webhook:', waOrderErr);
+          // Don't fail webhook processing
         }
       }
 

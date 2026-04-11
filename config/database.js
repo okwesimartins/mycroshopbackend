@@ -523,6 +523,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       profile_logo_url VARCHAR(500),
       banner_image_url VARCHAR(500),
       selected_theme JSON,
+      suggested_themes JSON,
       is_location_based BOOLEAN DEFAULT FALSE,
       show_location BOOLEAN DEFAULT TRUE,
       allow_delivery_datetime BOOLEAN DEFAULT FALSE,
@@ -1519,6 +1520,25 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     }
   } catch (alterError) {
     console.warn('Could not add selected_theme column to online_stores:', alterError.message);
+  }
+
+  try {
+    const [suggestedThemeColumns] = await connection.query(`
+      SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'online_stores'
+      AND COLUMN_NAME = 'suggested_themes'
+    `);
+    if (!suggestedThemeColumns || suggestedThemeColumns.length === 0) {
+      console.log('Adding suggested_themes column to online_stores table...');
+      await connection.query(`
+        ALTER TABLE online_stores
+        ADD COLUMN suggested_themes JSON NULL
+      `);
+      console.log('✅ suggested_themes column added to online_stores table');
+    }
+  } catch (alterError) {
+    console.warn('Could not add suggested_themes column to online_stores:', alterError.message);
   }
 
   // Migration: drop legacy appearance columns (replaced by selected_theme)

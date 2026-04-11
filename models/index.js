@@ -1516,6 +1516,11 @@ function initializeModels(sequelize) {
       allowNull: true,
       comment: 'The theme variant the store owner selected from generated logo themes'
     },
+    suggested_themes: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: 'Auto-generated theme variants from the last uploaded logo — persisted so owner can re-select without re-uploading'
+    },
     is_location_based: {
       type: DataTypes.BOOLEAN,
       defaultValue: false

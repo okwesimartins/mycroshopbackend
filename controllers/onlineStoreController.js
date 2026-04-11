@@ -1079,6 +1079,15 @@ function normalizeOnlineStoreData(req, onlineStore) {
     }
   }
 
+  // Parse suggested_themes if MySQL returned it as a JSON string
+  if (storeData.suggested_themes && typeof storeData.suggested_themes === 'string') {
+    try {
+      storeData.suggested_themes = JSON.parse(storeData.suggested_themes);
+    } catch (e) {
+      storeData.suggested_themes = null;
+    }
+  }
+
   // Convert image URLs to full URLs
   if (storeData.profile_logo_url) {
     storeData.profile_logo_url = getFullUrl(req, storeData.profile_logo_url);
@@ -1185,7 +1194,12 @@ async function uploadStoreImage(req, res) {
             message: 'No valid files uploaded'
           });
         }
-        
+
+        // Persist suggested_themes so owner can re-select later without re-uploading
+        if (generatedThemes) {
+          updates.suggested_themes = generatedThemes;
+        }
+
         await onlineStore.update(updates);
         
         // Refresh the onlineStore to get updated values
@@ -1233,26 +1247,27 @@ async function uploadStoreImage(req, res) {
 
         // Update with new image URL
         const relativeImageUrl = `/uploads/stores/${files.image[0].filename}`;
-        await onlineStore.update({
-          [oldImageField]: relativeImageUrl
-        });
+        const legacyUpdates = { [oldImageField]: relativeImageUrl };
+
+        // Generate themes if logo was uploaded (before DB update so we can persist them)
+        let legacyThemes = null;
+        if (image_type === 'logo') {
+          try {
+            const dominantColor = await extractDominantColor(files.image[0].path);
+            legacyThemes = generateThemesFromColor(dominantColor);
+            legacyUpdates.suggested_themes = legacyThemes;
+          } catch (themeErr) {
+            console.warn('Theme generation failed (non-fatal):', themeErr.message);
+          }
+        }
+
+        await onlineStore.update(legacyUpdates);
 
         // Refresh the onlineStore to get updated values
         await onlineStore.reload();
 
         // Normalize the onlineStore data (parses social_links, converts URLs)
         const normalizedStore = normalizeOnlineStoreData(req, onlineStore);
-
-        // Generate themes if logo was uploaded
-        let legacyThemes = null;
-        if (image_type === 'logo') {
-          try {
-            const dominantColor = await extractDominantColor(files.image[0].path);
-            legacyThemes = generateThemesFromColor(dominantColor);
-          } catch (themeErr) {
-            console.warn('Theme generation failed (non-fatal):', themeErr.message);
-          }
-        }
 
         const legacyResponseData = {
           image_url: getFullUrl(req, relativeImageUrl),

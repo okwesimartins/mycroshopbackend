@@ -39,6 +39,7 @@ async function initializePaystackPayment(paymentData, secretKey, testMode, split
 
     if (splitOptions && splitOptions.subaccount) {
       payload.subaccount = splitOptions.subaccount;
+      payload.bearer = splitOptions.bearer || 'account';
       if (splitOptions.charge_amount) {
         payload.charge_amount = splitOptions.charge_amount;
       }

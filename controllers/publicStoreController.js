@@ -575,6 +575,117 @@ async function getPublicStore(req, res) {
       totalServicesNotInCollections = parseInt(servicesNotInCollectionsCountResult?.count || 0);
     }
 
+    // Batch-fetch variations + variants for ALL products in this response
+    const allProductIds = [];
+    for (const col of productCollections) {
+      const colData = col.toJSON ? col.toJSON() : col;
+      for (const cp of (colData.StoreCollectionProducts || [])) {
+        const cpData = cp.toJSON ? cp.toJSON() : cp;
+        const pid = cpData.Product?.id || cpData.product_id;
+        if (pid) allProductIds.push(pid);
+      }
+    }
+    for (const sp of productsNotInCollections) {
+      const spData = sp.toJSON ? sp.toJSON() : sp;
+      const pid = spData.Product?.id || spData.product_id;
+      if (pid) allProductIds.push(pid);
+    }
+    const uniqueProductIds = [...new Set(allProductIds)];
+
+    let variationsByProductId = {};
+    let variantsByProductId = {};
+
+    if (uniqueProductIds.length > 0) {
+      const tenantFilter = isFreePlan ? 'AND pv.tenant_id = :tenantId' : '';
+
+      // Fetch variations + options
+      const variationRows = await sequelize.query(`
+        SELECT pv.id, pv.product_id, pv.variation_name, pv.variation_type, pv.is_required, pv.sort_order,
+               pvo.id as option_id, pvo.option_value, pvo.option_display_name,
+               pvo.price_adjustment, pvo.stock as option_stock, pvo.sku as option_sku,
+               pvo.image_url as option_image_url, pvo.is_default, pvo.is_available,
+               pvo.sort_order as option_sort_order
+        FROM product_variations pv
+        LEFT JOIN product_variation_options pvo ON pv.id = pvo.variation_id
+        WHERE pv.product_id IN (:productIds)
+        ${tenantFilter}
+        ORDER BY pv.product_id, pv.sort_order ASC, pvo.sort_order ASC
+      `, {
+        replacements: { productIds: uniqueProductIds, ...(isFreePlan ? { tenantId: effectiveTenantId } : {}) },
+        type: Sequelize.QueryTypes.SELECT
+      });
+
+      variationRows.forEach(v => {
+        if (!variationsByProductId[v.product_id]) variationsByProductId[v.product_id] = {};
+        if (!variationsByProductId[v.product_id][v.id]) {
+          variationsByProductId[v.product_id][v.id] = {
+            id: v.id,
+            variation_name: v.variation_name,
+            variation_type: v.variation_type,
+            is_required: !!v.is_required,
+            sort_order: v.sort_order,
+            options: []
+          };
+        }
+        if (v.option_id) {
+          variationsByProductId[v.product_id][v.id].options.push({
+            id: v.option_id,
+            option_value: v.option_value,
+            option_display_name: v.option_display_name,
+            price_adjustment: v.price_adjustment,
+            stock: v.option_stock,
+            sku: v.option_sku,
+            image_url: v.option_image_url ? getFullUrl(v.option_image_url) : null,
+            is_default: !!v.is_default,
+            is_available: !!v.is_available,
+            sort_order: v.option_sort_order
+          });
+        }
+      });
+
+      // Fetch variants (specific sellable combinations)
+      const variantRows = await sequelize.query(`
+        SELECT pv.id as variant_id, pv.product_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
+               pvo.id as vopt_id, pvo.variation_id, pvo.option_id,
+               pvopt.option_value, pvopt.option_display_name,
+               pvar.variation_name, pvar.variation_type
+        FROM product_variants pv
+        LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
+        LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
+        LEFT JOIN product_variations pvar ON pvo.variation_id = pvar.id
+        WHERE pv.product_id IN (:productIds)
+          AND pv.is_active = 1
+        ${tenantFilter}
+        ORDER BY pv.product_id, pv.id
+      `, {
+        replacements: { productIds: uniqueProductIds, ...(isFreePlan ? { tenantId: effectiveTenantId } : {}) },
+        type: Sequelize.QueryTypes.SELECT
+      });
+
+      variantRows.forEach(v => {
+        if (!variantsByProductId[v.product_id]) variantsByProductId[v.product_id] = {};
+        if (!variantsByProductId[v.product_id][v.variant_id]) {
+          variantsByProductId[v.product_id][v.variant_id] = {
+            id: v.variant_id,
+            sku: v.sku,
+            price: v.price,
+            stock: v.stock,
+            image_url: v.image_url ? getFullUrl(v.image_url) : null,
+            is_active: !!v.is_active,
+            options: []
+          };
+        }
+        if (v.vopt_id) {
+          variantsByProductId[v.product_id][v.variant_id].options.push({
+            variation_name: v.variation_name,
+            variation_type: v.variation_type,
+            option_value: v.option_value,
+            option_display_name: v.option_display_name
+          });
+        }
+      });
+    }
+
     // Normalize collection data
     // Handles both Sequelize instances and plain objects (from raw SQL)
     const normalizeCollection = (collection) => {
@@ -587,14 +698,22 @@ async function getPublicStore(req, res) {
         collectionData.StoreCollectionProducts = collectionData.StoreCollectionProducts.map(cp => {
           // Handle both Sequelize instances and plain objects
           const cpData = cp && typeof cp.toJSON === 'function' ? cp.toJSON() : cp;
-          const productData = cpData.Product 
-            ? (cpData.Product && typeof cpData.Product.toJSON === 'function' 
-                ? cpData.Product.toJSON() 
+          const productData = cpData.Product
+            ? (cpData.Product && typeof cpData.Product.toJSON === 'function'
+                ? cpData.Product.toJSON()
                 : cpData.Product)
             : null;
-          
+
           if (productData && productData.image_url) {
             productData.image_url = getFullUrl(productData.image_url);
+          }
+          if (productData) {
+            productData.variations = variationsByProductId[productData.id]
+              ? Object.values(variationsByProductId[productData.id])
+              : [];
+            productData.variants = variantsByProductId[productData.id]
+              ? Object.values(variantsByProductId[productData.id])
+              : [];
           }
           return {
             ...cpData,
@@ -640,11 +759,19 @@ async function getPublicStore(req, res) {
 
     // Normalize products - handle both Sequelize instances and plain objects
     const normalizedProducts = productsNotInCollections.map(sp => {
-      const productData = sp.Product && typeof sp.Product.toJSON === 'function' 
-        ? sp.Product.toJSON() 
+      const productData = sp.Product && typeof sp.Product.toJSON === 'function'
+        ? sp.Product.toJSON()
         : (sp.Product || sp);
       if (productData && productData.image_url) {
         productData.image_url = getFullUrl(productData.image_url);
+      }
+      if (productData) {
+        productData.variations = variationsByProductId[productData.id]
+          ? Object.values(variationsByProductId[productData.id])
+          : [];
+        productData.variants = variantsByProductId[productData.id]
+          ? Object.values(variantsByProductId[productData.id])
+          : [];
       }
       return productData;
     });
@@ -685,7 +812,6 @@ async function getPublicStore(req, res) {
           store_description: storeData.store_description,
           profile_logo_url: storeData.profile_logo_url,
           banner_image_url: storeData.banner_image_url,
-          background_image_url: storeData.background_image_url,
           selected_theme: storeData.selected_theme || null,
           social_links: storeData.social_links,
           is_location_based: storeData.is_location_based,
