@@ -208,13 +208,15 @@ function generateThemesFromColor(dominantHex) {
       preview_colors: ['#F2EFEF', primary, primaryLight]
     }),
 
-    // ── LIGHT ── soft pastel tint, clean cards
+    // ── LIGHT ── very lightly brand-tinted — surface/card always near-white
     buildTheme({
       id: 'light', name: 'Light',
       description: 'Clean and minimal — soft tinted background with brand buttons',
       background_color: '#FFFFFF',
-      surface:          primaryPastel,
-      card:             hslHex(h, Math.max(brandS - 30, 8), Math.min(brandL + 30, 94)),
+      // Surface and card are always very high lightness (≥94%) regardless of brand darkness.
+      // Using a tiny fraction of the brand saturation so it reads as white, not coloured.
+      surface:          hslHex(h, Math.min(brandS * 0.25, 12), 95),
+      card:             hslHex(h, Math.min(brandS * 0.15, 7),  97),
       primary,
       primary_light:  primaryLight,
       primary_dark:   primaryDark,
@@ -226,7 +228,7 @@ function generateThemesFromColor(dominantHex) {
       text_tertiary:      'rgba(17,17,17,0.35)',
       border_default:     'rgba(0,0,0,0.08)',
       border_accent:      hexToRgbaStr(primary, 0.25),
-      preview_colors: ['#FFFFFF', primary, primaryPastel]
+      preview_colors: ['#FFFFFF', primary, hslHex(h, Math.min(brandS * 0.25, 12), 95)]
     }),
 
     // ── DARK ── deep brand-tinted dark
@@ -893,6 +895,7 @@ async function updateStoreInformation(req, res) {
       country,
       state,
       show_location,
+      show_social_icons,
       allow_delivery_datetime,
       is_location_based
     } = req.body;
@@ -958,6 +961,7 @@ async function updateStoreInformation(req, res) {
       ...(country !== undefined && { country }),
       ...(state !== undefined && { state }),
       ...(show_location !== undefined && { show_location }),
+      ...(show_social_icons !== undefined && { show_social_icons }),
       ...(allow_delivery_datetime !== undefined && { allow_delivery_datetime }),
       ...(is_location_based !== undefined && { is_location_based })
     });
@@ -1086,6 +1090,49 @@ function normalizeOnlineStoreData(req, onlineStore) {
     } catch (e) {
       storeData.suggested_themes = null;
     }
+  }
+
+  // Patch stale light theme surface/card: old algorithm produced mid-grey (#94a9b8, #8f9ba3).
+  // Correct values are always near-white (L ≥ 94%). Detect by checking if surface lightness < 85%
+  // and fix in-place so the frontend always receives the correct light theme without re-upload.
+  if (Array.isArray(storeData.suggested_themes)) {
+    storeData.suggested_themes = storeData.suggested_themes.map(t => {
+      if (t.id !== 'light') return t;
+      // Parse surface hex to HSL to check lightness
+      const staleSurface = /^#([0-9a-f]{6})$/i.exec(t.surface);
+      if (staleSurface) {
+        const r = parseInt(staleSurface[1].slice(0, 2), 16) / 255;
+        const g = parseInt(staleSurface[1].slice(2, 4), 16) / 255;
+        const b = parseInt(staleSurface[1].slice(4, 6), 16) / 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        const lightness = (max + min) / 2;
+        if (lightness < 0.85) {
+          // Surface is too dark — replace with near-white tinted values
+          // Derive hue from the button_color (primary) to keep the tint consistent
+          const pc = /^#([0-9a-f]{6})$/i.exec(t.button_color || t.primary || '#2e526b');
+          let hue = 205; // default to blue
+          if (pc) {
+            const pr = parseInt(pc[1].slice(0, 2), 16) / 255;
+            const pg = parseInt(pc[1].slice(2, 4), 16) / 255;
+            const pb = parseInt(pc[1].slice(4, 6), 16) / 255;
+            const pmx = Math.max(pr, pg, pb), pmn = Math.min(pr, pg, pb);
+            const d = pmx - pmn;
+            if (d > 0) {
+              if (pmx === pr) hue = 60 * (((pg - pb) / d) % 6);
+              else if (pmx === pg) hue = 60 * (((pb - pr) / d) + 2);
+              else hue = 60 * (((pr - pg) / d) + 4);
+              if (hue < 0) hue += 360;
+            }
+          }
+          return {
+            ...t,
+            surface: `hsl(${Math.round(hue)},10%,95%)`,
+            card:    `hsl(${Math.round(hue)},6%,97%)`
+          };
+        }
+      }
+      return t;
+    });
   }
 
   // Convert image URLs to full URLs
@@ -4159,9 +4206,9 @@ async function getStorePreview(req, res) {
       include: [
         {
           model: models.OnlineStoreLocation,
-          include: [{ 
-            model: models.Store, 
-            attributes: ['id', 'name', 'address', 'city', 'state', 'country'] 
+          include: [{
+            model: models.Store,
+            attributes: ['id', 'name', 'address', 'city', 'state', 'country', 'phone']
           }]
         }
       ],
@@ -4699,26 +4746,83 @@ async function getStorePreview(req, res) {
       }
     }
 
+    // Collect all product IDs across collections + standalone products for batch variation/variant fetch
+    const allPreviewProductIds = [];
+    for (const col of productCollections) {
+      const colData = col && typeof col.toJSON === 'function' ? col.toJSON() : col;
+      for (const cp of (colData.StoreCollectionProducts || [])) {
+        const cpData = cp && typeof cp.toJSON === 'function' ? cp.toJSON() : cp;
+        const pid = cpData.Product?.id || cpData.product_id;
+        if (pid) allPreviewProductIds.push(pid);
+      }
+    }
+    for (const sp of productsNotInCollections) {
+      const productData = sp.Product ? (typeof sp.Product.toJSON === 'function' ? sp.Product.toJSON() : sp.Product) : sp;
+      if (productData?.id) allPreviewProductIds.push(productData.id);
+    }
+
+    // Batch-fetch variations and variants for all products
+    const previewVariantsByProduct = await fetchVariantsForProductIds(req.db, allPreviewProductIds, getFullUrl);
+
+    // Batch-fetch variations (product_variations + options) for preview
+    const previewVariationsByProduct = new Map();
+    if (allPreviewProductIds.length > 0) {
+      const uniquePreviewIds = [...new Set(allPreviewProductIds)].filter(Boolean);
+      const placeholders = uniquePreviewIds.map(() => '?').join(',');
+      const varRows = await req.db.query(
+        `SELECT pv.id, pv.product_id, pv.variation_name, pv.sort_order,
+                pvo.id AS option_id, pvo.option_value, pvo.option_display_name, pvo.sort_order AS opt_sort
+         FROM product_variations pv
+         LEFT JOIN product_variation_options pvo ON pvo.variation_id = pv.id
+         WHERE pv.product_id IN (${placeholders})
+         ORDER BY pv.product_id, pv.sort_order, pvo.sort_order`,
+        { replacements: uniquePreviewIds, type: require('sequelize').QueryTypes.SELECT }
+      );
+      for (const r of varRows || []) {
+        const pid = r.product_id;
+        if (!previewVariationsByProduct.has(pid)) previewVariationsByProduct.set(pid, new Map());
+        const byVar = previewVariationsByProduct.get(pid);
+        if (!byVar.has(r.id)) {
+          byVar.set(r.id, { id: r.id, variation_name: r.variation_name, sort_order: r.sort_order, options: [] });
+        }
+        if (r.option_id != null) {
+          byVar.get(r.id).options.push({
+            id: r.option_id,
+            option_value: r.option_value != null ? String(r.option_value) : null,
+            option_display_name: r.option_display_name || r.option_value || null,
+            sort_order: r.opt_sort
+          });
+        }
+      }
+    }
+
     // Normalize collection data
     // Handles both Sequelize instances (with .toJSON()) and plain objects (from raw SQL)
     const normalizeCollection = (collection) => {
       // Handle both Sequelize instances and plain objects
-      const collectionData = collection && typeof collection.toJSON === 'function' 
-        ? collection.toJSON() 
+      const collectionData = collection && typeof collection.toJSON === 'function'
+        ? collection.toJSON()
         : collection;
-      
+
       if (collectionData.StoreCollectionProducts) {
         collectionData.StoreCollectionProducts = collectionData.StoreCollectionProducts.map(cp => {
           // Handle both Sequelize instances and plain objects
           const cpData = cp && typeof cp.toJSON === 'function' ? cp.toJSON() : cp;
-          const productData = cpData.Product 
-            ? (cpData.Product && typeof cpData.Product.toJSON === 'function' 
-                ? cpData.Product.toJSON() 
+          const productData = cpData.Product
+            ? (cpData.Product && typeof cpData.Product.toJSON === 'function'
+                ? cpData.Product.toJSON()
                 : cpData.Product)
             : null;
-          
+
           if (productData && productData.image_url) {
             productData.image_url = getFullUrl(productData.image_url);
+          }
+          if (productData) {
+            const pid = productData.id;
+            productData.variations = previewVariationsByProduct.has(pid)
+              ? Array.from(previewVariationsByProduct.get(pid).values())
+              : [];
+            productData.variants = previewVariantsByProduct.get(pid) || [];
           }
           return {
             ...cpData,
@@ -4730,12 +4834,12 @@ async function getStorePreview(req, res) {
         collectionData.StoreCollectionServices = collectionData.StoreCollectionServices.map(cs => {
           // Handle both Sequelize instances and plain objects
           const csData = cs && typeof cs.toJSON === 'function' ? cs.toJSON() : cs;
-          const serviceData = csData.StoreService 
-            ? (csData.StoreService && typeof csData.StoreService.toJSON === 'function' 
-                ? csData.StoreService.toJSON() 
+          const serviceData = csData.StoreService
+            ? (csData.StoreService && typeof csData.StoreService.toJSON === 'function'
+                ? csData.StoreService.toJSON()
                 : csData.StoreService)
             : null;
-          
+
           if (serviceData && serviceData.service_image_url) {
             serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
           }
@@ -4755,6 +4859,11 @@ async function getStorePreview(req, res) {
       if (productData.image_url) {
         productData.image_url = getFullUrl(productData.image_url);
       }
+      const pid = productData.id;
+      productData.variations = previewVariationsByProduct.has(pid)
+        ? Array.from(previewVariationsByProduct.get(pid).values())
+        : [];
+      productData.variants = previewVariantsByProduct.get(pid) || [];
       return productData;
     });
 
@@ -4770,6 +4879,19 @@ async function getStorePreview(req, res) {
       return serviceData;
     });
 
+    // Build contact info: phone from default (or first) linked physical store
+    const previewStorePhone = (() => {
+      const locations = storeData.OnlineStoreLocations || [];
+      if (!locations.length) return null;
+      const defaultLoc = locations.find(l => l.is_default) || locations[0];
+      return defaultLoc?.Store?.phone || null;
+    })();
+
+    const previewStoreAddress = {
+      state: storeData.state || null,
+      country: storeData.country || null
+    };
+
     res.json({
       success: true,
       data: {
@@ -4782,9 +4904,12 @@ async function getStorePreview(req, res) {
           banner_image_url: storeData.banner_image_url,
           selected_theme: storeData.selected_theme || null,
           social_links: storeData.social_links,
+          show_social_icons: storeData.show_social_icons !== false,
           is_location_based: storeData.is_location_based,
           show_location: storeData.show_location,
           allow_delivery_datetime: storeData.allow_delivery_datetime,
+          address: previewStoreAddress,
+          phone_number: previewStorePhone,
           is_published: storeData.is_published,
           OnlineStoreLocations: storeData.OnlineStoreLocations
         },
@@ -5459,6 +5584,43 @@ async function getPreviewProducts(req, res) {
 
     // Calculate total count
     const totalCount = Array.isArray(count) ? count[0]?.count || count.length : count;
+
+    // Attach variations to each product
+    const previewProdVariationsByProduct = new Map();
+    if (productIds.length > 0) {
+      const uniqueProdIds = [...new Set(productIds)].filter(Boolean);
+      const pholds = uniqueProdIds.map(() => '?').join(',');
+      const varRows = await req.db.query(
+        `SELECT pv.id, pv.product_id, pv.variation_name, pv.sort_order,
+                pvo.id AS option_id, pvo.option_value, pvo.option_display_name, pvo.sort_order AS opt_sort
+         FROM product_variations pv
+         LEFT JOIN product_variation_options pvo ON pvo.variation_id = pv.id
+         WHERE pv.product_id IN (${pholds})
+         ORDER BY pv.product_id, pv.sort_order, pvo.sort_order`,
+        { replacements: uniqueProdIds, type: Sequelize.QueryTypes.SELECT }
+      );
+      for (const r of varRows || []) {
+        const pid = r.product_id;
+        if (!previewProdVariationsByProduct.has(pid)) previewProdVariationsByProduct.set(pid, new Map());
+        const byVar = previewProdVariationsByProduct.get(pid);
+        if (!byVar.has(r.id)) {
+          byVar.set(r.id, { id: r.id, variation_name: r.variation_name, sort_order: r.sort_order, options: [] });
+        }
+        if (r.option_id != null) {
+          byVar.get(r.id).options.push({
+            id: r.option_id,
+            option_value: r.option_value != null ? String(r.option_value) : null,
+            option_display_name: r.option_display_name || r.option_value || null,
+            sort_order: r.opt_sort
+          });
+        }
+      }
+    }
+    products.forEach(p => {
+      p.variations = previewProdVariationsByProduct.has(p.id)
+        ? Array.from(previewProdVariationsByProduct.get(p.id).values())
+        : [];
+    });
 
     res.json({
       success: true,

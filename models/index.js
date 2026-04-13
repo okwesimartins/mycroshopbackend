@@ -1529,6 +1529,10 @@ function initializeModels(sequelize) {
       type: DataTypes.BOOLEAN,
       defaultValue: true
     },
+    show_social_icons: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true
+    },
     allow_delivery_datetime: {
       type: DataTypes.BOOLEAN,
       defaultValue: false

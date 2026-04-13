@@ -920,29 +920,6 @@ async function createProduct(req, res) {
         }
       }
 
-      // Validate: Only ONE variation type per product allowed (keep it simple!)
-      if (Array.isArray(parsedVariations) && parsedVariations.length > 1) {
-        // Clean up uploaded files if any
-        if (req.file && fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
-        }
-        // Clean up uploaded variation option images if any
-        if (req.files) {
-          const files = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
-          files.forEach(file => {
-            if (fs.existsSync(file.path)) {
-              fs.unlinkSync(file.path);
-            }
-          });
-        }
-        
-        return res.status(400).json({
-          success: false,
-          message: 'A product can only have ONE variation type. Please choose either Color, Size, Material, etc., but not multiple types together.',
-          suggestion: 'If you need multiple variations (e.g., Color + Size), create separate products like "T-Shirt - Red" (with sizes) and "T-Shirt - Blue" (with sizes).'
-        });
-      }
-
       // Create variations and options
       if (Array.isArray(parsedVariations) && parsedVariations.length > 0) {
         for (let i = 0; i < parsedVariations.length; i++) {

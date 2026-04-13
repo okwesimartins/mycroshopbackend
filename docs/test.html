@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyBuddy AI | The Tutor You Never Had</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .glass-morphism {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(229, 231, 235, 0.5);
+        }
+        .chat-height { height: calc(100vh - 180px); }
+        #quiz-overlay { display: none; }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .cheat-warning { animation: pulse-red 1.5s infinite; }
+    </style>
+</head>
+<body class="bg-gray-50 font-sans text-gray-900">
+
+    <nav class="sticky top-0 z-50 w-full border-b bg-white px-6 py-3 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <div class="bg-indigo-600 p-2 rounded-lg text-white">
+                <i class="fas fa-graduation-cap"></i>
+            </div>
+            <span class="text-xl font-bold tracking-tight text-indigo-900">StudyBuddy<span class="text-indigo-500">AI</span></span>
+        </div>
+        <div class="flex items-center gap-4">
+            <button onclick="toggleQuiz()" class="bg-orange-100 text-orange-700 px-4 py-2 rounded-full text-sm font-semibold hover:bg-orange-200 transition">
+                <i class="fas fa-stopwatch mr-2"></i>Take Mock Quiz
+            </button>
+            <div class="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center border border-indigo-200">
+                <span class="font-bold text-indigo-700">MO</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="flex">
+        <aside class="w-72 bg-white border-r h-screen sticky top-16 p-4 hidden md:block">
+            <h2 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">My Tutor Vaults</h2>
+            <div class="space-y-2">
+                <div class="p-3 bg-indigo-50 border-l-4 border-indigo-600 rounded-r-lg flex items-center justify-between cursor-pointer">
+                    <div>
+                        <p class="font-bold text-indigo-900 text-sm">Mr. Segun's Physics</p>
+                        <p class="text-xs text-indigo-500">12 Documents Active</p>
+                    </div>
+                    <i class="fas fa-lock-open text-xs text-indigo-400"></i>
+                </div>
+                <div class="p-3 hover:bg-gray-50 rounded-lg flex items-center justify-between cursor-pointer border border-transparent hover:border-gray-200 transition">
+                    <div>
+                        <p class="font-bold text-gray-700 text-sm">Mummy Joy Academy (Govt)</p>
+                        <p class="text-xs text-gray-400">5 Past Questions</p>
+                    </div>
+                    <i class="fas fa-lock text-xs text-gray-300"></i>
+                </div>
+            </div>
+
+            <div class="mt-8">
+                <h2 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">General Library</h2>
+                <button class="w-full text-left p-3 text-sm text-gray-600 hover:bg-gray-50 rounded-lg flex items-center gap-3">
+                    <i class="fas fa-file-pdf text-red-500"></i> JAMB Past Questions
+                </button>
+                <button class="w-full text-left p-3 text-sm text-gray-600 hover:bg-gray-50 rounded-lg flex items-center gap-3">
+                    <i class="fas fa-file-word text-blue-500"></i> Chemistry 101 Notes
+                </button>
+            </div>
+
+            <div class="absolute bottom-20 left-4 right-4 bg-gradient-to-r from-indigo-600 to-indigo-800 p-4 rounded-xl text-white shadow-lg">
+                <p class="text-xs font-semibold opacity-80">Refer a Friend</p>
+                <p class="text-sm font-bold mt-1">Earn ₦1,000 Credit</p>
+                <button class="mt-2 w-full bg-white text-indigo-600 text-xs py-2 rounded font-bold uppercase">Get Link</button>
+            </div>
+        </aside>
+
+        <main class="flex-1 p-4 md:p-8 relative">
+            <div class="max-w-3xl mx-auto flex flex-col chat-height">
+                
+                <div class="mb-6 flex items-center justify-between">
+                    <div>
+                        <h1 class="text-2xl font-bold">Personalized Learning</h1>
+                        <p class="text-sm text-gray-500">Context: <span class="text-indigo-600 font-medium">Mr. Segun's Physics Handout (Week 4)</span></p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="p-2 border rounded-lg hover:bg-white transition"><i class="fas fa-microphone text-gray-400"></i></button>
+                        <button class="p-2 border rounded-lg hover:bg-white transition"><i class="fas fa-headphones text-gray-400"></i></button>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-y-auto space-y-6 mb-4 pr-2" id="chat-window">
+                    <div class="flex gap-4">
+                        <div class="h-8 w-8 rounded-full bg-indigo-600 flex-shrink-0 flex items-center justify-center text-white text-xs">AI</div>
+                        <div class="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm border text-sm max-w-[85%] leading-relaxed">
+                            Welcome back, Martins! 👋 <br><br>
+                            I've analyzed Mr. Segun's notes on **Centripetal Force**. Would you like me to explain it using the <b>"Danfo taking a sharp turn"</b> analogy, or should we dive straight into the calculations?
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4 flex-row-reverse">
+                        <div class="h-8 w-8 rounded-full bg-gray-300 flex-shrink-0 flex items-center justify-center text-xs">You</div>
+                        <div class="bg-indigo-600 text-white p-4 rounded-2xl rounded-tr-none shadow-sm text-sm max-w-[85%]">
+                            Use the Danfo analogy. I also want to see the formula.
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4">
+                        <div class="h-8 w-8 rounded-full bg-indigo-600 flex-shrink-0 flex items-center justify-center text-white text-xs">AI</div>
+                        <div class="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm border text-sm max-w-[85%] leading-relaxed">
+                            Perfect. Imagine a Yellow Danfo speeding towards a roundabout in Ikeja. For that bus to stay in its lane and not fly off the road, there's an invisible force pulling it toward the center. That's <b>Centripetal Force</b>.<br><br>
+                            The formula Mr. Segun highlighted is:<br>
+                            <code class="bg-gray-100 p-2 block mt-2 rounded font-mono text-indigo-700">F = (m * v²) / r</code>
+                            <br>
+                            Where <b>v</b> is the speed of the Danfo. If the driver doubles the speed, the force needed to stay on the road becomes 4x stronger! 🚌💨
+                        </div>
+                    </div>
+                </div>
+
+                <div class="relative bg-white border rounded-2xl shadow-sm p-2 focus-within:ring-2 ring-indigo-500 transition">
+                    <textarea rows="1" class="w-full p-3 resize-none outline-none text-sm pr-12" placeholder="Ask your Tutor anything..."></textarea>
+                    <button class="absolute right-4 bottom-3 text-indigo-600 hover:text-indigo-800 transition">
+                        <i class="fas fa-paper-plane text-xl"></i>
+                    </button>
+                </div>
+                <p class="text-[10px] text-center mt-3 text-gray-400 uppercase tracking-widest font-bold">Powered by StudyBuddy AI Lagos</p>
+            </div>
+        </main>
+    </div>
+
+    <div id="quiz-overlay" class="fixed inset-0 bg-gray-900 z-[100] p-8 flex flex-col items-center justify-center">
+        <div class="max-w-2xl w-full bg-white rounded-3xl p-8 shadow-2xl relative" id="quiz-card">
+            <div class="flex justify-between items-center mb-8 border-b pb-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">Physics Mock Quiz</h2>
+                    <p class="text-sm text-red-500 font-bold uppercase tracking-widest" id="cheat-alert-text">Focus Mode Active</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-xs font-bold text-gray-400 uppercase">Timer</p>
+                    <p class="text-xl font-mono font-bold" id="timer">09:58</p>
+                </div>
+            </div>
+
+            <div class="space-y-6">
+                <p class="text-lg font-medium text-gray-700">1. If the radius of a circular path is halved, what happens to the centripetal force if the velocity remains constant?</p>
+                <div class="grid grid-cols-1 gap-3">
+                    <button class="p-4 border rounded-xl text-left hover:bg-indigo-50 hover:border-indigo-500 transition">A) It is halved</button>
+                    <button class="p-4 border rounded-xl text-left hover:bg-indigo-50 hover:border-indigo-500 transition">B) It remains the same</button>
+                    <button class="p-4 border rounded-xl text-left border-indigo-500 bg-indigo-50 font-semibold">C) It is doubled</button>
+                    <button class="p-4 border rounded-xl text-left hover:bg-indigo-50 hover:border-indigo-500 transition">D) It becomes four times greater</button>
+                </div>
+            </div>
+
+            <div class="mt-8 flex justify-between">
+                <button onclick="toggleQuiz()" class="text-gray-400 text-sm font-bold">CANCEL EXAM</button>
+                <button class="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-indigo-200">SUBMIT ANSWER</button>
+            </div>
+        </div>
+        <p class="mt-6 text-gray-400 text-sm">Attempting to leave this tab will notify <b>Mr. Segun</b> immediately.</p>
+    </div>
+
+    <script>
+        let cheatCount = 0;
+
+        function toggleQuiz() {
+            const overlay = document.getElementById('quiz-overlay');
+            const isVisible = overlay.style.display === 'flex';
+            overlay.style.display = isVisible ? 'none' : 'flex';
+            
+            if (!isVisible) {
+                alert("ENTERING FOCUS MODE: If you switch tabs or minimize this window, the tutor will be notified.");
+            }
+        }
+
+        // CHEAT-PROOF DETECTION LOGIC
+        document.addEventListener("visibilitychange", function() {
+            if (document.hidden && document.getElementById('quiz-overlay').style.display === 'flex') {
+                cheatCount++;
+                const card = document.getElementById('quiz-card');
+                const text = document.getElementById('cheat-alert-text');
+                
+                card.classList.add('cheat-warning');
+                text.innerText = `CHEAT WARNING #${cheatCount}: TAB SWITCH DETECTED`;
+                
+                // In a real app, you would send an API call to the database here
+                console.log(`Alert: Student tried to cheat! Count: ${cheatCount}`);
+            }
+        });
+
+        // Simple typing effect for realism
+        const textarea = document.querySelector('textarea');
+        textarea.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                alert("In the real app, this would send your message to the AI and generate a response based on your Tutor's vault!");
+                textarea.value = '';
+            }
+        });
+    </script>
+</body>
+</html>

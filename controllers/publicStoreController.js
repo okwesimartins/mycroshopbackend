@@ -87,9 +87,9 @@ async function getPublicStore(req, res) {
         : [
             {
               model: models.OnlineStoreLocation,
-              include: [{ 
-                model: models.Store, 
-                attributes: ['id', 'name', 'address', 'city', 'state', 'country'] 
+              include: [{
+                model: models.Store,
+                attributes: ['id', 'name', 'address', 'city', 'state', 'country', 'phone']
               }]
             }
           ]
@@ -802,6 +802,20 @@ async function getPublicStore(req, res) {
       return serviceData;
     });
 
+    // Build contact info: phone from the default (or first) linked physical store
+    const storePhone = (() => {
+      const locations = storeData.OnlineStoreLocations || [];
+      if (!locations.length) return null;
+      const defaultLoc = locations.find(l => l.is_default) || locations[0];
+      return defaultLoc?.Store?.phone || null;
+    })();
+
+    // Build address from state/country on the OnlineStore record (set via updateStoreInformation)
+    const storeAddress = {
+      state: storeData.state || null,
+      country: storeData.country || null
+    };
+
     res.json({
       success: true,
       data: {
@@ -813,10 +827,13 @@ async function getPublicStore(req, res) {
           profile_logo_url: storeData.profile_logo_url,
           banner_image_url: storeData.banner_image_url,
           selected_theme: storeData.selected_theme || null,
-          social_links: storeData.social_links,
+          social_links: storeData.show_social_icons !== false ? storeData.social_links : [],
+          show_social_icons: storeData.show_social_icons !== false,
           is_location_based: storeData.is_location_based,
           show_location: storeData.show_location,
           allow_delivery_datetime: storeData.allow_delivery_datetime,
+          address: storeData.show_location !== false ? storeAddress : null,
+          phone_number: storePhone,
           OnlineStoreLocations: storeData.OnlineStoreLocations
         },
         toggles: {

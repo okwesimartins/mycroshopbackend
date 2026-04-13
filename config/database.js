@@ -526,6 +526,7 @@ async function runTenantMigrations(connection, isSharedDb = false) {
       suggested_themes JSON,
       is_location_based BOOLEAN DEFAULT FALSE,
       show_location BOOLEAN DEFAULT TRUE,
+      show_social_icons BOOLEAN DEFAULT TRUE,
       allow_delivery_datetime BOOLEAN DEFAULT FALSE,
       social_links JSON,
       paystack_subaccount_code VARCHAR(100),
@@ -1539,6 +1540,25 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     }
   } catch (alterError) {
     console.warn('Could not add suggested_themes column to online_stores:', alterError.message);
+  }
+
+  try {
+    const [showSocialIconsColumns] = await connection.query(`
+      SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'online_stores'
+      AND COLUMN_NAME = 'show_social_icons'
+    `);
+    if (!showSocialIconsColumns || showSocialIconsColumns.length === 0) {
+      console.log('Adding show_social_icons column to online_stores table...');
+      await connection.query(`
+        ALTER TABLE online_stores
+        ADD COLUMN show_social_icons BOOLEAN NOT NULL DEFAULT TRUE AFTER show_location
+      `);
+      console.log('✅ show_social_icons column added to online_stores table');
+    }
+  } catch (alterError) {
+    console.warn('Could not add show_social_icons column to online_stores:', alterError.message);
   }
 
   // Migration: drop legacy appearance columns (replaced by selected_theme)

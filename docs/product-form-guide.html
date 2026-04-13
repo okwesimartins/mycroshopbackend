@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MycroShop — Product Form UI Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',sans-serif;background:#f5f6fa;color:#1a1a2e;font-size:14px;}
+
+.shell{display:grid;grid-template-columns:240px 1fr;min-height:100vh;}
+
+/* sidebar */
+.sidebar{background:#fff;border-right:1px solid #e8eaf0;padding:24px 0;position:sticky;top:0;height:100vh;overflow-y:auto;}
+.sidebar-logo{padding:0 18px 20px;border-bottom:1px solid #f0f1f5;display:flex;align-items:center;gap:10px;}
+.logo-icon{width:32px;height:32px;background:linear-gradient(135deg,#6c63ff,#4facfe);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;}
+.logo-name{font-weight:700;font-size:14px;color:#1a1a2e;}
+.logo-sub{font-size:10px;color:#9499a7;}
+.nav{padding:14px 10px 0;}
+.nav-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#b0b4c0;padding:0 8px;margin-bottom:4px;margin-top:14px;}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font-size:13px;color:#6b7080;cursor:pointer;transition:all .15s;}
+.nav-item:hover{background:#f5f6fa;color:#1a1a2e;}
+.nav-item.active{background:#ede9fe;color:#6c63ff;font-weight:600;}
+
+/* main */
+.main{padding:28px 36px 80px;}
+.breadcrumb{display:flex;align-items:center;gap:7px;font-size:12px;color:#9499a7;margin-bottom:18px;}
+.breadcrumb a{color:#6c63ff;cursor:pointer;}
+.page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;}
+.page-title{font-size:21px;font-weight:700;color:#1a1a2e;}
+.page-sub{font-size:12px;color:#9499a7;margin-top:4px;}
+.header-actions{display:flex;gap:8px;flex-shrink:0;}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:inherit;}
+.btn-ghost{background:#fff;color:#6b7080;border:1.5px solid #e0e2ea;}
+.btn-ghost:hover{border-color:#c8cad4;color:#1a1a2e;}
+.btn-primary{background:linear-gradient(135deg,#6c63ff,#5a52d5);color:#fff;box-shadow:0 2px 10px rgba(108,99,255,.28);}
+.btn-primary:hover{box-shadow:0 4px 16px rgba(108,99,255,.38);transform:translateY(-1px);}
+.btn-danger-soft{background:#fff0f0;color:#dc2626;border:1px solid #fecaca;}
+.btn-danger-soft:hover{background:#fef2f2;}
+.btn-sm{padding:5px 11px;font-size:11px;}
+.btn-icon{width:30px;height:30px;padding:0;justify-content:center;border-radius:7px;}
+
+/* form layout */
+.form-layout{display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start;}
+
+/* card */
+.card{background:#fff;border-radius:12px;border:1px solid #e8eaf0;overflow:hidden;margin-bottom:18px;}
+.card:last-child{margin-bottom:0;}
+.card-header{padding:15px 20px;border-bottom:1px solid #f0f1f5;display:flex;align-items:center;justify-content:space-between;}
+.card-title{font-size:13px;font-weight:700;color:#1a1a2e;display:flex;align-items:center;gap:7px;}
+.dot{width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,#6c63ff,#4facfe);flex-shrink:0;}
+.card-body{padding:20px;}
+
+/* fields */
+.field{margin-bottom:16px;}
+.field:last-child{margin-bottom:0;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px;}
+label{display:block;font-size:11px;font-weight:600;color:#4a4f60;margin-bottom:5px;letter-spacing:.02em;}
+.req{color:#e53e3e;}
+.badge-sm{font-size:9px;background:#f0f1f5;color:#9499a7;padding:1px 6px;border-radius:4px;margin-left:5px;font-weight:500;vertical-align:middle;}
+input[type=text],input[type=number],textarea,select{
+  width:100%;padding:8px 11px;border:1.5px solid #e0e2ea;border-radius:7px;
+  font-size:12px;font-family:inherit;color:#1a1a2e;background:#fafbfd;
+  transition:border-color .15s,box-shadow .15s;outline:none;
+}
+input:focus,textarea:focus,select:focus{border-color:#6c63ff;background:#fff;box-shadow:0 0 0 3px rgba(108,99,255,.1);}
+input::placeholder,textarea::placeholder{color:#c0c4cf;}
+textarea{resize:vertical;min-height:72px;line-height:1.6;}
+select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239499a7' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;}
+.pfx-wrap{position:relative;}
+.pfx{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:12px;color:#9499a7;font-weight:500;pointer-events:none;}
+.pfx-wrap input{padding-left:24px;}
+.hint{font-size:10px;color:#9499a7;margin-top:4px;line-height:1.5;}
+
+/* toggle */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;}
+.toggle-row+.toggle-row{border-top:1px solid #f5f6fa;}
+.tl{font-size:12px;font-weight:500;color:#1a1a2e;}
+.ts{font-size:10px;color:#9499a7;margin-top:1px;}
+.toggle{position:relative;width:36px;height:20px;flex-shrink:0;}
+.toggle input{opacity:0;width:0;height:0;}
+.tslider{position:absolute;inset:0;background:#dde1ea;border-radius:20px;cursor:pointer;transition:.2s;}
+.tslider:before{content:'';position:absolute;width:14px;height:14px;background:#fff;border-radius:50%;left:3px;top:3px;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.15);}
+.toggle input:checked+.tslider{background:#6c63ff;}
+.toggle input:checked+.tslider:before{transform:translateX(16px);}
+
+/* status pill */
+.spill{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:600;}
+.spill.draft{background:#fef9c3;color:#854d0e;}
+.spill.pub{background:#dcfce7;color:#166534;}
+.sdot{width:5px;height:5px;border-radius:50%;background:currentColor;}
+
+/* image upload */
+.img-area{border:2px dashed #e0e2ea;border-radius:10px;padding:24px 16px;text-align:center;cursor:pointer;transition:all .2s;background:#fafbfd;}
+.img-area:hover{border-color:#6c63ff;background:#f5f3ff;}
+.img-area.filled{border-style:solid;border-color:#e0e2ea;padding:0;overflow:hidden;}
+.img-preview{width:100%;aspect-ratio:1;object-fit:cover;display:block;}
+.img-actions{display:flex;gap:7px;padding:9px;}
+.img-icon{width:40px;height:40px;background:#f0f1f5;border-radius:9px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;}
+.img-title{font-size:12px;font-weight:600;color:#4a4f60;margin-bottom:3px;}
+.img-sub{font-size:10px;color:#9499a7;}
+
+/* category */
+.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+.cat-chip{padding:7px;border:1.5px solid #e0e2ea;border-radius:7px;font-size:11px;font-weight:500;text-align:center;cursor:pointer;transition:all .15s;color:#6b7080;}
+.cat-chip:hover{border-color:#6c63ff;color:#6c63ff;background:#f5f3ff;}
+.cat-chip.sel{border-color:#6c63ff;background:#ede9fe;color:#6c63ff;}
+
+/* price summary */
+.psum{background:#fafbfd;border:1px solid #f0f1f5;border-radius:9px;padding:13px;}
+.psum-title{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9499a7;margin-bottom:9px;}
+.prow{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#6b7080;padding:3px 0;}
+.prange{color:#6c63ff;font-weight:700;}
+
+/* ══════════════════════════════════
+   CONCEPT EXPLAINER
+══════════════════════════════════ */
+.concept-box{background:linear-gradient(135deg,#f5f3ff,#ede9fe);border:1px solid #c4b5fd;border-radius:10px;padding:14px 16px;margin-bottom:18px;}
+.concept-box-title{font-size:11px;font-weight:700;color:#5b21b6;display:flex;align-items:center;gap:6px;margin-bottom:10px;}
+.concept-diagram{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:0;align-items:start;margin-bottom:10px;}
+.cdiag-col{background:#fff;border:1px solid #c4b5fd;border-radius:8px;padding:10px 12px;}
+.cdiag-col-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#7c3aed;margin-bottom:7px;}
+.cdiag-item{font-size:11px;color:#4a4f60;padding:2px 0;display:flex;align-items:center;gap:5px;}
+.cdiag-item:before{content:'';width:5px;height:5px;border-radius:50%;background:#c4b5fd;flex-shrink:0;}
+.cdiag-arrow{display:flex;align-items:center;justify-content:center;padding:0 8px;color:#9ca3af;font-size:18px;padding-top:22px;}
+.cdiag-variants{background:#fff;border:1px solid #c4b5fd;border-radius:8px;padding:10px 12px;}
+.cdiag-variants-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#7c3aed;margin-bottom:7px;}
+.var-combo-pill{display:inline-flex;align-items:center;gap:4px;background:#ede9fe;border-radius:5px;padding:3px 7px;font-size:10px;font-weight:500;color:#6c63ff;margin:2px;}
+.var-combo-pill span{background:#6c63ff;color:#fff;border-radius:3px;padding:0px 4px;font-size:9px;}
+.concept-note{font-size:11px;color:#6d28d9;line-height:1.6;}
+
+/* ══════════════════════════════════
+   VARIATION BLOCK
+══════════════════════════════════ */
+.no-var-state{border:2px dashed #e0e2ea;border-radius:10px;padding:24px;text-align:center;background:#fafbfd;}
+.no-var-title{font-size:13px;font-weight:600;color:#4a4f60;margin-bottom:5px;}
+.no-var-sub{font-size:11px;color:#9499a7;margin-bottom:16px;line-height:1.6;}
+.no-var-btns{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;}
+
+.var-block{border:1.5px solid #e0e2ea;border-radius:10px;overflow:hidden;margin-bottom:14px;}
+.var-block.active{border-color:#a78bfa;}
+.var-block-head{padding:11px 14px;background:#fafbfd;display:flex;align-items:center;gap:8px;cursor:default;}
+.var-block-head.active{background:#f5f3ff;}
+.drag-handle{cursor:grab;color:#c0c4cf;display:flex;align-items:center;}
+.vtype-badge{padding:3px 9px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
+.vb-color{background:#fdf2f8;color:#be185d;}
+.vb-size{background:#eff6ff;color:#1d4ed8;}
+.vb-material{background:#f0fdf4;color:#15803d;}
+.vb-style{background:#fff7ed;color:#c2410c;}
+.vb-other{background:#f1f5f9;color:#475569;}
+.var-block-name{font-size:12px;font-weight:600;color:#1a1a2e;flex:1;}
+.var-block-optcount{font-size:10px;color:#9499a7;background:#f0f1f5;padding:2px 7px;border-radius:10px;}
+.var-block-actions{display:flex;gap:5px;margin-left:auto;}
+
+.var-block-body{padding:14px;}
+
+/* option rows */
+.opt-table-head{display:grid;grid-template-columns:34px 1fr 100px 80px 30px;gap:7px;padding-bottom:6px;border-bottom:1px solid #f0f1f5;margin-bottom:6px;}
+.opt-col-lbl{font-size:9px;font-weight:700;color:#b0b4c0;letter-spacing:.06em;text-transform:uppercase;padding:0 2px;}
+.opt-rows{display:flex;flex-direction:column;gap:7px;margin-bottom:10px;}
+.opt-row{display:grid;grid-template-columns:34px 1fr 100px 80px 30px;gap:7px;align-items:center;}
+.opt-img{width:34px;height:34px;border:1.5px dashed #d0d3de;border-radius:7px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#fafbfd;transition:all .15s;flex-shrink:0;overflow:hidden;}
+.opt-img:hover{border-color:#6c63ff;background:#f5f3ff;}
+.opt-img img{width:100%;height:100%;object-fit:cover;}
+.opt-remove{width:28px;height:34px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;cursor:pointer;color:#c8cad4;transition:color .15s;}
+.opt-remove:hover{color:#dc2626;}
+.add-opt-btn{display:flex;align-items:center;gap:6px;padding:7px 11px;border:1.5px dashed #d0d3de;border-radius:7px;background:#fafbfd;color:#9499a7;font-size:11px;font-weight:500;cursor:pointer;transition:all .15s;width:100%;}
+.add-opt-btn:hover{border-color:#6c63ff;color:#6c63ff;background:#f5f3ff;}
+
+/* quick add pills */
+.qpills{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;}
+.qpill{padding:3px 10px;border:1px solid #d0d3de;border-radius:20px;font-size:10px;color:#6b7080;cursor:pointer;background:#fafbfd;transition:all .15s;font-family:inherit;}
+.qpill:hover{border-color:#6c63ff;color:#6c63ff;background:#f5f3ff;}
+
+/* add variation btn */
+.add-var-btn{display:flex;align-items:center;justify-content:center;gap:7px;padding:10px;border:1.5px dashed #d0d3de;border-radius:9px;background:#fafbfd;color:#9499a7;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;width:100%;margin-top:4px;}
+.add-var-btn:hover{border-color:#6c63ff;color:#6c63ff;background:#f5f3ff;}
+.add-var-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+/* ══════════════════════════════════
+   VARIANTS TABLE  (the combinations)
+══════════════════════════════════ */
+.variants-card{margin-top:18px;}
+.vt-header{display:flex;align-items:center;justify-content:space-between;}
+.vt-title{font-size:13px;font-weight:700;color:#1a1a2e;display:flex;align-items:center;gap:7px;}
+.vt-count{background:#ede9fe;color:#6c63ff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;}
+.regen-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:#6c63ff;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;}
+.regen-btn:hover{background:#5a52d5;box-shadow:0 3px 12px rgba(108,99,255,.35);}
+
+.info-banner{display:flex;align-items:flex-start;gap:9px;padding:11px 13px;border-radius:8px;margin:14px 0 0;}
+.info-banner.green{background:#f0fdf4;border:1px solid #bbf7d0;}
+.info-banner.yellow{background:#fffbeb;border:1px solid #fde68a;}
+.info-banner-icon{flex-shrink:0;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;}
+.info-banner.green .info-banner-icon{background:#dcfce7;}
+.info-banner.yellow .info-banner-icon{background:#fef3c7;}
+.info-banner-text{font-size:11px;line-height:1.6;}
+.info-banner.green .info-banner-text{color:#166534;}
+.info-banner.yellow .info-banner-text{color:#92400e;}
+
+.vtable-wrap{border:1.5px solid #e0e2ea;border-radius:9px;overflow:hidden;margin-top:12px;}
+.vtable{width:100%;border-collapse:collapse;}
+.vtable th{background:#f8f9fc;font-size:9px;font-weight:700;color:#9499a7;letter-spacing:.07em;text-transform:uppercase;padding:9px 12px;text-align:left;border-bottom:1px solid #e8eaf0;}
+.vtable td{padding:9px 12px;border-bottom:1px solid #f0f1f5;vertical-align:middle;}
+.vtable tr:last-child td{border-bottom:none;}
+.vtable tr:hover td{background:#fafbfd;}
+.combo-tags{display:flex;flex-wrap:wrap;gap:4px;}
+.ctag{background:#f0f1f5;color:#374151;font-size:10px;padding:2px 7px;border-radius:4px;font-weight:500;}
+.ctag.color-tag{background:#fdf2f8;color:#be185d;}
+.ctag.size-tag{background:#eff6ff;color:#1d4ed8;}
+.ctag.material-tag{background:#f0fdf4;color:#15803d;}
+.vtable input[type=number],
+.vtable input[type=text]{border:1px solid #e0e2ea;border-radius:6px;padding:5px 8px;font-size:11px;font-family:inherit;background:#fafbfd;width:100%;}
+.vtable input:focus{border-color:#6c63ff;outline:none;background:#fff;}
+.vstatus{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;padding:3px 7px;border-radius:5px;}
+.vstatus.on{background:#f0fdf4;color:#16a34a;}
+.vstatus.off{background:#fef2f2;color:#dc2626;}
+.vstatus-dot{width:5px;height:5px;border-radius:50%;background:currentColor;}
+
+/* modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.48);z-index:1000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .2s;}
+.modal-overlay.open{opacity:1;pointer-events:all;}
+.modal{background:#fff;border-radius:14px;width:480px;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.18);}
+.modal-head{padding:18px 20px;border-bottom:1px solid #f0f1f5;display:flex;align-items:center;justify-content:space-between;}
+.modal-title{font-size:14px;font-weight:700;}
+.modal-close{width:28px;height:28px;border:none;background:#f0f1f5;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7080;font-size:14px;}
+.modal-body{padding:20px;}
+.modal-foot{padding:14px 20px;border-top:1px solid #f0f1f5;display:flex;justify-content:flex-end;gap:8px;}
+
+/* tooltip */
+.tip-wrap{position:relative;display:inline-flex;align-items:center;margin-left:4px;}
+.tip-icon{width:14px;height:14px;background:#e8eaf0;border-radius:50%;font-size:8px;font-weight:700;color:#9499a7;display:inline-flex;align-items:center;justify-content:center;cursor:default;}
+.tip-box{position:absolute;bottom:calc(100%+5px);left:50%;transform:translateX(-50%);background:#1a1a2e;color:#fff;font-size:10px;line-height:1.5;padding:6px 9px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;z-index:200;max-width:200px;white-space:normal;text-align:center;}
+.tip-box:after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:#1a1a2e;}
+.tip-wrap:hover .tip-box{opacity:1;}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">M</div>
+    <div><div class="logo-name">MycroShop</div><div class="logo-sub">Store Manager</div></div>
+  </div>
+  <nav class="nav">
+    <div class="nav-label">Store</div>
+    <div class="nav-item"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg> Dashboard</div>
+    <div class="nav-item active"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg> Products</div>
+    <div class="nav-item"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg> Orders</div>
+    <div class="nav-item"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg> Customers</div>
+  </nav>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+  <div class="breadcrumb"><a>Products</a> <span>›</span> <span>Add New Product</span></div>
+
+  <div class="page-header">
+    <div>
+      <div class="page-title" id="pg-title">Add New Product</div>
+      <div class="page-sub">Fill in the product details. Use variations for products with multiple options (colours, sizes, etc.).</div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-ghost">Save Draft</button>
+      <button class="btn btn-primary" onclick="publishProduct()">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        Publish Product
+      </button>
+    </div>
+  </div>
+
+  <div class="form-layout">
+
+    <!-- LEFT -->
+    <div>
+
+      <!-- Basic Info -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><div class="dot"></div> Basic Information</div>
+          <div class="spill draft" id="status-pill"><div class="sdot"></div>Draft</div>
+        </div>
+        <div class="card-body">
+          <div class="field">
+            <label>Product Name <span class="req">*</span></label>
+            <input type="text" placeholder="e.g. Premium Leather Sneakers" oninput="document.getElementById('pg-title').textContent=this.value||'Add New Product'"/>
+          </div>
+          <div class="field">
+            <label>Description</label>
+            <textarea placeholder="Describe your product — materials, features, care instructions…"></textarea>
+          </div>
+          <div class="row2">
+            <div class="field" style="margin:0">
+              <label>SKU <span class="badge-sm">Optional</span></label>
+              <input type="text" placeholder="e.g. SNK-001"/>
+            </div>
+            <div class="field" style="margin:0">
+              <label>Barcode <span class="badge-sm">Optional</span></label>
+              <input type="text" placeholder="e.g. 8901234567890"/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Base pricing (hidden when variations active) -->
+      <div class="card" id="base-price-card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="dot"></div> Pricing &amp; Stock
+            <div class="tip-wrap"><div class="tip-icon">?</div><div class="tip-box">When you add variations, price and stock move to each option. These fields hide automatically.</div></div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="row2">
+            <div class="field" style="margin:0">
+              <label>Selling Price <span class="req">*</span></label>
+              <div class="pfx-wrap"><span class="pfx">₦</span><input type="number" placeholder="0.00" min="0" step="0.01"/></div>
+            </div>
+            <div class="field" style="margin:0">
+              <label>Cost Price <span class="badge-sm">Private</span></label>
+              <div class="pfx-wrap"><span class="pfx">₦</span><input type="number" placeholder="0.00" min="0" step="0.01"/></div>
+            </div>
+          </div>
+          <div class="row2" style="margin-top:14px;margin-bottom:0;">
+            <div class="field" style="margin:0">
+              <label>Stock Quantity <span class="req">*</span></label>
+              <input type="number" placeholder="0" min="0"/>
+            </div>
+            <div class="field" style="margin:0">
+              <label>Low Stock Alert</label>
+              <input type="number" placeholder="10" min="0"/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pricing hidden notice -->
+      <div id="price-notice" style="display:none;margin-bottom:18px;">
+        <div class="info-banner yellow">
+          <div class="info-banner-icon"><svg width="10" height="10" fill="none" stroke="#d97706" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+          <div class="info-banner-text"><strong>Price &amp; Stock are managed per variation option.</strong> Each colour / size below has its own price and stock. Remove all variations to set a single price.</div>
+        </div>
+      </div>
+
+      <!-- VARIATIONS -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="dot"></div> Variations
+            <div class="tip-wrap"><div class="tip-icon">?</div><div class="tip-box">A variation is a type of difference (e.g. Colour). Add multiple variation types and variants are automatically generated as every combination.</div></div>
+          </div>
+          <div id="opt-count-badge" style="display:none;" class="vt-count">0 options</div>
+        </div>
+        <div class="card-body">
+
+          <!-- CONCEPT DIAGRAM — always visible -->
+          <div class="concept-box">
+            <div class="concept-box-title">
+              <svg width="12" height="12" fill="none" stroke="#5b21b6" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Variation → Options → Variants (combinations)
+            </div>
+            <div class="concept-diagram">
+              <div class="cdiag-col">
+                <div class="cdiag-col-title">Variation 1<br/>e.g. Colour</div>
+                <div class="cdiag-item">Red</div>
+                <div class="cdiag-item">Blue</div>
+                <div class="cdiag-item">Black</div>
+              </div>
+              <div class="cdiag-arrow">×</div>
+              <div class="cdiag-col">
+                <div class="cdiag-col-title">Variation 2<br/>e.g. Size</div>
+                <div class="cdiag-item">S</div>
+                <div class="cdiag-item">M</div>
+                <div class="cdiag-item">L</div>
+              </div>
+              <div class="cdiag-arrow">→</div>
+              <div class="cdiag-col">
+                <div class="cdiag-col-title">Auto-generated<br/>Variants (9)</div>
+                <div style="display:flex;flex-wrap:wrap;gap:3px;">
+                  <span class="var-combo-pill"><span>Red</span>S</span>
+                  <span class="var-combo-pill"><span>Red</span>M</span>
+                  <span class="var-combo-pill"><span>Red</span>L</span>
+                  <span class="var-combo-pill"><span>Blue</span>S</span>
+                  <span class="var-combo-pill"><span>Blue</span>M</span>
+                  <span class="var-combo-pill"><span>Blue</span>L</span>
+                  <span class="var-combo-pill"><span>Black</span>S</span>
+                  <span class="var-combo-pill"><span>Black</span>M</span>
+                  <span class="var-combo-pill"><span>Black</span>L</span>
+                </div>
+              </div>
+            </div>
+            <div class="concept-note">Each generated variant has its own <strong>price, stock, SKU</strong> and optional image. Add as many variation types as you need — variants are rebuilt automatically.</div>
+          </div>
+
+          <!-- No variation state -->
+          <div class="no-var-state" id="no-var-state">
+            <svg width="38" height="38" fill="none" stroke="#c8cad4" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 10px;display:block;"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            <div class="no-var-title">No variations added yet</div>
+            <div class="no-var-sub">Product has a single price &amp; stock.<br/>Add a variation if it comes in different colours, sizes, or materials.</div>
+            <div class="no-var-btns">
+              <button class="btn btn-ghost btn-sm" onclick="addVariation('color')">+ Colour</button>
+              <button class="btn btn-ghost btn-sm" onclick="addVariation('size')">+ Size</button>
+              <button class="btn btn-ghost btn-sm" onclick="addVariation('material')">+ Material</button>
+              <button class="btn btn-ghost btn-sm" onclick="addVariation('other')">+ Other</button>
+            </div>
+          </div>
+
+          <!-- Active variations -->
+          <div id="vars-container" style="display:none;"></div>
+
+          <!-- Add another variation button -->
+          <div id="add-var-wrap" style="display:none;margin-top:10px;">
+            <button class="add-var-btn" id="add-var-btn" onclick="showAddVarPicker()">
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add another variation type
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- VARIANTS TABLE -->
+      <div class="card variants-card" id="variants-card" style="display:none;">
+        <div class="card-header">
+          <div class="vt-header" style="width:100%;">
+            <div class="vt-title"><div class="dot"></div> Generated Variants <span class="vt-count" id="vt-count">0</span></div>
+            <button class="regen-btn" onclick="generateVariants()">
+              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+              Regenerate
+            </button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0;">
+          <div class="info-banner green" style="margin:14px 16px 0;">
+            <div class="info-banner-icon"><svg width="9" height="9" fill="none" stroke="#16a34a" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+            <div class="info-banner-text"><strong>Each row below is one specific combination</strong> a customer can purchase — e.g. "Red + Size M". Set the price and stock for each. Click the edit icon for more details (SKU, image).</div>
+          </div>
+          <div class="vtable-wrap" style="margin:12px 14px 14px;">
+            <table class="vtable">
+              <thead>
+                <tr>
+                  <th>Variant (Combination)</th>
+                  <th>Price (₦)</th>
+                  <th>Stock</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="vtable-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /left -->
+
+    <!-- RIGHT -->
+    <div>
+
+      <!-- Image -->
+      <div class="card">
+        <div class="card-header"><div class="card-title"><div class="dot"></div> Product Image</div></div>
+        <div class="card-body">
+          <div class="img-area" id="main-img-area" onclick="document.getElementById('main-img-input').click()">
+            <div class="img-icon"><svg width="18" height="18" fill="none" stroke="#9499a7" stroke-width="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>
+            <div class="img-title">Upload product photo</div>
+            <div class="img-sub">JPG, PNG, WEBP · Max 5MB</div>
+            <input type="file" id="main-img-input" accept="image/*" style="display:none" onchange="previewMainImg(this)"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Category -->
+      <div class="card">
+        <div class="card-header"><div class="card-title"><div class="dot"></div> Category</div></div>
+        <div class="card-body">
+          <div class="cat-grid">
+            <div class="cat-chip sel" onclick="pickCat(this)">Footwear</div>
+            <div class="cat-chip" onclick="pickCat(this)">Clothing</div>
+            <div class="cat-chip" onclick="pickCat(this)">Accessories</div>
+            <div class="cat-chip" onclick="pickCat(this)">Electronics</div>
+            <div class="cat-chip" onclick="pickCat(this)">Food</div>
+            <div class="cat-chip" onclick="pickCat(this)">Beauty</div>
+          </div>
+          <div style="margin-top:10px;"><input type="text" placeholder="Or type custom category…"/></div>
+        </div>
+      </div>
+
+      <!-- Visibility -->
+      <div class="card">
+        <div class="card-header"><div class="card-title"><div class="dot"></div> Visibility</div></div>
+        <div class="card-body">
+          <div class="toggle-row">
+            <div><div class="tl">Publish to Store</div><div class="ts">Customers can see and buy this product</div></div>
+            <label class="toggle"><input type="checkbox" id="pub-toggle" onchange="updatePubStatus(this)"/><span class="tslider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <div><div class="tl">Featured Product</div><div class="ts">Show in featured section on home page</div></div>
+            <label class="toggle"><input type="checkbox"/><span class="tslider"></span></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Price summary (shown when variations active) -->
+      <div class="card" id="price-summary" style="display:none;">
+        <div class="card-header"><div class="card-title"><div class="dot"></div> Price Summary</div></div>
+        <div class="card-body">
+          <div class="psum">
+            <div class="psum-title">Across all variants</div>
+            <div class="prow"><span>Price range</span><span class="prange" id="pr-range">—</span></div>
+            <div class="prow"><span>Total stock</span><span id="pr-stock">—</span></div>
+            <div class="prow"><span>Variant count</span><span id="pr-vcount">—</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /right -->
+
+  </div><!-- /form-layout -->
+</main>
+</div><!-- /shell -->
+
+<!-- VARIANT DETAIL MODAL -->
+<div class="modal-overlay" id="variant-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title">Edit Variant</div>
+      <button class="modal-close" onclick="document.getElementById('variant-modal').classList.remove('open')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Variant Combination</label>
+        <input type="text" id="m-combo" readonly style="background:#f5f6fa;font-weight:600;"/>
+      </div>
+      <div class="row2">
+        <div class="field" style="margin:0"><label>Price (₦)</label><div class="pfx-wrap"><span class="pfx">₦</span><input type="number" id="m-price" min="0"/></div></div>
+        <div class="field" style="margin:0"><label>Stock</label><input type="number" id="m-stock" min="0"/></div>
+      </div>
+      <div class="row2" style="margin-top:14px;">
+        <div class="field" style="margin:0"><label>SKU</label><input type="text" id="m-sku" placeholder="Optional"/></div>
+        <div class="field" style="margin:0"><label>Barcode</label><input type="text" id="m-barcode" placeholder="Optional"/></div>
+      </div>
+      <div class="field" style="margin-top:14px;">
+        <label>Variant Image <span class="badge-sm">Optional</span></label>
+        <div class="img-area" style="padding:14px;" onclick="document.getElementById('m-img-input').click()">
+          <div class="img-sub">Upload an image specific to this variant</div>
+          <input type="file" id="m-img-input" accept="image/*" style="display:none"/>
+        </div>
+      </div>
+      <div class="toggle-row" style="margin-top:4px;">
+        <div><div class="tl">Active</div><div class="ts">Customers can purchase this variant</div></div>
+        <label class="toggle"><input type="checkbox" id="m-active" checked/><span class="tslider"></span></label>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="document.getElementById('variant-modal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════
+const S = {
+  variations: [],   // [{id, type, name, options:[{id,value,price,stock,sku,img}]}]
+  variants:   [],   // auto-generated [{combo,comboTags,price,stock,sku,active}]
+  editingIdx: null
+};
+let VID = 0, OID = 0;
+
+const TYPES = {
+  color:    { label:'Colour',   badge:'vb-color',    suggestions:['Red','Blue','Black','White','Green','Brown','Grey','Navy','Pink','Yellow'] },
+  size:     { label:'Size',     badge:'vb-size',     suggestions:['XS','S','M','L','XL','XXL','36','37','38','39','40','41','42','43','44','45'] },
+  material: { label:'Material', badge:'vb-material', suggestions:['Leather','Suede','Cotton','Canvas','Polyester','Wool','Denim'] },
+  style:    { label:'Style',    badge:'vb-style',    suggestions:['Classic','Modern','Casual','Formal','Sport','Vintage'] },
+  length:   { label:'Length',   badge:'vb-other',    suggestions:['Short','Medium','Long','Extra Long'] },
+  weight:   { label:'Weight',   badge:'vb-other',    suggestions:['Light','Medium','Heavy'] },
+  other:    { label:'Other',    badge:'vb-other',    suggestions:[] }
+};
+
+// ════════════════════════════════════════
+// ADD / REMOVE VARIATION
+// ════════════════════════════════════════
+function addVariation(type) {
+  const id = ++VID;
+  S.variations.push({ id, type, name: TYPES[type]?.label || 'Variation', options: [] });
+  render();
+}
+
+function removeVariation(id) {
+  S.variations = S.variations.filter(v => v.id !== id);
+  generateVariants();
+  render();
+}
+
+function changeType(id, type) {
+  const v = S.variations.find(v => v.id === id);
+  if (v) { v.type = type; v.name = TYPES[type]?.label || 'Other'; render(); }
+}
+
+function changeName(id, name) {
+  const v = S.variations.find(v => v.id === id);
+  if (v) v.name = name;
+}
+
+// ════════════════════════════════════════
+// ADD / REMOVE OPTION
+// ════════════════════════════════════════
+function addOption(vid) {
+  const v = S.variations.find(v => v.id === vid);
+  if (v) { v.options.push({id:++OID,value:'',price:'',stock:'',sku:'',img:null}); render(); }
+}
+
+function removeOption(vid, oid) {
+  const v = S.variations.find(v => v.id === vid);
+  if (v) { v.options = v.options.filter(o => o.id !== oid); generateVariants(); render(); }
+}
+
+function quickAdd(vid, value) {
+  const v = S.variations.find(v => v.id === vid);
+  if (!v || v.options.some(o => o.value.toLowerCase() === value.toLowerCase())) return;
+  v.options.push({id:++OID,value,price:'',stock:'',sku:'',img:null});
+  generateVariants();
+  render();
+}
+
+function updateOpt(vid, oid, field, val) {
+  const v = S.variations.find(v => v.id === vid);
+  const o = v?.options.find(o => o.id === oid);
+  if (o) o[field] = val;
+}
+
+// ════════════════════════════════════════
+// GENERATE VARIANTS (cartesian product)
+// ════════════════════════════════════════
+function generateVariants() {
+  const filled = S.variations
+    .map(v => ({v, opts: v.options.filter(o => o.value.trim())}))
+    .filter(x => x.opts.length > 0);
+
+  if (!filled.length) { S.variants = []; renderVariantsTable(); updatePriceSummary(); return; }
+
+  // Cartesian product
+  let combos = [[]];
+  for (const {v, opts} of filled) {
+    combos = combos.flatMap(c => opts.map(o => [...c, {varType: v.type, varName: v.name, opt: o}]));
+  }
+
+  const existing = {};
+  S.variants.forEach(v => { existing[v.combo] = v; });
+
+  S.variants = combos.map(combo => {
+    const key = combo.map(c => c.opt.value).join(' / ');
+    const tags = combo.map(c => ({type: c.varType, name: c.varName, value: c.opt.value}));
+    const first = combo[0].opt;
+    return existing[key] || {
+      combo: key,
+      tags,
+      price: first.price || '',
+      stock: first.stock || '',
+      sku: '',
+      active: true
+    };
+  });
+
+  renderVariantsTable();
+  updatePriceSummary();
+}
+
+// ════════════════════════════════════════
+// RENDER
+// ════════════════════════════════════════
+function render() {
+  const container = document.getElementById('vars-container');
+  const noState   = document.getElementById('no-var-state');
+  const addWrap   = document.getElementById('add-var-wrap');
+  const badge     = document.getElementById('opt-count-badge');
+
+  if (!S.variations.length) {
+    container.style.display = 'none';
+    noState.style.display   = 'block';
+    addWrap.style.display   = 'none';
+    badge.style.display     = 'none';
+    document.getElementById('base-price-card').style.display = 'block';
+    document.getElementById('price-notice').style.display    = 'none';
+    document.getElementById('price-summary').style.display   = 'none';
+    generateVariants();
+    return;
+  }
+
+  noState.style.display   = 'none';
+  container.style.display = 'block';
+  addWrap.style.display   = 'block';
+  document.getElementById('base-price-card').style.display = 'none';
+  document.getElementById('price-notice').style.display    = 'block';
+  document.getElementById('price-summary').style.display   = 'block';
+
+  const totalOpts = S.variations.reduce((s,v)=>s+v.options.length,0);
+  badge.style.display = 'inline-flex';
+  badge.textContent = totalOpts + ' option'+(totalOpts!==1?'s':'');
+
+  container.innerHTML = S.variations.map(v => renderVarBlock(v)).join('');
+  generateVariants();
+}
+
+function renderVarBlock(v) {
+  const t = TYPES[v.type] || TYPES.other;
+  const used = new Set(v.options.map(o=>o.value.toLowerCase()));
+  const suggs = (t.suggestions||[]).filter(s=>!used.has(s.toLowerCase())).slice(0,7);
+
+  return `
+  <div class="var-block active" id="vb-${v.id}">
+    <div class="var-block-head active">
+      <div class="drag-handle"><svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></div>
+      <span class="vtype-badge ${t.badge}">${t.label}</span>
+      <span class="var-block-name">${v.name}</span>
+      <span class="var-block-optcount">${v.options.length} option${v.options.length!==1?'s':''}</span>
+      <div class="var-block-actions">
+        <button class="btn btn-danger-soft btn-sm btn-icon" onclick="removeVariation(${v.id})" title="Remove variation">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="var-block-body">
+      <div class="row2" style="margin-bottom:12px;">
+        <div class="field" style="margin:0">
+          <label>Variation Type</label>
+          <select onchange="changeType(${v.id},this.value)">
+            ${Object.entries(TYPES).map(([k,d])=>`<option value="${k}"${v.type===k?' selected':''}>${d.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="margin:0">
+          <label>Display Label</label>
+          <input type="text" value="${v.name}" oninput="changeName(${v.id},this.value)" placeholder="e.g. Pick a colour"/>
+        </div>
+      </div>
+
+      ${suggs.length?`<div style="margin-bottom:10px;"><div style="font-size:10px;color:#9499a7;font-weight:500;margin-bottom:5px;">Quick add:</div><div class="qpills">${suggs.map(s=>`<button class="qpill" onclick="quickAdd(${v.id},'${s}')">${s}</button>`).join('')}</div></div>`:''}
+
+      <div class="opt-table-head">
+        <div class="opt-col-lbl">IMG</div>
+        <div class="opt-col-lbl">Option Value</div>
+        <div class="opt-col-lbl">Price (₦)</div>
+        <div class="opt-col-lbl">Stock</div>
+        <div></div>
+      </div>
+
+      <div class="opt-rows" id="opts-${v.id}">
+        ${v.options.map(o=>renderOptRow(v.id,o)).join('')}
+      </div>
+
+      <button class="add-opt-btn" onclick="addOption(${v.id})">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add option
+      </button>
+    </div>
+  </div>`;
+}
+
+function renderOptRow(vid, o) {
+  return `
+  <div class="opt-row">
+    <div class="opt-img" onclick="document.getElementById('oi-${o.id}').click()" title="Option image">
+      ${o.img?`<img src="${o.img}"/>`:`<svg width="13" height="13" fill="none" stroke="#c0c4cf" stroke-width="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`}
+      <input type="file" id="oi-${o.id}" accept="image/*" style="display:none" onchange="previewOptImg(${vid},${o.id},this)"/>
+    </div>
+    <input type="text" value="${o.value}" placeholder="e.g. Red" oninput="updateOpt(${vid},${o.id},'value',this.value)" onblur="generateVariants()"/>
+    <div class="pfx-wrap"><span class="pfx" style="font-size:10px;">₦</span><input type="number" value="${o.price}" placeholder="0.00" min="0" step="0.01" oninput="updateOpt(${vid},${o.id},'price',this.value);updatePriceSummary()"/></div>
+    <input type="number" value="${o.stock}" placeholder="0" min="0" oninput="updateOpt(${vid},${o.id},'stock',this.value);updatePriceSummary()"/>
+    <button class="opt-remove" onclick="removeOption(${vid},${o.id})">
+      <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>`;
+}
+
+// ════════════════════════════════════════
+// RENDER VARIANTS TABLE
+// ════════════════════════════════════════
+function renderVariantsTable() {
+  const card  = document.getElementById('variants-card');
+  const tbody = document.getElementById('vtable-body');
+  const count = document.getElementById('vt-count');
+
+  if (!S.variants.length) { card.style.display='none'; return; }
+
+  card.style.display = 'block';
+  count.textContent  = S.variants.length;
+
+  const tagClass = {color:'color-tag',size:'size-tag',material:'material-tag'};
+
+  tbody.innerHTML = S.variants.map((v,i)=>`
+    <tr>
+      <td>
+        <div class="combo-tags">
+          ${(v.tags||[{type:'other',value:v.combo}]).map(t=>`<span class="ctag ${tagClass[t.type]||''}">${t.value}</span>`).join('')}
+        </div>
+      </td>
+      <td style="width:130px;">
+        <div class="pfx-wrap"><span class="pfx" style="font-size:10px;">₦</span>
+        <input type="number" value="${v.price}" placeholder="0.00" min="0" step="0.01" oninput="S.variants[${i}].price=this.value;updatePriceSummary()"/>
+        </div>
+      </td>
+      <td style="width:90px;"><input type="number" value="${v.stock}" placeholder="0" min="0" oninput="S.variants[${i}].stock=this.value;updatePriceSummary()"/></td>
+      <td style="width:130px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="vstatus ${v.active?'on':'off'}"><span class="vstatus-dot"></span>${v.active?'Active':'Off'}</span>
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="openModal(${i})" title="Edit details">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+// ════════════════════════════════════════
+// PRICE SUMMARY
+// ════════════════════════════════════════
+function updatePriceSummary() {
+  const prices = S.variants.map(v=>parseFloat(v.price)).filter(p=>!isNaN(p)&&p>0);
+  const stocks = S.variants.map(v=>parseInt(v.stock)).filter(s=>!isNaN(s));
+  const rng = document.getElementById('pr-range');
+  if (!prices.length) { rng.textContent='—'; }
+  else {
+    const mn=Math.min(...prices),mx=Math.max(...prices);
+    rng.textContent = mn===mx ? `₦${mn.toLocaleString()}` : `₦${mn.toLocaleString()} – ₦${mx.toLocaleString()}`;
+  }
+  document.getElementById('pr-stock').textContent  = stocks.length ? stocks.reduce((a,b)=>a+b,0).toLocaleString()+' units' : '—';
+  document.getElementById('pr-vcount').textContent = S.variants.length || '—';
+}
+
+// ════════════════════════════════════════
+// MODAL
+// ════════════════════════════════════════
+function openModal(i) {
+  const v = S.variants[i];
+  S.editingIdx = i;
+  document.getElementById('m-combo').value  = v.combo;
+  document.getElementById('m-price').value  = v.price;
+  document.getElementById('m-stock').value  = v.stock;
+  document.getElementById('m-sku').value    = v.sku||'';
+  document.getElementById('m-active').checked = v.active;
+  document.getElementById('variant-modal').classList.add('open');
+}
+
+function saveModal() {
+  const i = S.editingIdx;
+  if (i===null) return;
+  S.variants[i].price  = document.getElementById('m-price').value;
+  S.variants[i].stock  = document.getElementById('m-stock').value;
+  S.variants[i].sku    = document.getElementById('m-sku').value;
+  S.variants[i].active = document.getElementById('m-active').checked;
+  document.getElementById('variant-modal').classList.remove('open');
+  renderVariantsTable();
+  updatePriceSummary();
+}
+
+// ════════════════════════════════════════
+// ADD VARIATION PICKER
+// ════════════════════════════════════════
+function showAddVarPicker() {
+  const usedTypes = new Set(S.variations.map(v=>v.type));
+  const available = Object.entries(TYPES).filter(([k])=>!usedTypes.has(k));
+  if (!available.length) { alert('All variation types already added.'); return; }
+  const choice = available.map(([k,d])=>d.label).join(', ');
+  // Show inline dropdown instead of alert in real implementation
+  const type = available[0][0]; // for demo just pick first available
+  addVariation(type);
+}
+
+// ════════════════════════════════════════
+// IMAGE HELPERS
+// ════════════════════════════════════════
+function previewMainImg(input) {
+  if (!input.files[0]) return;
+  const url = URL.createObjectURL(input.files[0]);
+  const a = document.getElementById('main-img-area');
+  a.className = 'img-area filled';
+  a.onclick = null;
+  a.innerHTML = `<img src="${url}" class="img-preview"/><div class="img-actions"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('main-img-input').click()">Change</button><button class="btn btn-danger-soft btn-sm" onclick="resetMainImg()">Remove</button><input type="file" id="main-img-input" accept="image/*" style="display:none" onchange="previewMainImg(this)"/></div>`;
+}
+
+function resetMainImg() {
+  const a = document.getElementById('main-img-area');
+  a.className='img-area'; a.onclick=()=>document.getElementById('main-img-input').click();
+  a.innerHTML=`<div class="img-icon"><svg width="18" height="18" fill="none" stroke="#9499a7" stroke-width="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div><div class="img-title">Upload product photo</div><div class="img-sub">JPG, PNG, WEBP · Max 5MB</div><input type="file" id="main-img-input" accept="image/*" style="display:none" onchange="previewMainImg(this)"/>`;
+}
+
+function previewOptImg(vid, oid, input) {
+  if (!input.files[0]) return;
+  const url = URL.createObjectURL(input.files[0]);
+  updateOpt(vid, oid, 'img', url);
+  const btn = document.querySelector(`#oi-${oid}`).closest('.opt-img');
+  btn.innerHTML=`<img src="${url}"/><input type="file" id="oi-${oid}" accept="image/*" style="display:none" onchange="previewOptImg(${vid},${oid},this)"/>`;
+}
+
+// ════════════════════════════════════════
+// MISC
+// ════════════════════════════════════════
+function pickCat(el) {
+  document.querySelectorAll('.cat-chip').forEach(c=>c.classList.remove('sel'));
+  el.classList.add('sel');
+}
+
+function updatePubStatus(cb) {
+  const p = document.getElementById('status-pill');
+  p.className = cb.checked ? 'spill pub' : 'spill draft';
+  p.innerHTML = `<div class="sdot"></div>${cb.checked?'Published':'Draft'}`;
+}
+
+function publishProduct() {
+  document.getElementById('pub-toggle').checked = true;
+  updatePubStatus(document.getElementById('pub-toggle'));
+  const b = document.querySelector('.btn-primary');
+  b.innerHTML='<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Published!';
+  b.style.background='linear-gradient(135deg,#22c55e,#16a34a)';
+  setTimeout(()=>{b.innerHTML='<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Publish Product';b.style.background='';},2000);
+}
+
+// ════════════════════════════════════════
+// BOOT — demo: Colour + Size → 6 variants
+// ════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+  // Add Colour variation
+  addVariation('color');
+  const cv = S.variations[0];
+  cv.options.push({id:++OID,value:'Black',price:'45000',stock:'10',sku:'',img:null});
+  cv.options.push({id:++OID,value:'Brown',price:'45000',stock:'8', sku:'',img:null});
+
+  // Add Size variation
+  addVariation('size');
+  const sv = S.variations[1];
+  sv.options.push({id:++OID,value:'41',price:'',stock:'',sku:'',img:null});
+  sv.options.push({id:++OID,value:'42',price:'',stock:'',sku:'',img:null});
+  sv.options.push({id:++OID,value:'43',price:'',stock:'',sku:'',img:null});
+
+  render();
+});
+</script>
+</body>
+</html>

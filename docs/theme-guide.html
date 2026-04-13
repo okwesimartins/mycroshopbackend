@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MycroShop Theme Guide — Stride Store</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+/* ═══════════════════════════════════════════════
+   GUIDE CHROME (not part of storefront)
+═══════════════════════════════════════════════ */
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0a;color:#e0e0e0;}
+
+.guide-top{padding:32px 40px 24px;border-bottom:1px solid #1c1c1c;}
+.guide-top h1{font-size:22px;font-weight:700;color:#fff;}
+.guide-top p{margin-top:6px;font-size:13px;color:#666;line-height:1.6;max-width:700px;}
+
+.switcher{display:flex;align-items:center;gap:10px;padding:16px 40px;background:#0f0f0f;border-bottom:1px solid #1c1c1c;position:sticky;top:0;z-index:200;flex-wrap:wrap;}
+.switcher-label{font-size:12px;color:#444;margin-right:4px;}
+.tbtn{padding:7px 18px;border-radius:20px;border:1.5px solid #252525;background:transparent;color:#666;font-size:12px;cursor:pointer;transition:all .15s;font-family:inherit;}
+.tbtn:hover{border-color:#444;color:#ccc;}
+.tbtn.active{border-color:#4a9eff;background:rgba(74,158,255,.1);color:#4a9eff;}
+
+.active-info{margin-left:auto;font-size:11px;color:#333;background:#111;border:1px solid #1e1e1e;padding:5px 14px;border-radius:20px;}
+.active-info span{color:#888;}
+
+/* ═══════════════════════════════════════════════
+   TWO-PANEL LAYOUT
+═══════════════════════════════════════════════ */
+.panels{display:flex;gap:0;min-height:calc(100vh - 120px);}
+
+/* ── LEFT: mobile phone frame ── */
+.panel-mobile{width:420px;flex-shrink:0;padding:32px 24px;background:#0d0d0d;border-right:1px solid #1a1a1a;display:flex;flex-direction:column;align-items:center;}
+.panel-mobile-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#333;margin-bottom:20px;}
+.phone-frame{width:320px;background:#0f0f0f;border-radius:42px;border:10px solid #1a1a1a;box-shadow:0 0 0 1px #222,0 32px 80px rgba(0,0,0,.6);overflow:hidden;position:relative;}
+.phone-notch{width:80px;height:24px;background:#0f0f0f;border-radius:0 0 14px 14px;position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:10;}
+.phone-screen{overflow:hidden;border-radius:33px;}
+
+/* ── RIGHT: web view ── */
+.panel-web{flex:1;padding:32px 40px;background:#0a0a0a;}
+.panel-web-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#333;margin-bottom:20px;}
+.web-frame{border-radius:12px;border:1px solid #1e1e1e;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.4);}
+
+/* ═══════════════════════════════════════════════
+   VARIABLE MAPPING DOC
+═══════════════════════════════════════════════ */
+.doc-section{padding:36px 40px;border-top:1px solid #1a1a1a;}
+.doc-section h2{font-size:16px;font-weight:600;color:#fff;margin-bottom:8px;}
+.doc-section p{font-size:13px;color:#666;line-height:1.7;max-width:840px;}
+.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px;}
+.map-card{background:#0f0f0f;border:1px solid #1e1e1e;border-radius:10px;padding:18px;}
+.map-card h3{font-size:12px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;}
+pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
+.c1{color:#79c0ff;} .c2{color:#a5d6ff;} .c3{color:#7ee787;} .c4{color:#555;font-style:italic;}
+
+/* ═══════════════════════════════════════════════
+   STOREFRONT CSS VARIABLES (scoped, not :root)
+═══════════════════════════════════════════════ */
+.sf{
+  /* Classic theme defaults — overridden at runtime by applyTheme() */
+  --accent:#2e526b;       --accent-light:#699bbf;
+  --dark:#F2EFEF;         --mid:#E8E5E2;          --card:#FFFFFF;
+  --text:#111111;         --muted:rgba(17,17,17,.58);
+  --border:rgba(46,82,107,.25);
+  --btn-font:#FFFFFF;
+  --radius:18px;
+  --font-display:'Playfair Display',serif;
+  --font-body:'DM Sans',sans-serif;
+  transition:background .35s,color .35s;
+}
+
+/* ═══════════════════════════════════════════════
+   MOBILE STOREFRONT STYLES
+═══════════════════════════════════════════════ */
+.sf-m{font-family:var(--font-body);background:var(--dark);color:var(--text);font-size:14px;}
+
+.sf-m .hero{position:relative;height:280px;overflow:hidden;}
+.sf-m .hero-bg{position:absolute;inset:0;background:var(--mid);}
+.sf-m .hero-banner-img{position:absolute;inset:0;background-size:cover;background-position:center;background-image:url('http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png');}
+.sf-m .hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,var(--dark) 0%,rgba(0,0,0,.25) 60%,rgba(0,0,0,.5) 100%);}
+.sf-m .hero-content{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:24px;}
+.sf-m .store-logo{width:64px;height:64px;border-radius:50%;overflow:hidden;border:2.5px solid rgba(255,255,255,.3);margin-bottom:10px;background:var(--mid);flex-shrink:0;}
+.sf-m .store-logo img{width:100%;height:100%;object-fit:cover;}
+.sf-m .store-name{font-family:var(--font-display);font-size:22px;font-weight:700;color:#fff;text-shadow:0 2px 16px rgba(0,0,0,.5);margin-bottom:3px;}
+.sf-m .store-tagline{font-size:11px;color:var(--accent);font-weight:500;letter-spacing:.1em;text-transform:uppercase;}
+
+.sf-m .nav-pills{display:flex;gap:7px;padding:12px 16px;overflow-x:auto;scrollbar-width:none;background:var(--dark);}
+.sf-m .nav-pills::-webkit-scrollbar{display:none;}
+.sf-m .nav-pill{flex-shrink:0;padding:7px 14px;border-radius:100px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);color:var(--muted);background:transparent;white-space:nowrap;font-family:var(--font-body);}
+.sf-m .nav-pill.active{background:var(--accent);border-color:var(--accent);color:var(--btn-font);font-weight:600;}
+
+.sf-m .toggle-wrap{padding:0 16px 16px;}
+.sf-m .toggle-bar{display:flex;background:var(--mid);border-radius:100px;padding:3px;gap:2px;border:1px solid var(--border);}
+.sf-m .toggle-btn{flex:1;padding:9px;border-radius:100px;font-size:12px;font-weight:500;text-align:center;cursor:pointer;color:var(--muted);font-family:var(--font-body);border:none;background:transparent;}
+.sf-m .toggle-btn.active{background:var(--accent);color:var(--btn-font);font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.2);}
+
+.sf-m .section-header{display:flex;align-items:baseline;justify-content:space-between;padding:6px 16px 12px;}
+.sf-m .section-title{font-family:var(--font-display);font-size:17px;font-weight:600;color:var(--text);}
+.sf-m .section-link{font-size:11px;color:var(--accent);font-weight:500;cursor:pointer;}
+
+.sf-m .products-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px;margin-bottom:20px;}
+.sf-m .product-card{background:var(--card);border-radius:14px;overflow:hidden;border:1px solid var(--border);cursor:pointer;}
+.sf-m .product-img{width:100%;aspect-ratio:1;background:var(--mid);overflow:hidden;}
+.sf-m .product-img img{width:100%;height:100%;object-fit:cover;}
+.sf-m .product-badge{position:absolute;top:8px;left:8px;background:var(--accent);color:var(--btn-font);font-size:8px;font-weight:700;padding:3px 7px;border-radius:100px;letter-spacing:.05em;text-transform:uppercase;}
+.sf-m .product-img-wrap{position:relative;}
+.sf-m .product-info{padding:10px 10px 12px;}
+.sf-m .product-cat{font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--accent);margin-bottom:3px;}
+.sf-m .product-name{font-size:12px;font-weight:600;color:var(--text);line-height:1.3;margin-bottom:3px;}
+.sf-m .product-sub{font-size:10px;color:var(--muted);margin-bottom:8px;}
+.sf-m .product-bottom{display:flex;align-items:center;justify-content:space-between;}
+.sf-m .product-price{font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--accent);}
+.sf-m .product-btn{width:26px;height:26px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;flex-shrink:0;}
+
+.sf-m .view-all-wrap{padding:0 16px 8px;}
+.sf-m .view-all-btn{width:100%;padding:13px;border-radius:12px;background:transparent;border:1px solid var(--border);color:var(--accent);font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;font-family:var(--font-body);display:flex;align-items:center;justify-content:center;gap:6px;}
+
+.sf-m .pb-safe{height:68px;}
+.sf-m .bottom-nav{display:flex;align-items:center;background:var(--mid);border-top:1px solid var(--border);padding:8px 0 14px;}
+.sf-m .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;}
+.sf-m .nav-item-label{font-size:9px;font-weight:500;color:var(--muted);}
+.sf-m .nav-item.active .nav-item-label{color:var(--accent);}
+.sf-m .cart-fab{width:46px;height:46px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;margin-top:-20px;box-shadow:0 4px 16px rgba(0,0,0,.3);border:3px solid var(--dark);cursor:pointer;position:relative;flex-shrink:0;}
+.sf-m .cart-badge{position:absolute;top:-2px;right:-2px;width:16px;height:16px;background:#FF4545;border-radius:50%;font-size:9px;font-weight:700;color:#fff;display:flex;align-items:center;justify-content:center;border:2px solid var(--dark);}
+
+/* mobile footer */
+.sf-m .store-footer{background:var(--mid);border-top:1px solid var(--border);padding:20px 16px 16px;}
+.sf-m .footer-store-name{font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px;}
+.sf-m .footer-tagline{font-size:10px;color:var(--muted);margin-bottom:14px;}
+.sf-m .footer-location{display:flex;align-items:flex-start;gap:6px;margin-bottom:14px;}
+.sf-m .footer-location-icon{flex-shrink:0;margin-top:1px;}
+.sf-m .footer-location-text{font-size:10px;color:var(--muted);line-height:1.5;}
+.sf-m .footer-social-label{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+.sf-m .footer-social-row{display:flex;gap:8px;}
+.sf-m .footer-social-icon{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--card);}
+.sf-m .footer-copy{font-size:9px;color:var(--muted);text-align:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);}
+
+/* ═══════════════════════════════════════════════
+   WEB STOREFRONT STYLES
+═══════════════════════════════════════════════ */
+.sf-w{font-family:var(--font-body);background:var(--dark);color:var(--text);}
+
+.sf-w .topbar{background:var(--mid);border-bottom:1px solid var(--border);padding:0 40px;height:60px;display:flex;align-items:center;justify-content:space-between;}
+.sf-w .topbar-brand{display:flex;align-items:center;gap:12px;}
+.sf-w .topbar-logo{width:40px;height:40px;border-radius:50%;overflow:hidden;border:2px solid var(--border);background:var(--card);}
+.sf-w .topbar-logo img{width:100%;height:100%;object-fit:cover;}
+.sf-w .topbar-name{font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--text);}
+.sf-w .topbar-nav{display:flex;gap:28px;}
+.sf-w .topbar-link{font-size:13px;color:var(--muted);cursor:pointer;transition:color .15s;}
+.sf-w .topbar-link:hover,.sf-w .topbar-link.active{color:var(--accent);}
+.sf-w .topbar-actions{display:flex;align-items:center;gap:12px;}
+.sf-w .topbar-search{padding:7px 14px;border-radius:20px;background:var(--card);border:1px solid var(--border);font-size:12px;color:var(--muted);font-family:var(--font-body);outline:none;width:160px;}
+.sf-w .cart-btn{padding:8px 18px;border-radius:20px;background:var(--accent);color:var(--btn-font);font-size:12px;font-weight:600;border:none;cursor:pointer;font-family:var(--font-body);display:flex;align-items:center;gap:6px;}
+
+.sf-w .hero-banner{width:100%;height:220px;position:relative;overflow:hidden;}
+.sf-w .hero-banner-img{width:100%;height:100%;object-fit:cover;object-position:center 30%;}
+.sf-w .hero-overlay{position:absolute;inset:0;background:linear-gradient(to right,rgba(0,0,0,.55) 0%,transparent 60%),linear-gradient(to top,var(--dark) 0%,transparent 50%);}
+.sf-w .hero-text{position:absolute;bottom:28px;left:40px;z-index:2;}
+.sf-w .hero-text h1{font-family:var(--font-display);font-size:28px;font-weight:700;color:#fff;margin-bottom:6px;text-shadow:0 2px 20px rgba(0,0,0,.4);}
+.sf-w .hero-text p{font-size:13px;color:rgba(255,255,255,.7);margin-bottom:14px;}
+.sf-w .hero-cta{padding:10px 22px;border-radius:100px;background:var(--accent);color:var(--btn-font);font-size:13px;font-weight:600;border:none;cursor:pointer;font-family:var(--font-body);}
+
+.sf-w .content{display:grid;grid-template-columns:220px 1fr;gap:0;}
+.sf-w .sidebar{background:var(--mid);border-right:1px solid var(--border);padding:24px 20px;min-height:500px;}
+.sf-w .sidebar-section{margin-bottom:24px;}
+.sf-w .sidebar-title{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+.sf-w .sidebar-item{padding:8px 10px;border-radius:8px;font-size:13px;color:var(--muted);cursor:pointer;transition:all .15s;margin-bottom:2px;}
+.sf-w .sidebar-item:hover{background:var(--card);color:var(--text);}
+.sf-w .sidebar-item.active{background:var(--accent);color:var(--btn-font);font-weight:500;}
+
+.sf-w .main{padding:28px 32px;background:var(--dark);}
+.sf-w .main-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+.sf-w .main-title{font-family:var(--font-display);font-size:22px;font-weight:600;color:var(--text);}
+.sf-w .main-count{font-size:12px;color:var(--muted);}
+.sf-w .products-grid-w{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+.sf-w .wcard{background:var(--card);border-radius:14px;overflow:hidden;border:1px solid var(--border);cursor:pointer;transition:transform .2s,box-shadow .2s;}
+.sf-w .wcard:hover{transform:translateY(-3px);box-shadow:0 12px 32px rgba(0,0,0,.15);}
+.sf-w .wcard-img{width:100%;height:160px;background:var(--mid);overflow:hidden;position:relative;}
+.sf-w .wcard-img img{width:100%;height:100%;object-fit:cover;}
+.sf-w .wcard-badge{position:absolute;top:10px;left:10px;background:var(--accent);color:var(--btn-font);font-size:9px;font-weight:700;padding:3px 8px;border-radius:100px;letter-spacing:.05em;text-transform:uppercase;}
+.sf-w .wcard-body{padding:14px;}
+.sf-w .wcard-cat{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--accent);margin-bottom:4px;}
+.sf-w .wcard-name{font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;}
+.sf-w .wcard-sub{font-size:11px;color:var(--muted);margin-bottom:10px;}
+.sf-w .wcard-bottom{display:flex;align-items:center;justify-content:space-between;}
+.sf-w .wcard-price{font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--accent);}
+.sf-w .wcard-btn{padding:7px 16px;border-radius:20px;background:var(--accent);color:var(--btn-font);font-size:11px;font-weight:600;border:none;cursor:pointer;font-family:var(--font-body);white-space:nowrap;flex-shrink:0;}
+
+/* web footer */
+.sf-w .site-footer{background:var(--mid);border-top:1px solid var(--border);padding:40px 40px 28px;}
+.sf-w .footer-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:40px;margin-bottom:32px;}
+.sf-w .footer-brand-name{font-family:var(--font-display);font-size:18px;font-weight:700;color:var(--text);margin-bottom:6px;}
+.sf-w .footer-brand-tagline{font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:16px;max-width:240px;}
+.sf-w .footer-social-row{display:flex;gap:8px;}
+.sf-w .footer-social-icon{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--card);transition:background .15s,border-color .15s;}
+.sf-w .footer-social-icon:hover{background:var(--accent);border-color:var(--accent);}
+.sf-w .footer-social-icon:hover svg{stroke:var(--btn-font);}
+.sf-w .footer-col-title{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
+.sf-w .footer-col-item{font-size:12px;color:var(--muted);margin-bottom:8px;cursor:pointer;transition:color .15s;}
+.sf-w .footer-col-item:hover{color:var(--accent);}
+.sf-w .footer-location-row{display:flex;gap:8px;margin-bottom:10px;}
+.sf-w .footer-location-text{font-size:12px;color:var(--muted);line-height:1.6;}
+.sf-w .footer-divider{border:none;border-top:1px solid var(--border);margin-bottom:20px;}
+.sf-w .footer-bottom{display:flex;align-items:center;justify-content:space-between;}
+.sf-w .footer-copy{font-size:11px;color:var(--muted);}
+.sf-w .footer-copy span{color:var(--accent);}
+.sf-w .footer-bottom-links{display:flex;gap:20px;}
+.sf-w .footer-bottom-link{font-size:11px;color:var(--muted);cursor:pointer;transition:color .15s;}
+.sf-w .footer-bottom-link:hover{color:var(--accent);}
+</style>
+</head>
+<body>
+
+<!-- ── GUIDE HEADER ── -->
+<div class="guide-top">
+  <h1>MycroShop Theme System — Frontend Integration Guide</h1>
+  <p>Live preview of the <strong>Stride</strong> store with all 5 generated themes. Left panel = mobile storefront. Right panel = web/desktop storefront. Both update together when you switch themes.</p>
+</div>
+
+<!-- ── THEME SWITCHER ── -->
+<div class="switcher">
+  <span class="switcher-label">Switch theme:</span>
+  <button class="tbtn active" onclick="setTheme('classic')">Classic</button>
+  <button class="tbtn" onclick="setTheme('light')">Light</button>
+  <button class="tbtn" onclick="setTheme('dark')">Dark</button>
+  <button class="tbtn" onclick="setTheme('bold')">Bold</button>
+  <button class="tbtn" onclick="setTheme('soft')">Soft</button>
+  <div class="active-info">Active: <span id="active-label">Classic</span></div>
+</div>
+
+<!-- ══════════════════════════════════════
+     TWO-PANEL PREVIEW
+══════════════════════════════════════ -->
+<div class="panels">
+
+  <!-- ── MOBILE PANEL ── -->
+  <div class="panel-mobile">
+    <div class="panel-mobile-label">📱 Mobile View</div>
+    <div class="phone-frame">
+      <div class="phone-notch"></div>
+      <div class="phone-screen">
+
+        <!-- MOBILE STOREFRONT -->
+        <div class="sf sf-m" id="sf-mobile">
+
+          <!-- Hero -->
+          <div class="hero">
+            <div class="hero-bg"></div>
+            <div class="hero-banner-img"></div>
+            <div class="hero-overlay"></div>
+            <div class="hero-content">
+              <div class="store-logo"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171662-257153511.png" alt="Stride Logo"/></div>
+              <div class="store-name">STRIDE</div>
+              <div class="store-tagline">Move Beyond.</div>
+            </div>
+          </div>
+
+          <!-- Nav pills -->
+          <div class="nav-pills">
+            <div class="nav-pill active">All</div>
+            <div class="nav-pill">Sneakers</div>
+            <div class="nav-pill">Loafers</div>
+            <div class="nav-pill">Boots</div>
+            <div class="nav-pill">Sandals</div>
+          </div>
+
+          <!-- Toggle -->
+          <div class="toggle-wrap">
+            <div class="toggle-bar">
+              <button class="toggle-btn active">Products</button>
+              <button class="toggle-btn">Services</button>
+            </div>
+          </div>
+
+          <!-- Collection header -->
+          <div class="section-header">
+            <div class="section-title">Footwear</div>
+            <div class="section-link">See all →</div>
+          </div>
+
+          <!-- Product grid -->
+          <div class="products-grid">
+            <div class="product-card">
+              <div class="product-img-wrap">
+                <div class="product-img"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Mens Loafers"/></div>
+                <div class="product-badge">New</div>
+              </div>
+              <div class="product-info">
+                <div class="product-cat">Loafers</div>
+                <div class="product-name">Mens Loafers</div>
+                <div class="product-sub">3 colours · 5 sizes</div>
+                <div class="product-bottom">
+                  <div class="product-price">₦45,000</div>
+                  <button class="product-btn">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--btn-font)" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="product-card">
+              <div class="product-img-wrap">
+                <div class="product-img"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Oxford Classic"/></div>
+              </div>
+              <div class="product-info">
+                <div class="product-cat">Oxford</div>
+                <div class="product-name">Oxford Classic</div>
+                <div class="product-sub">Brown · Tan</div>
+                <div class="product-bottom">
+                  <div class="product-price">₦62,000</div>
+                  <button class="product-btn">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--btn-font)" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="product-card">
+              <div class="product-img-wrap">
+                <div class="product-img"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Chelsea Boot"/></div>
+                <div class="product-badge">Sale</div>
+              </div>
+              <div class="product-info">
+                <div class="product-cat">Boots</div>
+                <div class="product-name">Chelsea Boot</div>
+                <div class="product-sub">Black · Size 39–45</div>
+                <div class="product-bottom">
+                  <div class="product-price">₦38,500</div>
+                  <button class="product-btn">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--btn-font)" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="product-card">
+              <div class="product-img-wrap">
+                <div class="product-img"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Comfy Clacks"/></div>
+              </div>
+              <div class="product-info">
+                <div class="product-cat">Sandals</div>
+                <div class="product-name">Comfy Clacks</div>
+                <div class="product-sub">4 colours</div>
+                <div class="product-bottom">
+                  <div class="product-price">₦29,000</div>
+                  <button class="product-btn">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--btn-font)" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="view-all-wrap">
+            <button class="view-all-btn">View All Products →</button>
+          </div>
+
+          <!-- Mobile Footer -->
+          <div class="store-footer">
+            <div class="footer-store-name">STRIDE</div>
+            <div class="footer-tagline">Premium footwear. Move beyond every limit.</div>
+            <div class="footer-location">
+              <div class="footer-location-icon">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              </div>
+              <div class="footer-location-text">14 Adeola Odeku Street,<br/>Victoria Island, Lagos.</div>
+            </div>
+            <div class="footer-social-label">Follow us</div>
+            <div class="footer-social-row">
+              <div class="footer-social-icon">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+              </div>
+              <div class="footer-social-icon">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+              </div>
+              <div class="footer-social-icon">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M22.54 6.42a2.78 2.78 0 00-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 001.46 6.42 29 29 0 001 12a29 29 0 00.46 5.58 2.78 2.78 0 001.95 1.96C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 001.95-1.96A29 29 0 0023 12a29 29 0 00-.46-5.58z"/><polygon points="9.75,15.02 15.5,12 9.75,8.98 9.75,15.02"/></svg>
+              </div>
+              <div class="footer-social-icon">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2c9 5 20 0 20-11.5a4.5 4.5 0 00-.08-.83A7.72 7.72 0 0023 3z"/></svg>
+              </div>
+            </div>
+            <div class="footer-copy">© 2025 Stride Footwear · All rights reserved</div>
+          </div>
+
+          <div class="pb-safe"></div>
+
+          <!-- Bottom nav: Home, Search, Cart only -->
+          <div class="bottom-nav">
+            <div class="nav-item active">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
+              <div class="nav-item-label" style="color:var(--accent)">Home</div>
+            </div>
+            <div class="nav-item">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <div class="nav-item-label">Search</div>
+            </div>
+            <div class="nav-item">
+              <div class="cart-fab">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--btn-font)" stroke-width="2.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+                <div class="cart-badge">3</div>
+              </div>
+              <div class="nav-item-label">Cart</div>
+            </div>
+          </div>
+
+        </div><!-- /sf-mobile -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ── WEB PANEL ── -->
+  <div class="panel-web">
+    <div class="panel-web-label">🖥️ Web / Desktop View</div>
+    <div class="web-frame">
+
+      <!-- WEB STOREFRONT -->
+      <div class="sf sf-w" id="sf-web">
+
+        <!-- Top bar -->
+        <div class="topbar">
+          <div class="topbar-brand">
+            <div class="topbar-logo"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171662-257153511.png" alt="Stride"/></div>
+            <span class="topbar-name">STRIDE</span>
+          </div>
+          <div class="topbar-nav">
+            <span class="topbar-link active">Shop</span>
+            <span class="topbar-link">Collections</span>
+            <span class="topbar-link">About</span>
+          </div>
+          <div class="topbar-actions">
+            <input class="topbar-search" placeholder="Search shoes…" readonly/>
+            <button class="cart-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--btn-font)" stroke-width="2.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+              Cart (3)
+            </button>
+          </div>
+        </div>
+
+        <!-- Hero banner -->
+        <div class="hero-banner">
+          <img class="hero-banner-img" src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt="Stride Banner"/>
+          <div class="hero-overlay"></div>
+          <div class="hero-text">
+            <h1>Move Beyond Every Limit.</h1>
+            <p>Premium footwear · Delivered in 2 days across Nigeria</p>
+            <button class="hero-cta">Shop Collection</button>
+          </div>
+        </div>
+
+        <!-- Content: sidebar + grid -->
+        <div class="content">
+
+          <!-- Sidebar -->
+          <div class="sidebar">
+            <div class="sidebar-section">
+              <div class="sidebar-title">Categories</div>
+              <div class="sidebar-item active">All Shoes</div>
+              <div class="sidebar-item">Sneakers</div>
+              <div class="sidebar-item">Loafers</div>
+              <div class="sidebar-item">Boots</div>
+              <div class="sidebar-item">Sandals</div>
+              <div class="sidebar-item">Oxfords</div>
+            </div>
+            <div class="sidebar-section">
+              <div class="sidebar-title">View</div>
+              <div class="sidebar-item active">Products</div>
+              <div class="sidebar-item">Services</div>
+            </div>
+          </div>
+
+          <!-- Main content -->
+          <div class="main">
+            <div class="main-header">
+              <div class="main-title">Footwear Collection</div>
+              <div class="main-count">24 products</div>
+            </div>
+
+            <div class="products-grid-w">
+
+              <div class="wcard">
+                <div class="wcard-img">
+                  <img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Mens Loafers"/>
+                  <div class="wcard-badge">New</div>
+                </div>
+                <div class="wcard-body">
+                  <div class="wcard-cat">Loafers</div>
+                  <div class="wcard-name">Mens Loafers</div>
+                  <div class="wcard-sub">Full grain leather · 3 colours</div>
+                  <div class="wcard-bottom">
+                    <div class="wcard-price">₦45,000</div>
+                    <button class="wcard-btn">Add to Cart</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="wcard">
+                <div class="wcard-img">
+                  <img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Oxford Classic"/>
+                </div>
+                <div class="wcard-body">
+                  <div class="wcard-cat">Oxford</div>
+                  <div class="wcard-name">Oxford Classic</div>
+                  <div class="wcard-sub">Premium suede · Brown & Tan</div>
+                  <div class="wcard-bottom">
+                    <div class="wcard-price">₦62,000</div>
+                    <button class="wcard-btn">Add to Cart</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="wcard">
+                <div class="wcard-img">
+                  <img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Chelsea Boot"/>
+                  <div class="wcard-badge">Sale</div>
+                </div>
+                <div class="wcard-body">
+                  <div class="wcard-cat">Boots</div>
+                  <div class="wcard-name">Chelsea Boot</div>
+                  <div class="wcard-sub">Waxed leather · Black</div>
+                  <div class="wcard-bottom">
+                    <div class="wcard-price">₦38,500</div>
+                    <button class="wcard-btn">Add to Cart</button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Web Footer -->
+        <div class="site-footer">
+          <div class="footer-grid">
+
+            <!-- Brand column -->
+            <div>
+              <div class="footer-brand-name">STRIDE</div>
+              <div class="footer-brand-tagline">Premium footwear crafted for movement. Delivered across Nigeria in 2 days.</div>
+              <div class="footer-social-row">
+                <div class="footer-social-icon" title="Instagram">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+                </div>
+                <div class="footer-social-icon" title="Facebook">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+                </div>
+                <div class="footer-social-icon" title="YouTube">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M22.54 6.42a2.78 2.78 0 00-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 001.46 6.42 29 29 0 001 12a29 29 0 00.46 5.58 2.78 2.78 0 001.95 1.96C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 001.95-1.96A29 29 0 0023 12a29 29 0 00-.46-5.58z"/><polygon points="9.75,15.02 15.5,12 9.75,8.98 9.75,15.02"/></svg>
+                </div>
+                <div class="footer-social-icon" title="Twitter / X">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2c9 5 20 0 20-11.5a4.5 4.5 0 00-.08-.83A7.72 7.72 0 0023 3z"/></svg>
+                </div>
+                <div class="footer-social-icon" title="TikTok">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M9 12a4 4 0 104 4V4a5 5 0 005 5"/></svg>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick Links column -->
+            <div>
+              <div class="footer-col-title">Quick Links</div>
+              <div class="footer-col-item">Shop All Shoes</div>
+              <div class="footer-col-item">New Arrivals</div>
+              <div class="footer-col-item">Sale</div>
+              <div class="footer-col-item">Collections</div>
+              <div class="footer-col-item">Gift Cards</div>
+            </div>
+
+            <!-- Location column -->
+            <div>
+              <div class="footer-col-title">Find Us</div>
+              <div class="footer-location-row">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" style="flex-shrink:0;margin-top:2px"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <div class="footer-location-text">14 Adeola Odeku Street,<br/>Victoria Island, Lagos.</div>
+              </div>
+              <div class="footer-location-row">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" style="flex-shrink:0;margin-top:2px"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <div class="footer-location-text">Shop 7, Palms Mall,<br/>Lekki Phase 1, Lagos.</div>
+              </div>
+              <div class="footer-col-title" style="margin-top:14px;">Store Hours</div>
+              <div class="footer-col-item" style="cursor:default;">Mon – Sat: 9am – 8pm</div>
+              <div class="footer-col-item" style="cursor:default;">Sunday: 12pm – 6pm</div>
+            </div>
+
+          </div>
+
+          <hr class="footer-divider"/>
+
+          <div class="footer-bottom">
+            <div class="footer-copy">© 2025 <span>Stride Footwear</span> · Powered by MycroShop</div>
+            <div class="footer-bottom-links">
+              <span class="footer-bottom-link">Privacy Policy</span>
+              <span class="footer-bottom-link">Terms of Service</span>
+              <span class="footer-bottom-link">Returns</span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /sf-web -->
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     DOCUMENTATION SECTIONS
+══════════════════════════════════════ -->
+
+<!-- 1. HOW TO APPLY -->
+<div class="doc-section">
+  <h2>1 — How to wire the theme JSON to your storefront CSS variables</h2>
+  <p>
+    The storefront template uses short CSS custom property names (<code>--dark</code>, <code>--accent</code>, <code>--btn-font</code>, etc.).
+    The theme JSON returned by the API uses descriptive semantic names (<code>background_color</code>, <code>button_color</code>, <code>button_font_color</code>, etc.).
+    You need a single bridge function. Call it once on page load, and again every time the user switches themes.
+    <br/><br/>
+    <strong>Critical rule:</strong> target the outermost storefront wrapper element, <em>not</em> <code>document.documentElement</code>.
+    If you set variables on <code>:root</code> they have lower CSS specificity than class-level variable definitions already
+    on the <code>.sf</code> wrapper. Setting them directly on the element as inline styles guarantees they win.
+  </p>
+
+  <div class="map-grid">
+    <div class="map-card">
+      <h3>The applyTheme function — copy this exactly</h3>
+      <pre><span class="c4">// target = your outermost storefront wrapper (not document.documentElement)</span>
+<span class="c1">function</span> <span class="c3">applyTheme</span>(theme, target) {
+  <span class="c4">// ── Backgrounds ──────────────────────────────</span>
+  target.style.setProperty(<span class="c2">'--dark'</span>,         theme.background_color);
+  <span class="c4">// page background, hero overlay gradient base</span>
+  target.style.setProperty(<span class="c2">'--mid'</span>,          theme.surface);
+  <span class="c4">// topbar/navbar bg, toggle bar bg, sidebar bg</span>
+  target.style.setProperty(<span class="c2">'--card'</span>,         theme.card);
+  <span class="c4">// product card backgrounds, input fields</span>
+
+  <span class="c4">// ── Brand / Accent ───────────────────────────</span>
+  target.style.setProperty(<span class="c2">'--accent'</span>,       theme.button_color);
+  <span class="c4">// buttons, active nav pills, badges, price text</span>
+  target.style.setProperty(<span class="c2">'--accent-light'</span>, theme.primary_light);
+  <span class="c4">// hover states, focus rings, subtle highlights</span>
+  target.style.setProperty(<span class="c2">'--btn-font'</span>,     theme.button_font_color);
+  <span class="c4">// text colour ON top of --accent buttons</span>
+
+  <span class="c4">// ── Text ─────────────────────────────────────</span>
+  target.style.setProperty(<span class="c2">'--text'</span>,         theme.text_primary);
+  <span class="c4">// headings, product names, all primary copy</span>
+  target.style.setProperty(<span class="c2">'--muted'</span>,        theme.text_secondary);
+  <span class="c4">// descriptions, category labels, meta info</span>
+
+  <span class="c4">// ── Borders ──────────────────────────────────</span>
+  target.style.setProperty(<span class="c2">'--border'</span>,       theme.border_accent);
+  <span class="c4">// card edges, dividers, input outlines</span>
+}</pre>
+    </div>
+
+    <div class="map-card">
+      <h3>Where to call it in your React / Vue / vanilla app</h3>
+      <pre><span class="c4">// React example</span>
+<span class="c1">const</span> sfRef = useRef(<span class="c2">null</span>);
+
+useEffect(() => {
+  <span class="c1">if</span> (sfRef.current && store.selected_theme) {
+    applyTheme(store.selected_theme, sfRef.current);
+  }
+}, [store.selected_theme]);
+
+<span class="c4">// JSX</span>
+&lt;div ref={sfRef} className=<span class="c2">"sf"</span>&gt;
+  ... storefront content ...
+&lt;/div&gt;
+
+<span class="c4">// ──────────────────────────────────────────────</span>
+<span class="c4">// Vue example</span>
+<span class="c1">watch</span>(() => store.selected_theme, (theme) => {
+  applyTheme(theme, sfRef.value);
+}, { immediate: <span class="c2">true</span> });
+
+<span class="c4">// ──────────────────────────────────────────────</span>
+<span class="c4">// Multi-page apps: call on every page mount,
+// not just the home page. Theme must be re-applied
+// whenever a new root element enters the DOM.</span></pre>
+    </div>
+  </div>
+</div>
+
+<!-- 2. THEME CATEGORIES -->
+<div class="doc-section">
+  <h2>2 — The 3 theme categories and why they behave differently</h2>
+  <p>
+    All 5 themes share the same JSON shape, but they fall into <strong>three fundamentally different rendering modes</strong>.
+    Your frontend code does NOT change — but the values inside the JSON are inverted or shifted between modes.
+    This is why applying a Bold theme with Classic assumptions produces a page that looks blank or broken.
+  </p>
+
+  <div class="map-grid" style="grid-template-columns:1fr 1fr 1fr;">
+
+    <div class="map-card" style="border-color:#2a3a2a;">
+      <h3 style="color:#7ee787;">Mode A — Brand on Light (Classic · Light · Soft)</h3>
+      <pre><span class="c4">Dark brand colour sits on a light/white page background.
+This is the "normal" mode most designs expect.</span>
+
+<span class="c4">— CLASSIC —</span>
+background_color → <span class="c3">#F2EFEF</span>              warm off-white
+surface          → <span class="c3">#E8E5E2</span>              slightly darker off-white
+card             → <span class="c3">#FFFFFF</span>              pure white cards
+button_color     → <span class="c1">#2e526b</span>              dark brand blue
+button_font_color→ <span class="c3">#FFFFFF</span>
+text_primary     → <span class="c1">#111111</span>
+border_accent    → rgba(46,82,107,0.25)
+
+<span class="c4">— LIGHT —</span>
+background_color → <span class="c3">#FFFFFF</span>              pure white
+surface          → <span class="c3">hsl(205,10%,95%)</span>    near-white with tiny blue tint
+card             → <span class="c3">hsl(205,6%,97%)</span>     near-white (barely tinted)
+
+<span class="c4">— SOFT —</span>
+background_color → <span class="c3">#FAFAFA</span>              near-white
+surface          → <span class="c3">#F0EDEA</span>              warm light grey
+button_color     → <span class="c1">#627684</span>              muted brand (desaturated)</pre>
+    </div>
+
+    <div class="map-card" style="border-color:#2a2a3a;">
+      <h3 style="color:#79c0ff;">Mode B — Brand on Dark (Dark theme)</h3>
+      <pre><span class="c4">⚠️ text_primary FLIPS from #111111 → #F5F2EE (off-white)
+⚠️ button_color BRIGHTENS from #2e526b → #347eb2</span>
+
+background_color → <span class="c1">#151a1e</span>    near-black
+surface          → <span class="c1">#212a30</span>    dark grey (navbar/sidebar)
+card             → <span class="c1">#29353d</span>    dark card bg
+button_color     → <span class="c3">#347eb2</span>    ← LIGHTER than classic brand
+                              (brand is brightened for dark bg contrast)
+button_font_color→ <span class="c3">#FFFFFF</span>
+text_primary     → <span class="c3">#F5F2EE</span>    ← FLIPPED to off-white
+text_secondary   → rgba(245,242,238,0.58)
+border_accent    → rgba(52,126,178,0.25)
+
+<span class="c4">// Any hardcoded #111 text is invisible on #151a1e.
+// Any hardcoded #fff card bg glows on dark page.
+// ONLY var(--text) and var(--dark) work correctly.</span></pre>
+    </div>
+
+    <div class="map-card" style="border-color:#3a2a2a;">
+      <h3 style="color:#ffa657;">Mode C — Brand Fills Canvas (Bold theme)</h3>
+      <pre><span class="c4">⚠️ background_color IS the brand colour (#347eb2)
+⚠️ button_color FLIPS to #FFFFFF (white buttons)
+⚠️ button_font_color FLIPS to #152632 (dark on white)
+⚠️ text_primary FLIPS to #FFFFFF</span>
+
+background_color → <span class="c1">#347eb2</span>    brand blue IS the page bg
+surface          → <span class="c1">#274d68</span>    darker brand shade
+card             → <span class="c1">#2d5e80</span>    mid brand shade
+button_color     → <span class="c3">#FFFFFF</span>    ← WHITE — not brand colour!
+button_font_color→ <span class="c1">#152632</span>    ← DARK text on white button
+text_primary     → <span class="c3">#FFFFFF</span>    ← white on brand bg
+text_secondary   → rgba(255,255,255,0.65)
+border_accent    → rgba(255,255,255,0.35)
+
+<span class="c4">// Any element with a hardcoded white (#fff) background
+// will be invisible — it blends into the white buttons.
+// Any hardcoded #111 text disappears on brand blue.
+// Must use var(--dark), var(--text), var(--accent).</span></pre>
+    </div>
+
+  </div>
+</div>
+
+<!-- 3. WHAT BREAKS AND WHY -->
+<div class="doc-section">
+  <h2>3 — What breaks when you hardcode colours — real examples</h2>
+  <p>
+    Each of these is a real symptom that means somewhere in the storefront a colour is not using a CSS variable.
+    Use this as a debugging checklist when a page looks wrong in one theme but correct in others.
+  </p>
+
+  <div class="map-grid">
+    <div class="map-card">
+      <h3>Symptom → Root cause table</h3>
+      <pre><span class="c4">SYMPTOM                        ROOT CAUSE</span>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<span class="c4">Bold theme: entire page white</span>  background:#fff hardcoded
+<span class="c4">Bold theme: text invisible</span>     color:#111 hardcoded somewhere
+<span class="c4">Dark theme: text invisible</span>     color:#000 or #111 hardcoded
+<span class="c4">Dark theme: card looks white</span>   background:#fff on card/section
+<span class="c4">Classic: buttons look white</span>    button bg set to var(--card) not var(--accent)
+<span class="c4">Classic: nav looks white</span>       topbar bg set to #fff not var(--mid)
+<span class="c4">All themes: border invisible</span>   border:1px solid #ccc hardcoded
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<span class="c4">// Fix pattern: grep for any hex colour like #fff,
+// #000, #ffffff, #111, rgba(0,0,0,x) in your
+// storefront template CSS and replace every one
+// with the appropriate var(--...) from the map below.</span></pre>
+    </div>
+
+    <div class="map-card">
+      <h3>Complete variable → usage map</h3>
+      <pre><span class="c2">var(--dark)</span>        page/section background
+<span class="c2">var(--mid)</span>         topbar, sidebar, toggle bar, footer bg
+<span class="c2">var(--card)</span>        product cards, modals, input fields
+<span class="c2">var(--accent)</span>      CTA buttons, active nav pill bg,
+                   product price colour, badge bg,
+                   category label colour, link colour
+<span class="c2">var(--accent-light)</span>hover on --accent elements,
+                   focus ring, subtle tag fill
+<span class="c2">var(--btn-font)</span>    text/icon colour ON --accent buttons
+                   ← this FLIPS in Bold (white→dark)
+<span class="c2">var(--text)</span>        all primary text: headings, names,
+                   product titles, sidebar items
+                   ← this FLIPS in Dark + Bold
+<span class="c2">var(--muted)</span>       secondary text: descriptions, sub,
+                   inactive nav labels, count, meta
+<span class="c2">var(--border)</span>      card borders, dividers, input outlines,
+                   section separators</pre>
+    </div>
+  </div>
+</div>
+
+<!-- 4. SPECIFICITY NOTE -->
+<div class="doc-section">
+  <h2>4 — CSS specificity: why you must target the element, not :root</h2>
+  <p>
+    Your storefront template defines CSS variables at class level (e.g. <code>.sf { --accent: #2e526b; }</code>).
+    CSS specificity rules mean that a class selector beats the <code>:root</code> pseudo-class for variable
+    inheritance when the variable is also defined on the same element. Setting variables on <code>document.documentElement</code>
+    (which is <code>:root</code>) will be <em>ignored</em> if the element already declares the same variable via a class.
+    <br/><br/>
+    The fix is to set variables as <strong>inline styles</strong> on the wrapper element itself.
+    Inline styles always beat class-level definitions, regardless of cascade order.
+  </p>
+
+  <div class="map-grid">
+    <div class="map-card">
+      <h3>Wrong — variables silently ignored</h3>
+      <pre><span class="c4">// ❌ Sets on :root but .sf class overrides it</span>
+<span class="c1">function</span> applyTheme(theme) {
+  document.documentElement
+    .style.setProperty(<span class="c2">'--accent'</span>, theme.button_color);
+  <span class="c4">// .sf { --accent: #2e526b } in your CSS wins.
+  // User switches theme → nothing changes visually.</span>
+}</pre>
+    </div>
+
+    <div class="map-card">
+      <h3>Correct — inline style beats class</h3>
+      <pre><span class="c4">// ✅ Targets the wrapper element directly</span>
+<span class="c1">const</span> wrapper = document.getElementById(<span class="c2">'storefront-root'</span>);
+
+<span class="c1">function</span> applyTheme(theme, el) {
+  el.style.setProperty(<span class="c2">'--accent'</span>, theme.button_color);
+  <span class="c4">// This becomes: &lt;div style="--accent:#347eb2"&gt;
+  // Inline style specificity = highest possible.
+  // Overrides .sf { --accent: #2e526b } every time.</span>
+}
+
+applyTheme(selectedTheme, wrapper);</pre>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SCRIPT
+══════════════════════════════════════ -->
+<script>
+const THEMES = {
+  classic:{
+    background_color:"#F2EFEF",surface:"#E8E5E2",card:"#FFFFFF",
+    primary:"#2e526b",primary_light:"#699bbf",primary_dark:"#152632",
+    primary_muted:"rgba(46,82,107,0.08)",
+    button_color:"#2e526b",button_font_color:"#FFFFFF",
+    text_primary:"#111111",text_secondary:"rgba(17,17,17,0.58)",text_tertiary:"rgba(17,17,17,0.35)",
+    border_default:"rgba(0,0,0,0.08)",border_accent:"rgba(46,82,107,0.25)"
+  },
+  light:{
+    background_color:"#FFFFFF",surface:"hsl(205,10%,95%)",card:"hsl(205,6%,97%)",
+    primary:"#2e526b",primary_light:"#699bbf",primary_dark:"#152632",
+    primary_muted:"rgba(46,82,107,0.08)",
+    button_color:"#2e526b",button_font_color:"#FFFFFF",
+    text_primary:"#111111",text_secondary:"rgba(17,17,17,0.58)",text_tertiary:"rgba(17,17,17,0.35)",
+    border_default:"rgba(0,0,0,0.08)",border_accent:"rgba(46,82,107,0.25)"
+  },
+  dark:{
+    background_color:"#151a1e",surface:"#212a30",card:"#29353d",
+    primary:"#347eb2",primary_light:"#5e94ba",primary_dark:"#152632",
+    primary_muted:"rgba(52,126,178,0.12)",
+    button_color:"#347eb2",button_font_color:"#FFFFFF",
+    text_primary:"#F5F2EE",text_secondary:"rgba(245,242,238,0.58)",text_tertiary:"rgba(245,242,238,0.35)",
+    border_default:"rgba(255,255,255,0.08)",border_accent:"rgba(52,126,178,0.25)"
+  },
+  bold:{
+    background_color:"#347eb2",surface:"#274d68",card:"#2d5e80",
+    primary:"#FFFFFF",primary_light:"rgba(255,255,255,0.75)",primary_dark:"#152632",
+    primary_muted:"rgba(255,255,255,0.12)",
+    button_color:"#FFFFFF",button_font_color:"#152632",
+    text_primary:"#FFFFFF",text_secondary:"rgba(255,255,255,0.65)",text_tertiary:"rgba(255,255,255,0.4)",
+    border_default:"rgba(255,255,255,0.15)",border_accent:"rgba(255,255,255,0.35)"
+  },
+  soft:{
+    background_color:"#FAFAFA",surface:"#F0EDEA",card:"#FFFFFF",
+    primary:"#627684",primary_light:"#94a9b8",primary_dark:"#152632",
+    primary_muted:"rgba(98,118,132,0.08)",
+    button_color:"#627684",button_font_color:"#FFFFFF",
+    text_primary:"#111111",text_secondary:"rgba(17,17,17,0.55)",text_tertiary:"rgba(17,17,17,0.32)",
+    border_default:"rgba(0,0,0,0.07)",border_accent:"rgba(98,118,132,0.22)"
+  }
+};
+
+function applyTheme(theme, el) {
+  el.style.setProperty('--dark',         theme.background_color);
+  el.style.setProperty('--mid',          theme.surface);
+  el.style.setProperty('--card',         theme.card);
+  el.style.setProperty('--accent',       theme.button_color);
+  el.style.setProperty('--accent-light', theme.primary_light);
+  el.style.setProperty('--btn-font',     theme.button_font_color);
+  el.style.setProperty('--text',         theme.text_primary);
+  el.style.setProperty('--muted',        theme.text_secondary);
+  el.style.setProperty('--border',       theme.border_accent);
+}
+
+function setTheme(id) {
+  const theme = THEMES[id];
+  if (!theme) return;
+
+  // Apply to both previews
+  applyTheme(theme, document.getElementById('sf-mobile'));
+  applyTheme(theme, document.getElementById('sf-web'));
+
+  document.getElementById('active-label').textContent =
+    id.charAt(0).toUpperCase() + id.slice(1);
+
+  document.querySelectorAll('.tbtn').forEach(b => {
+    b.classList.toggle('active', b.textContent.toLowerCase() === id);
+  });
+}
+
+// Boot with classic
+setTheme('classic');
+</script>
+</body>
+</html>
