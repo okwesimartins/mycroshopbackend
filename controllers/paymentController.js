@@ -114,29 +114,107 @@ async function notifyWhatsAppPaymentSuccess({ tenantId, metadata, models, transa
     const wa = await getWhatsappConnectionForTenant(tenantId);
     if (!wa?.phone_number_id || !wa?.access_token) return;
 
-    let msg = `✅ Payment successful.\nReference: ${transaction.transaction_reference}`;
+    const fmt = (n) => `₦${Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
     const orderId = metadata?.order_id || transaction?.order_id || null;
     const bookingId = metadata?.booking_id || null;
+
     if (orderId) {
       const where = isFreePlan ? { id: orderId, tenant_id: tenantId } : { id: orderId };
       const order = await models.OnlineStoreOrder.findOne({
         where,
         include: [{ model: models.OnlineStoreOrderItem, required: false }]
       });
+
       if (order) {
-        const items = (order.OnlineStoreOrderItems || []).slice(0, 8).map(i => `• ${i.product_name} x${i.quantity}`).join('\n');
-        msg += `\n\nOrder #${order.order_number || order.id}\n${items || ''}\nTotal: ₦${Number(order.total || 0).toLocaleString()}`;
+        const customerName = order.customer_name || transaction.customer_name || 'Customer';
+        const orderItems = (order.OnlineStoreOrderItems || []).slice(0, 15);
+        const itemLines = orderItems.map(i => {
+          const variant = i.variation_option_value ? ` (${i.variation_option_value})` : '';
+          return `• ${i.product_name}${variant} x${i.quantity} — ${fmt(i.unit_price)} each`;
+        }).join('\n');
+
+        const lines = [
+          `✅ *Payment Confirmed!*`,
+          ``,
+          `Hi ${customerName}, your payment was successful.`,
+          ``,
+          `📦 *Order #${order.order_number || order.id}*`,
+          itemLines,
+          ``,
+        ];
+
+        if (Number(order.subtotal) > 0) lines.push(`Subtotal: ${fmt(order.subtotal)}`);
+        if (Number(order.shipping_amount) > 0) lines.push(`Delivery: ${fmt(order.shipping_amount)}`);
+        if (Number(order.discount_amount) > 0) lines.push(`Discount: -${fmt(order.discount_amount)}`);
+        if (Number(order.tax_amount) > 0) lines.push(`Tax: ${fmt(order.tax_amount)}`);
+        lines.push(`*Total Paid: ${fmt(order.total)}*`);
+
+        if (order.customer_address || order.city) {
+          lines.push(``);
+          lines.push(`📍 *Delivery To*`);
+          const addrParts = [order.customer_address, order.city, order.state].filter(Boolean);
+          lines.push(addrParts.join(', '));
+        }
+
+        if (order.customer_phone && order.customer_phone !== customerPhone) {
+          lines.push(``);
+          lines.push(`📞 Contact: ${order.customer_phone}`);
+        }
+
+        lines.push(``);
+        lines.push(`Ref: ${transaction.transaction_reference}`);
+        lines.push(`Thank you for your order! 🙏`);
+
+        await sendWhatsappText(wa.phone_number_id, wa.access_token, customerPhone, lines.join('\n'));
+      } else {
+        // Order not found — send minimal confirmation
+        await sendWhatsappText(
+          wa.phone_number_id, wa.access_token, customerPhone,
+          `✅ Payment confirmed.\nRef: ${transaction.transaction_reference}\nAmount: ${fmt(transaction.amount)}\n\nThank you!`
+        );
       }
     } else {
+      // Booking payment
       const bookingWhere = bookingId
         ? (isFreePlan ? { id: bookingId, tenant_id: tenantId } : { id: bookingId })
         : { payment_transaction_id: transaction.id, ...(isFreePlan ? { tenant_id: tenantId } : {}) };
       const booking = await models.Booking.findOne({ where: bookingWhere });
+
       if (booking) {
-        msg += `\n\nBooking #${booking.id}\nService: ${booking.service_title}\nWhen: ${booking.scheduled_at}`;
+        const customerName = booking.customer_name || transaction.customer_name || 'Customer';
+        const scheduledAt = booking.scheduled_at
+          ? new Date(booking.scheduled_at).toLocaleString('en-NG', { dateStyle: 'full', timeStyle: 'short', timeZone: booking.timezone || 'Africa/Lagos' })
+          : String(booking.scheduled_at);
+
+        const lines = [
+          `✅ *Booking Confirmed!*`,
+          ``,
+          `Hi ${customerName}, your booking is confirmed.`,
+          ``,
+          `📅 *Booking #${booking.id}*`,
+          `Service: ${booking.service_title}`,
+          `When: ${scheduledAt}`,
+        ];
+
+        if (booking.duration_minutes) lines.push(`Duration: ${booking.duration_minutes} mins`);
+        if (booking.staff_name) lines.push(`With: ${booking.staff_name}`);
+        if (booking.location_type === 'online' && booking.meeting_link) lines.push(`Link: ${booking.meeting_link}`);
+        if (booking.notes) lines.push(`Notes: ${booking.notes}`);
+
+        lines.push(``);
+        lines.push(`*Amount Paid: ${fmt(transaction.amount)}*`);
+        lines.push(`Ref: ${transaction.transaction_reference}`);
+        lines.push(`Thank you for your booking! 🙏`);
+
+        await sendWhatsappText(wa.phone_number_id, wa.access_token, customerPhone, lines.join('\n'));
+      } else {
+        await sendWhatsappText(
+          wa.phone_number_id, wa.access_token, customerPhone,
+          `✅ Payment confirmed.\nRef: ${transaction.transaction_reference}\nAmount: ${fmt(transaction.amount)}\n\nThank you!`
+        );
       }
     }
-    await sendWhatsappText(wa.phone_number_id, wa.access_token, customerPhone, msg);
   } catch (e) {
     console.warn('notifyWhatsAppPaymentSuccess skipped:', e.message);
   }

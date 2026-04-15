@@ -136,5 +136,43 @@ router.post('/upgrade',
   authController.upgradeToEnterprise
 );
 
+// ==================== BANK DETAILS ====================
+
+// Get bank transfer details
+router.get('/bank-details', authenticate, authController.getBankDetails);
+
+// Create or update bank transfer details
+router.put('/bank-details',
+  authenticate,
+  [
+    body('bank_account_name').optional().isString().withMessage('Account name must be a string'),
+    body('bank_name').optional().isString().withMessage('Bank name must be a string'),
+    body('bank_account_number').optional().isString().withMessage('Account number must be a string'),
+    body('bank_code').optional().isString().withMessage('Bank code must be a string'),
+    body('payment_instructions').optional().isString().withMessage('Payment instructions must be a string')
+  ],
+  authController.upsertBankDetails
+);
+
+// Clear all bank transfer details
+router.delete('/bank-details', authenticate, authController.deleteBankDetails);
+
+// ==================== PAYMENT METHOD (AI AGENT) ====================
+
+// Get current payment method used by AI sales agent
+router.get('/payment-method', authenticate, authController.getPaymentMethod);
+
+// Set which payment method the AI sales agent should use
+router.put('/payment-method',
+  authenticate,
+  [
+    body('payment_instruction_type')
+      .notEmpty().withMessage('payment_instruction_type is required')
+      .isIn(['paystack', 'bank_transfer', 'paypal']).withMessage('Must be paystack, bank_transfer, or paypal'),
+    body('paypal_email').optional().isEmail().withMessage('Valid PayPal email required')
+  ],
+  authController.updatePaymentMethod
+);
+
 module.exports = router;
 

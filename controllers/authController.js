@@ -932,6 +932,178 @@ async function upgradeToEnterprise(req, res) {
   }
 }
 
+/**
+ * GET /auth/bank-details
+ * Returns the tenant's bank transfer details
+ */
+async function getBankDetails(req, res) {
+  try {
+    const tenant = await getTenantById(req.user.tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    res.json({
+      success: true,
+      data: {
+        bank_account_name: tenant.bank_account_name || null,
+        bank_name: tenant.bank_name || null,
+        bank_account_number: tenant.bank_account_number || null,
+        bank_code: tenant.bank_code || null,
+        payment_instructions: tenant.payment_instructions || null
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching bank details:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch bank details' });
+  }
+}
+
+/**
+ * PUT /auth/bank-details
+ * Create or update bank transfer details
+ * Body: { bank_account_name, bank_name, bank_account_number, bank_code, payment_instructions }
+ */
+async function upsertBankDetails(req, res) {
+  try {
+    const { bank_account_name, bank_name, bank_account_number, bank_code, payment_instructions } = req.body;
+
+    const tenant = await getTenantById(req.user.tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    await tenant.update({
+      ...(bank_account_name !== undefined && { bank_account_name: bank_account_name || null }),
+      ...(bank_name !== undefined && { bank_name: bank_name || null }),
+      ...(bank_account_number !== undefined && { bank_account_number: bank_account_number || null }),
+      ...(bank_code !== undefined && { bank_code: bank_code || null }),
+      ...(payment_instructions !== undefined && { payment_instructions: payment_instructions || null }),
+      updated_at: new Date()
+    });
+
+    res.json({
+      success: true,
+      message: 'Bank details updated successfully',
+      data: {
+        bank_account_name: tenant.bank_account_name || null,
+        bank_name: tenant.bank_name || null,
+        bank_account_number: tenant.bank_account_number || null,
+        bank_code: tenant.bank_code || null,
+        payment_instructions: tenant.payment_instructions || null
+      }
+    });
+  } catch (error) {
+    console.error('Error updating bank details:', error);
+    res.status(500).json({ success: false, message: 'Failed to update bank details' });
+  }
+}
+
+/**
+ * DELETE /auth/bank-details
+ * Clears all bank transfer details
+ */
+async function deleteBankDetails(req, res) {
+  try {
+    const tenant = await getTenantById(req.user.tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    await tenant.update({
+      bank_account_name: null,
+      bank_name: null,
+      bank_account_number: null,
+      bank_code: null,
+      payment_instructions: null,
+      updated_at: new Date()
+    });
+
+    res.json({ success: true, message: 'Bank details cleared successfully' });
+  } catch (error) {
+    console.error('Error deleting bank details:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete bank details' });
+  }
+}
+
+/**
+ * GET /auth/payment-method
+ * Returns the current payment method configuration for the AI sales agent
+ */
+async function getPaymentMethod(req, res) {
+  try {
+    const tenant = await getTenantById(req.user.tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    res.json({
+      success: true,
+      data: {
+        payment_instruction_type: tenant.payment_instruction_type || 'paystack',
+        paypal_email: tenant.paypal_email || null
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching payment method:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch payment method' });
+  }
+}
+
+/**
+ * PUT /auth/payment-method
+ * Set which payment method the AI sales agent uses after an order
+ * Body: { payment_instruction_type: 'paystack' | 'bank_transfer' | 'paypal', paypal_email? }
+ */
+async function updatePaymentMethod(req, res) {
+  try {
+    const { payment_instruction_type, paypal_email } = req.body;
+
+    const validTypes = ['paystack', 'bank_transfer', 'paypal'];
+    if (!payment_instruction_type || !validTypes.includes(payment_instruction_type)) {
+      return res.status(400).json({
+        success: false,
+        message: `payment_instruction_type must be one of: ${validTypes.join(', ')}`
+      });
+    }
+
+    if (payment_instruction_type === 'paypal' && !paypal_email) {
+      return res.status(400).json({
+        success: false,
+        message: 'paypal_email is required when payment_instruction_type is paypal'
+      });
+    }
+
+    const tenant = await getTenantById(req.user.tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    if (payment_instruction_type === 'bank_transfer' && (!tenant.bank_account_number || !tenant.bank_name)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please add your bank details first before setting payment type to bank_transfer'
+      });
+    }
+
+    await tenant.update({
+      payment_instruction_type,
+      ...(paypal_email !== undefined && { paypal_email: paypal_email || null }),
+      updated_at: new Date()
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment method updated successfully',
+      data: {
+        payment_instruction_type: tenant.payment_instruction_type,
+        paypal_email: tenant.paypal_email || null
+      }
+    });
+  } catch (error) {
+    console.error('Error updating payment method:', error);
+    res.status(500).json({ success: false, message: 'Failed to update payment method' });
+  }
+}
+
 // Export with authenticate middleware attached
 const { authenticate } = require('../middleware/auth');
 getCurrentUser.authenticate = authenticate;
@@ -947,6 +1119,11 @@ module.exports = {
   deleteLogo,
   updatePassword,
   updateEmail,
-  upgradeToEnterprise
+  upgradeToEnterprise,
+  getBankDetails,
+  upsertBankDetails,
+  deleteBankDetails,
+  getPaymentMethod,
+  updatePaymentMethod
 };
 
