@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MycroShop — Product Detail UI Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',sans-serif;background:#f5f6fa;color:#1a1a2e;font-size:14px;}
+
+/* ── TOP NAV ─────────────────────────────────────────────── */
+.top-nav{background:#fff;border-bottom:1px solid #e8eaf0;padding:0 32px;display:flex;align-items:center;justify-content:space-between;height:56px;position:sticky;top:0;z-index:100;}
+.nav-logo{display:flex;align-items:center;gap:10px;}
+.logo-box{width:30px;height:30px;background:linear-gradient(135deg,#6c63ff,#4facfe);border-radius:8px;display:grid;place-items:center;color:#fff;font-weight:800;font-size:13px;}
+.nav-title{font-weight:700;font-size:15px;color:#1a1a2e;}
+.nav-badge{background:#ede9fe;color:#6c63ff;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;letter-spacing:.04em;}
+
+/* view toggle tabs */
+.view-tabs{display:flex;gap:4px;background:#f0f1f5;border-radius:10px;padding:3px;}
+.vtab{padding:7px 18px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;color:#6b7080;transition:all .15s;border:none;background:transparent;font-family:inherit;}
+.vtab.active{background:#fff;color:#1a1a2e;box-shadow:0 1px 4px rgba(0,0,0,.1);}
+
+.nav-actions{display:flex;align-items:center;gap:10px;}
+.nav-hint{font-size:11px;color:#9499a7;}
+
+/* ── SHARED BUTTONS ──────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 18px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:inherit;white-space:nowrap;}
+.btn-primary{background:linear-gradient(135deg,#6c63ff,#5a52d5);color:#fff;box-shadow:0 2px 10px rgba(108,99,255,.28);}
+.btn-primary:hover{box-shadow:0 4px 16px rgba(108,99,255,.38);transform:translateY(-1px);}
+.btn-ghost{background:#fff;color:#6b7080;border:1.5px solid #e0e2ea;}
+.btn-ghost:hover{border-color:#c8cad4;color:#1a1a2e;}
+.btn-danger{background:#fff0f0;color:#dc2626;border:1.5px solid #fecaca;}
+.btn-sm{padding:5px 12px;font-size:11px;border-radius:7px;}
+.btn-icon{width:32px;height:32px;padding:0;justify-content:center;border-radius:8px;}
+
+/* ══════════════════════════════════════════════════════════
+   STORE (PUBLIC) VIEW
+══════════════════════════════════════════════════════════ */
+#store-view{display:block;}
+#dashboard-view{display:none;}
+
+.store-shell{max-width:1100px;margin:0 auto;padding:28px 24px 80px;}
+
+/* store header breadcrumb */
+.store-breadcrumb{display:flex;align-items:center;gap:6px;font-size:12px;color:#9499a7;margin-bottom:22px;}
+.store-breadcrumb a{color:#6c63ff;text-decoration:none;cursor:pointer;}
+.store-breadcrumb span{color:#c8cad4;}
+
+/* product layout */
+.product-layout{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start;}
+
+/* gallery */
+.gallery{}
+.main-img{width:100%;aspect-ratio:1;background:#f0f1f5;border-radius:16px;overflow:hidden;position:relative;margin-bottom:10px;}
+.main-img img{width:100%;height:100%;object-fit:cover;}
+.main-img-placeholder{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#b0b4c0;}
+.main-img-placeholder svg{width:48px;height:48px;opacity:.4;}
+.color-label-overlay{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.55);color:#fff;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;}
+.thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.thumb{aspect-ratio:1;border-radius:10px;overflow:hidden;cursor:pointer;border:2px solid transparent;transition:all .15s;}
+.thumb.active{border-color:#6c63ff;}
+.thumb-placeholder{width:100%;height:100%;display:grid;place-items:center;font-size:18px;font-weight:700;color:#fff;}
+
+/* product info */
+.product-info{}
+.p-brand{font-size:11px;font-weight:600;color:#6c63ff;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;}
+.p-name{font-size:26px;font-weight:800;color:#1a1a2e;line-height:1.25;margin-bottom:10px;}
+.p-rating{display:flex;align-items:center;gap:8px;margin-bottom:16px;}
+.stars{color:#f59e0b;font-size:14px;letter-spacing:1px;}
+.rating-count{font-size:12px;color:#9499a7;}
+.p-price-row{display:flex;align-items:baseline;gap:10px;margin-bottom:6px;}
+.p-price{font-size:28px;font-weight:800;color:#1a1a2e;}
+.p-price-original{font-size:16px;color:#b0b4c0;text-decoration:line-through;}
+.p-price-badge{background:#fef3c7;color:#d97706;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;}
+.p-price-note{font-size:12px;color:#9499a7;margin-bottom:20px;}
+.p-divider{border:none;border-top:1px solid #f0f1f5;margin:18px 0;}
+
+/* variation selectors */
+.var-block{margin-bottom:18px;}
+.var-label{font-size:12px;font-weight:600;color:#6b7080;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+.var-label strong{color:#1a1a2e;font-weight:700;text-transform:none;letter-spacing:0;font-size:13px;}
+
+/* color swatches */
+.color-options{display:flex;flex-wrap:wrap;gap:8px;}
+.color-swatch{width:36px;height:36px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:all .15s;position:relative;}
+.color-swatch.active{border-color:#6c63ff;box-shadow:0 0 0 3px rgba(108,99,255,.2);}
+.color-swatch.out{opacity:.35;cursor:not-allowed;}
+.color-swatch.out::after{content:'';position:absolute;inset:0;border-radius:50%;background:repeating-linear-gradient(-45deg,transparent,transparent 4px,rgba(0,0,0,.3) 4px,rgba(0,0,0,.3) 5px);}
+.color-tip{font-size:11px;color:#9499a7;margin-top:4px;}
+
+/* size options */
+.size-options{display:flex;flex-wrap:wrap;gap:8px;}
+.size-pill{min-width:48px;height:38px;padding:0 14px;border-radius:9px;border:1.5px solid #e0e2ea;background:#fff;font-size:13px;font-weight:600;color:#1a1a2e;cursor:pointer;display:grid;place-items:center;transition:all .15s;position:relative;}
+.size-pill:hover:not(.out):not(.active){border-color:#6c63ff;color:#6c63ff;}
+.size-pill.active{background:#6c63ff;color:#fff;border-color:#6c63ff;}
+.size-pill.out{border-color:#f0f1f5;color:#c8cad4;cursor:not-allowed;background:#fafafa;}
+.size-pill.out::after{content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-45deg);width:calc(100% - 10px);height:1.5px;background:#e0e2ea;}
+.size-guide{font-size:11px;color:#6c63ff;cursor:pointer;margin-top:4px;display:inline-flex;align-items:center;gap:4px;}
+
+/* stock status */
+.stock-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;font-size:12px;font-weight:600;margin-bottom:18px;}
+.stock-bar.in{background:#f0fdf4;color:#16a34a;}
+.stock-bar.low{background:#fffbeb;color:#d97706;}
+.stock-bar.out-stock{background:#fff0f0;color:#dc2626;}
+.stock-dot{width:7px;height:7px;border-radius:50%;}
+.in .stock-dot{background:#16a34a;}
+.low .stock-dot{background:#d97706;}
+.out-stock .stock-dot{background:#dc2626;}
+
+/* qty + add to cart */
+.qty-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.qty-ctrl{display:flex;align-items:center;border:1.5px solid #e0e2ea;border-radius:9px;overflow:hidden;}
+.qty-btn{width:38px;height:42px;background:#fff;border:none;font-size:18px;cursor:pointer;color:#6b7080;display:grid;place-items:center;transition:background .1s;}
+.qty-btn:hover{background:#f5f6fa;}
+.qty-val{width:44px;height:42px;text-align:center;border:none;font-size:14px;font-weight:600;color:#1a1a2e;background:#fff;outline:none;}
+.add-to-cart{flex:1;height:48px;font-size:14px;}
+.buy-now{width:100%;height:48px;font-size:14px;background:#1a1a2e;color:#fff;border:none;border-radius:9px;font-weight:700;cursor:pointer;margin-bottom:12px;transition:all .15s;}
+.buy-now:hover{background:#2d2d44;}
+
+/* meta row */
+.meta-row{display:flex;align-items:center;gap:16px;font-size:11px;color:#9499a7;}
+.meta-item{display:flex;align-items:center;gap:5px;}
+
+/* variant info card */
+.variant-info-card{background:#f8f9ff;border:1.5px solid #e8eaf0;border-radius:12px;padding:14px 16px;margin-bottom:18px;display:none;}
+.variant-info-card.show{display:block;}
+.vic-title{font-size:11px;font-weight:600;color:#9499a7;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;}
+.vic-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;}
+.vic-row:last-child{margin-bottom:0;}
+.vic-label{color:#6b7080;}
+.vic-val{font-weight:600;color:#1a1a2e;}
+
+/* description tabs */
+.desc-tabs{display:flex;gap:0;border-bottom:2px solid #f0f1f5;margin:28px 0 18px;}
+.dtab{padding:10px 18px;font-size:13px;font-weight:600;color:#9499a7;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;}
+.dtab.active{color:#6c63ff;border-bottom-color:#6c63ff;}
+.desc-panel{font-size:13px;color:#4b5063;line-height:1.7;}
+.desc-panel p{margin-bottom:10px;}
+
+/* ══════════════════════════════════════════════════════════
+   DASHBOARD VIEW
+══════════════════════════════════════════════════════════ */
+.db-shell{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 56px);}
+
+/* db sidebar */
+.db-sidebar{background:#fff;border-right:1px solid #e8eaf0;padding:20px 0;}
+.db-nav-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#b0b4c0;padding:0 16px;margin:14px 0 4px;}
+.db-nav-item{display:flex;align-items:center;gap:9px;padding:8px 14px;font-size:13px;color:#6b7080;cursor:pointer;border-radius:0;}
+.db-nav-item:hover{background:#f5f6fa;}
+.db-nav-item.active{background:#ede9fe;color:#6c63ff;font-weight:600;border-right:2px solid #6c63ff;}
+.db-nav-item svg{width:16px;height:16px;flex-shrink:0;}
+
+/* db main */
+.db-main{padding:28px 32px 80px;background:#f5f6fa;overflow-y:auto;}
+
+/* breadcrumb */
+.db-breadcrumb{display:flex;align-items:center;gap:6px;font-size:12px;color:#9499a7;margin-bottom:18px;}
+.db-breadcrumb a{color:#6c63ff;cursor:pointer;}
+
+/* product header card */
+.product-header-card{background:#fff;border-radius:14px;border:1px solid #e8eaf0;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;gap:20px;}
+.ph-img{width:80px;height:80px;border-radius:12px;background:#f0f1f5;overflow:hidden;flex-shrink:0;}
+.ph-img img{width:100%;height:100%;object-fit:cover;}
+.ph-info{flex:1;}
+.ph-name{font-size:18px;font-weight:700;color:#1a1a2e;margin-bottom:4px;}
+.ph-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;}
+.badge-green{background:#f0fdf4;color:#16a34a;}
+.badge-blue{background:#eff6ff;color:#2563eb;}
+.badge-yellow{background:#fffbeb;color:#d97706;}
+.badge-gray{background:#f5f6fa;color:#6b7080;}
+.badge-red{background:#fff0f0;color:#dc2626;}
+.ph-actions{display:flex;gap:8px;flex-shrink:0;}
+
+/* stats row */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;}
+.stat-card{background:#fff;border-radius:12px;border:1px solid #e8eaf0;padding:16px 18px;}
+.stat-label{font-size:11px;color:#9499a7;font-weight:500;margin-bottom:6px;}
+.stat-val{font-size:22px;font-weight:800;color:#1a1a2e;line-height:1;}
+.stat-sub{font-size:11px;color:#9499a7;margin-top:4px;}
+.stat-card.accent{background:linear-gradient(135deg,#6c63ff,#5a52d5);}
+.stat-card.accent .stat-label,.stat-card.accent .stat-val,.stat-card.accent .stat-sub{color:#fff;}
+.stat-card.accent .stat-label{opacity:.8;}
+
+/* tabs inside dashboard */
+.db-tabs{display:flex;gap:0;border-bottom:2px solid #e8eaf0;margin-bottom:20px;}
+.db-tab{padding:10px 20px;font-size:13px;font-weight:600;color:#9499a7;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;}
+.db-tab.active{color:#6c63ff;border-bottom-color:#6c63ff;}
+
+/* variants section */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.section-title{font-size:14px;font-weight:700;color:#1a1a2e;}
+.section-sub{font-size:12px;color:#9499a7;}
+
+/* filter bar */
+.filter-bar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.search-input{flex:1;min-width:180px;height:36px;border:1.5px solid #e0e2ea;border-radius:9px;padding:0 12px 0 34px;font-size:12px;font-family:inherit;outline:none;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239499a7' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E") no-repeat 10px center;}
+.search-input:focus{border-color:#6c63ff;}
+.filter-select{height:36px;border:1.5px solid #e0e2ea;border-radius:9px;padding:0 10px;font-size:12px;font-family:inherit;outline:none;background:#fff;color:#1a1a2e;cursor:pointer;}
+.filter-select:focus{border-color:#6c63ff;}
+
+/* variants table */
+.vtable-wrap{background:#fff;border-radius:12px;border:1px solid #e8eaf0;overflow:hidden;}
+.vtable{width:100%;border-collapse:collapse;}
+.vtable th{background:#f8f9fc;padding:10px 14px;text-align:left;font-size:11px;font-weight:600;color:#9499a7;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid #e8eaf0;white-space:nowrap;}
+.vtable td{padding:12px 14px;border-bottom:1px solid #f0f1f5;font-size:13px;vertical-align:middle;}
+.vtable tr:last-child td{border-bottom:none;}
+.vtable tr:hover td{background:#fafbff;}
+
+/* combo tags in table */
+.combo-tags{display:flex;gap:5px;flex-wrap:wrap;}
+.ctag{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;}
+.ctag-color{background:#ede9fe;color:#6c63ff;}
+.ctag-size{background:#e0f2fe;color:#0369a1;}
+.ctag-other{background:#f0fdf4;color:#16a34a;}
+
+/* stock inline edit */
+.stock-input{width:70px;height:30px;border:1.5px solid #e0e2ea;border-radius:7px;padding:0 8px;font-size:12px;font-family:inherit;text-align:center;outline:none;}
+.stock-input:focus{border-color:#6c63ff;}
+
+/* price cell */
+.price-cell{font-weight:700;color:#1a1a2e;}
+
+/* status toggle */
+.toggle{position:relative;width:36px;height:20px;}
+.toggle input{opacity:0;width:0;height:0;}
+.toggle-slider{position:absolute;inset:0;background:#e0e2ea;border-radius:20px;cursor:pointer;transition:.2s;}
+.toggle-slider::before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;}
+.toggle input:checked+.toggle-slider{background:#6c63ff;}
+.toggle input:checked+.toggle-slider::before{transform:translateX(16px);}
+
+/* row actions */
+.row-actions{display:flex;gap:6px;align-items:center;}
+
+/* sku / barcode pill */
+.mono{font-family:monospace;font-size:11px;background:#f5f6fa;padding:2px 7px;border-radius:5px;color:#6b7080;}
+
+/* overview tab */
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;}
+.info-card{background:#fff;border-radius:12px;border:1px solid #e8eaf0;padding:18px 20px;}
+.ic-title{font-size:12px;font-weight:700;color:#1a1a2e;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f0f1f5;}
+.ic-row{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;font-size:13px;}
+.ic-row:last-child{margin-bottom:0;}
+.ic-key{color:#9499a7;flex-shrink:0;margin-right:10px;}
+.ic-val{font-weight:500;color:#1a1a2e;text-align:right;}
+
+/* variation summary cards */
+.var-summary{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;}
+.vs-card{background:#fff;border:1.5px solid #e8eaf0;border-radius:12px;padding:14px 16px;min-width:200px;}
+.vs-type{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#9499a7;margin-bottom:8px;}
+.vs-options{display:flex;flex-wrap:wrap;gap:6px;}
+.vs-opt{padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;}
+
+/* price range visual */
+.price-range-bar{background:#fff;border-radius:12px;border:1px solid #e8eaf0;padding:18px 20px;margin-bottom:20px;}
+.pr-title{font-size:12px;font-weight:700;color:#1a1a2e;margin-bottom:14px;}
+.pr-row{display:flex;align-items:center;gap:12px;margin-bottom:8px;font-size:12px;}
+.pr-label{color:#9499a7;width:60px;flex-shrink:0;}
+.pr-track{flex:1;height:6px;background:#f0f1f5;border-radius:3px;overflow:hidden;}
+.pr-fill{height:100%;background:linear-gradient(90deg,#6c63ff,#4facfe);border-radius:3px;}
+.pr-val{font-weight:600;color:#1a1a2e;width:80px;text-align:right;flex-shrink:0;}
+
+/* edit modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;display:none;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:#fff;border-radius:16px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);}
+.modal-header{padding:18px 22px;border-bottom:1px solid #f0f1f5;display:flex;align-items:center;justify-content:space-between;}
+.modal-title{font-size:15px;font-weight:700;color:#1a1a2e;}
+.modal-close{width:28px;height:28px;border:none;background:#f5f6fa;border-radius:7px;cursor:pointer;display:grid;place-items:center;font-size:16px;color:#6b7080;}
+.modal-body{padding:20px 22px;}
+.modal-footer{padding:14px 22px;border-top:1px solid #f0f1f5;display:flex;justify-content:flex-end;gap:8px;}
+.form-group{margin-bottom:16px;}
+.form-label{font-size:12px;font-weight:600;color:#6b7080;margin-bottom:6px;display:block;}
+.form-input{width:100%;height:38px;border:1.5px solid #e0e2ea;border-radius:9px;padding:0 12px;font-size:13px;font-family:inherit;outline:none;}
+.form-input:focus{border-color:#6c63ff;}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+
+/* toaster */
+.toast{position:fixed;bottom:24px;right:24px;background:#1a1a2e;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:500;z-index:999;transform:translateY(80px);opacity:0;transition:all .3s;box-shadow:0 4px 20px rgba(0,0,0,.2);}
+.toast.show{transform:translateY(0);opacity:1;}
+
+/* responsive */
+@media(max-width:768px){
+  .product-layout{grid-template-columns:1fr;}
+  .stats-row{grid-template-columns:1fr 1fr;}
+  .info-grid{grid-template-columns:1fr;}
+  .db-sidebar{display:none;}
+  .db-shell{grid-template-columns:1fr;}
+  .vtable th:nth-child(4),.vtable td:nth-child(4),
+  .vtable th:nth-child(5),.vtable td:nth-child(5){display:none;}
+}
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<nav class="top-nav">
+  <div class="nav-logo">
+    <div class="logo-box">M</div>
+    <span class="nav-title">MycroShop</span>
+    <span class="nav-badge">UI Guide</span>
+  </div>
+
+  <div class="view-tabs">
+    <button class="vtab active" onclick="switchView('store')">🛍 Store View</button>
+    <button class="vtab" onclick="switchView('dashboard')">📊 Dashboard View</button>
+  </div>
+
+  <div class="nav-actions">
+    <span class="nav-hint">Click options to see live interaction</span>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════
+     STORE (PUBLIC) VIEW
+══════════════════════════════════════════════════ -->
+<div id="store-view">
+<div class="store-shell">
+
+  <div class="store-breadcrumb">
+    <a>Home</a><span>/</span>
+    <a>Men's Footwear</a><span>/</span>
+    <span>Classic Leather Sneaker</span>
+  </div>
+
+  <div class="product-layout">
+
+    <!-- GALLERY -->
+    <div class="gallery">
+      <div class="main-img" id="mainImg">
+        <div class="main-img-placeholder" id="mainPlaceholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <span id="mainColorLabel" style="font-size:14px;font-weight:600;color:#9499a7;margin-top:4px;">Select a color</span>
+        </div>
+        <div class="color-label-overlay" id="colorOverlay" style="display:none;"></div>
+      </div>
+      <div class="thumbs" id="thumbGrid"></div>
+    </div>
+
+    <!-- PRODUCT INFO -->
+    <div class="product-info">
+      <div class="p-brand">SoleKraft Studio</div>
+      <h1 class="p-name">Classic Leather Sneaker</h1>
+
+      <div class="p-rating">
+        <span class="stars">★★★★★</span>
+        <span class="rating-count">4.8 · 213 reviews</span>
+      </div>
+
+      <div class="p-price-row">
+        <span class="p-price" id="displayPrice">₦45,000</span>
+        <span class="p-price-original" id="displayOriginal" style="display:none;">₦55,000</span>
+        <span class="p-price-badge" id="discountBadge" style="display:none;">18% OFF</span>
+      </div>
+      <p class="p-price-note" id="priceNote">Price varies by size &amp; color · Free delivery above ₦50,000</p>
+
+      <hr class="p-divider"/>
+
+      <!-- COLOR VARIATION -->
+      <div class="var-block">
+        <div class="var-label">Color: <strong id="selectedColorLabel">— choose one</strong></div>
+        <div class="color-options" id="colorOptions"></div>
+        <div class="color-tip" id="colorTip"></div>
+      </div>
+
+      <!-- SIZE VARIATION -->
+      <div class="var-block">
+        <div class="var-label">Size (EU): <strong id="selectedSizeLabel">— choose one</strong></div>
+        <div class="size-options" id="sizeOptions"></div>
+        <div class="size-guide" onclick="toast('Size guide coming soon')">📏 Size guide</div>
+      </div>
+
+      <!-- VARIANT INFO CARD -->
+      <div class="variant-info-card" id="variantInfoCard">
+        <div class="vic-title">Selected Variant Details</div>
+        <div class="vic-row"><span class="vic-label">SKU</span><span class="vic-val" id="vicSku">—</span></div>
+        <div class="vic-row"><span class="vic-label">Barcode</span><span class="vic-val" id="vicBarcode">—</span></div>
+        <div class="vic-row"><span class="vic-label">Weight</span><span class="vic-val">0.8 kg</span></div>
+      </div>
+
+      <!-- STOCK STATUS -->
+      <div class="stock-bar" id="stockBar">
+        <span class="stock-dot"></span>
+        <span id="stockText">Select color &amp; size to check availability</span>
+      </div>
+
+      <!-- QTY + ADD TO CART -->
+      <div class="qty-row">
+        <div class="qty-ctrl">
+          <button class="qty-btn" onclick="changeQty(-1)">−</button>
+          <input class="qty-val" id="qtyVal" value="1" readonly/>
+          <button class="qty-btn" onclick="changeQty(1)">+</button>
+        </div>
+        <button class="btn btn-primary add-to-cart" id="addToCartBtn" onclick="handleAddToCart()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+          Add to Cart
+        </button>
+      </div>
+
+      <button class="buy-now" onclick="toast('Buy Now clicked — variant: ' + currentVariantLabel())">⚡ Buy Now</button>
+
+      <div class="meta-row">
+        <span class="meta-item">🔒 Secure checkout</span>
+        <span class="meta-item">🚚 2–4 day delivery</span>
+        <span class="meta-item">↩ 30-day returns</span>
+      </div>
+
+      <hr class="p-divider"/>
+
+      <!-- DESCRIPTION TABS -->
+      <div class="desc-tabs">
+        <div class="dtab active" onclick="switchDesc(this,'desc-1')">Description</div>
+        <div class="dtab" onclick="switchDesc(this,'desc-2')">Materials</div>
+        <div class="dtab" onclick="switchDesc(this,'desc-3')">Shipping</div>
+      </div>
+
+      <div class="desc-panel" id="desc-1">
+        <p>Step into effortless style with the Classic Leather Sneaker — a timeless silhouette crafted from full-grain leather with a cushioned insole for all-day comfort.</p>
+        <p>The vulcanised rubber sole provides excellent grip while keeping the profile clean and minimal. Pairs with everything from joggers to chinos.</p>
+      </div>
+      <div class="desc-panel" id="desc-2" style="display:none;">
+        <p><strong>Upper:</strong> Full-grain cowhide leather</p>
+        <p><strong>Lining:</strong> Breathable textile lining</p>
+        <p><strong>Sole:</strong> Vulcanised natural rubber</p>
+        <p><strong>Insole:</strong> Memory foam cushion</p>
+      </div>
+      <div class="desc-panel" id="desc-3" style="display:none;">
+        <p>Free delivery on orders above ₦50,000. Standard delivery (2–4 business days): ₦2,500.</p>
+        <p>Returns accepted within 30 days of delivery. Item must be unworn and in original packaging.</p>
+      </div>
+
+    </div><!-- /product-info -->
+  </div><!-- /product-layout -->
+</div><!-- /store-shell -->
+</div><!-- /store-view -->
+
+
+<!-- ══════════════════════════════════════════════════
+     DASHBOARD VIEW
+══════════════════════════════════════════════════ -->
+<div id="dashboard-view">
+<div class="db-shell">
+
+  <!-- SIDEBAR -->
+  <div class="db-sidebar">
+    <div class="db-nav-label">Catalogue</div>
+    <div class="db-nav-item active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Products
+    </div>
+    <div class="db-nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+      Collections
+    </div>
+    <div class="db-nav-label">Orders</div>
+    <div class="db-nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+      Online Orders
+    </div>
+    <div class="db-nav-label">Store</div>
+    <div class="db-nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      Online Store
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="db-main">
+    <div class="db-breadcrumb">
+      <a>Products</a> / <span>Classic Leather Sneaker</span>
+    </div>
+
+    <!-- PRODUCT HEADER CARD -->
+    <div class="product-header-card">
+      <div class="ph-img">
+        <div style="width:100%;height:100%;background:linear-gradient(135deg,#e8e4d0,#c9b99a);display:grid;place-items:center;font-size:28px;">👟</div>
+      </div>
+      <div class="ph-info">
+        <div class="ph-name">Classic Leather Sneaker</div>
+        <div class="ph-meta">
+          <span class="badge badge-green">● Active</span>
+          <span class="badge badge-blue">Men's Footwear</span>
+          <span class="badge badge-gray">2 Variations · 10 Variants</span>
+          <span class="badge badge-yellow">SKU: CLS-SNKR</span>
+        </div>
+      </div>
+      <div class="ph-actions">
+        <button class="btn btn-ghost btn-sm" onclick="toast('Opening product editor...')">Edit Product</button>
+        <button class="btn btn-primary btn-sm" onclick="toast('Viewing on store...')">View on Store</button>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat-card accent">
+        <div class="stat-label">Price Range</div>
+        <div class="stat-val">₦38k – ₦52k</div>
+        <div class="stat-sub">Across all variants</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Stock</div>
+        <div class="stat-val" id="totalStockStat">87</div>
+        <div class="stat-sub">Units across 10 variants</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Active Variants</div>
+        <div class="stat-val" id="activeVariantsStat">9</div>
+        <div class="stat-sub">1 inactive</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Low Stock</div>
+        <div class="stat-val" id="lowStockStat" style="color:#d97706;">2</div>
+        <div class="stat-sub">Below 5 units</div>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="db-tabs">
+      <div class="db-tab active" onclick="switchDbTab(this,'tab-variants')">Variants</div>
+      <div class="db-tab" onclick="switchDbTab(this,'tab-overview')">Overview</div>
+    </div>
+
+    <!-- TAB: VARIANTS -->
+    <div id="tab-variants">
+
+      <!-- Variation Summary -->
+      <div class="var-summary" id="varSummaryCards"></div>
+
+      <!-- Filter Bar -->
+      <div class="filter-bar">
+        <input class="search-input" placeholder="Search variants…" oninput="filterVariants(this.value)"/>
+        <select class="filter-select" onchange="filterByStatus(this.value)">
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <select class="filter-select" onchange="filterByColor(this.value)" id="colorFilter">
+          <option value="">All Colors</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="toast('Bulk edit coming soon')">Bulk Edit</button>
+      </div>
+
+      <!-- Variants Table -->
+      <div class="vtable-wrap">
+        <table class="vtable">
+          <thead>
+            <tr>
+              <th>Combination</th>
+              <th>Price</th>
+              <th>Stock</th>
+              <th>SKU</th>
+              <th>Barcode</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="variantsTableBody"></tbody>
+        </table>
+      </div>
+
+    </div><!-- /tab-variants -->
+
+    <!-- TAB: OVERVIEW -->
+    <div id="tab-overview" style="display:none;">
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="ic-title">Product Details</div>
+          <div class="ic-row"><span class="ic-key">Name</span><span class="ic-val">Classic Leather Sneaker</span></div>
+          <div class="ic-row"><span class="ic-key">Category</span><span class="ic-val">Men's Footwear</span></div>
+          <div class="ic-row"><span class="ic-key">Brand</span><span class="ic-val">SoleKraft Studio</span></div>
+          <div class="ic-row"><span class="ic-key">Base SKU</span><span class="ic-val ic-val"><span class="mono">CLS-SNKR</span></span></div>
+          <div class="ic-row"><span class="ic-key">Weight</span><span class="ic-val">0.8 kg</span></div>
+          <div class="ic-row"><span class="ic-key">Status</span><span class="ic-val"><span class="badge badge-green">Active</span></span></div>
+        </div>
+        <div class="info-card">
+          <div class="ic-title">Pricing Summary</div>
+          <div class="ic-row"><span class="ic-key">Min Price</span><span class="ic-val">₦38,000</span></div>
+          <div class="ic-row"><span class="ic-key">Max Price</span><span class="ic-val">₦52,000</span></div>
+          <div class="ic-row"><span class="ic-key">Avg Price</span><span class="ic-val">₦45,500</span></div>
+          <div class="ic-row"><span class="ic-key">Compare At</span><span class="ic-val">₦55,000</span></div>
+          <div class="ic-row"><span class="ic-key">Cost Price</span><span class="ic-val">₦28,000</span></div>
+          <div class="ic-row"><span class="ic-key">Avg Margin</span><span class="ic-val" style="color:#16a34a;">≈ 38%</span></div>
+        </div>
+      </div>
+
+      <!-- Price Range Visual -->
+      <div class="price-range-bar">
+        <div class="pr-title">Stock Distribution by Color</div>
+        <div id="priceRangeRows"></div>
+      </div>
+
+    </div><!-- /tab-overview -->
+
+  </div><!-- /db-main -->
+</div><!-- /db-shell -->
+</div><!-- /dashboard-view -->
+
+
+<!-- EDIT VARIANT MODAL -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Edit Variant — <span id="editModalTitle"></span></div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Price (₦)</label>
+          <input class="form-input" id="editPrice" type="number" placeholder="45000"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Compare At Price (₦)</label>
+          <input class="form-input" id="editCompare" type="number" placeholder="55000"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Stock Quantity</label>
+          <input class="form-input" id="editStock" type="number" placeholder="10"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Low Stock Alert At</label>
+          <input class="form-input" id="editLowAlert" type="number" placeholder="5"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">SKU</label>
+          <input class="form-input" id="editSku" type="text" placeholder="CLS-BLK-41"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Barcode (ISBN/EAN)</label>
+          <input class="form-input" id="editBarcode" type="text" placeholder="1234567890123"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Variant Image URL (optional)</label>
+        <input class="form-input" id="editImage" type="text" placeholder="https://…"/>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+        <label class="form-label" style="margin:0;">Active (visible on store)</label>
+        <label class="toggle">
+          <input type="checkbox" id="editActive" checked/>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveVariant()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  DATA MODEL
+// ═══════════════════════════════════════════════════════════
+const VARIATIONS = [
+  {
+    id: 1, type: 'color', name: 'Color',
+    options: [
+      { id: 10, value: 'White',  hex: '#f0ede8' },
+      { id: 11, value: 'Black',  hex: '#1a1a1a' },
+      { id: 12, value: 'Brown',  hex: '#8B5E3C' },
+      { id: 13, value: 'Navy',   hex: '#1e3a5f' },
+      { id: 14, value: 'Cream',  hex: '#e8dcc8' },
+    ]
+  },
+  {
+    id: 2, type: 'size', name: 'Size',
+    options: [
+      { id: 20, value: '40' },
+      { id: 21, value: '41' },
+      { id: 22, value: '42' },
+      { id: 23, value: '43' },
+      { id: 24, value: '44' },
+    ]
+  }
+];
+
+// product_variants — each is the cartesian combo (Color × Size)
+// only showing 10 of 25 for realism
+const VARIANTS = [
+  { id:1, color:'Black', size:'40', price:38000, compare:48000, stock:12, sku:'CLS-BLK-40', barcode:'1000000000001', active:true },
+  { id:2, color:'Black', size:'41', price:38000, compare:48000, stock:8,  sku:'CLS-BLK-41', barcode:'1000000000002', active:true },
+  { id:3, color:'Black', size:'42', price:40000, compare:50000, stock:3,  sku:'CLS-BLK-42', barcode:'1000000000003', active:true },
+  { id:4, color:'Black', size:'43', price:42000, compare:52000, stock:0,  sku:'CLS-BLK-43', barcode:'1000000000004', active:true },
+  { id:5, color:'Brown', size:'40', price:45000, compare:55000, stock:6,  sku:'CLS-BRN-40', barcode:'1000000000005', active:true },
+  { id:6, color:'Brown', size:'41', price:45000, compare:55000, stock:4,  sku:'CLS-BRN-41', barcode:'1000000000006', active:true },
+  { id:7, color:'Brown', size:'42', price:47000, compare:55000, stock:9,  sku:'CLS-BRN-42', barcode:'1000000000007', active:true },
+  { id:8, color:'White', size:'41', price:52000, compare:60000, stock:15, sku:'CLS-WHT-41', barcode:'1000000000008', active:true },
+  { id:9, color:'White', size:'42', price:52000, compare:60000, stock:2,  sku:'CLS-WHT-42', barcode:'1000000000009', active:true },
+  { id:10,color:'Navy',  size:'42', price:50000, compare:58000, stock:7,  sku:'CLS-NVY-42', barcode:'1000000000010', active:false },
+];
+
+// Colour metadata
+const COLOR_META = {
+  'White': { hex:'#f0ede8', bg:'#e8e4d0', emoji:'⬜' },
+  'Black': { hex:'#1a1a1a', bg:'#2d2d2d', emoji:'⬛' },
+  'Brown': { hex:'#8B5E3C', bg:'#a07050', emoji:'🟫' },
+  'Navy':  { hex:'#1e3a5f', bg:'#2a4a70', emoji:'🟦' },
+  'Cream': { hex:'#e8dcc8', bg:'#d4c5a8', emoji:'🟡' },
+};
+
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+let selectedColor = null;
+let selectedSize  = null;
+let qty           = 1;
+let editingId     = null;
+let filteredVariants = [...VARIANTS];
+let filterSearch  = '';
+let filterStatus  = '';
+let filterColor   = '';
+
+// ═══════════════════════════════════════════════════════════
+//  UTILITY
+// ═══════════════════════════════════════════════════════════
+const fmt = n => '₦' + Number(n).toLocaleString('en-NG');
+
+function getVariant(color, size) {
+  return VARIANTS.find(v => v.color === color && v.size === size) || null;
+}
+
+function getAvailableSizesForColor(color) {
+  return VARIANTS.filter(v => v.color === color).map(v => ({ size: v.size, stock: v.stock, active: v.active }));
+}
+
+function getAllColors() {
+  return [...new Set(VARIANTS.map(v => v.color))];
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  STORE VIEW — RENDER
+// ═══════════════════════════════════════════════════════════
+function renderColorOptions() {
+  const colors = getAllColors();
+  const wrap = document.getElementById('colorOptions');
+  wrap.innerHTML = colors.map(c => {
+    const meta = COLOR_META[c] || { hex:'#ccc' };
+    return `<div class="color-swatch${selectedColor===c?' active':''}"
+      style="background:${meta.hex};" title="${c}"
+      onclick="selectColor('${c}')"></div>`;
+  }).join('');
+}
+
+function renderSizeOptions() {
+  const wrap = document.getElementById('sizeOptions');
+  if (!selectedColor) {
+    wrap.innerHTML = VARIATIONS[1].options.map(o =>
+      `<div class="size-pill out">${o.value}</div>`
+    ).join('');
+    return;
+  }
+  const avail = getAvailableSizesForColor(selectedColor);
+  wrap.innerHTML = VARIATIONS[1].options.map(o => {
+    const match = avail.find(a => a.size === o.value);
+    const isOut = !match || match.stock === 0 || !match.active;
+    const isActive = selectedSize === o.value;
+    return `<div class="size-pill${isActive?' active':''}${isOut?' out':''}"
+      onclick="${isOut?'':'selectSize(\''+o.value+'\')'}">${o.value}</div>`;
+  }).join('');
+}
+
+function renderGallery() {
+  const thumbGrid = document.getElementById('thumbGrid');
+  const colors = getAllColors();
+  thumbGrid.innerHTML = colors.map((c, i) => {
+    const meta = COLOR_META[c] || { hex:'#ccc', bg:'#ccc' };
+    const isActive = selectedColor === c;
+    return `<div class="thumb${isActive?' active':''}" onclick="selectColor('${c}')">
+      <div class="thumb-placeholder" style="background:${meta.bg};font-size:20px;">${meta.emoji||'👟'}</div>
+    </div>`;
+  }).join('');
+
+  const ph = document.getElementById('mainPlaceholder');
+  const overlay = document.getElementById('colorOverlay');
+  if (selectedColor) {
+    const meta = COLOR_META[selectedColor];
+    ph.style.background = meta.bg;
+    ph.querySelector('svg').style.display = 'none';
+    document.getElementById('mainColorLabel').textContent = `${selectedColor} Leather`;
+    document.getElementById('mainColorLabel').style.color = '#fff';
+    overlay.style.display = 'block';
+    overlay.textContent = selectedColor;
+  } else {
+    ph.style.background = '';
+    ph.querySelector('svg').style.display = '';
+    document.getElementById('mainColorLabel').textContent = 'Select a color';
+    document.getElementById('mainColorLabel').style.color = '#9499a7';
+    overlay.style.display = 'none';
+  }
+}
+
+function updatePriceDisplay() {
+  const priceEl = document.getElementById('displayPrice');
+  const origEl  = document.getElementById('displayOriginal');
+  const badge   = document.getElementById('discountBadge');
+  const note    = document.getElementById('priceNote');
+
+  if (selectedColor && selectedSize) {
+    const v = getVariant(selectedColor, selectedSize);
+    if (v) {
+      priceEl.textContent = fmt(v.price);
+      if (v.compare && v.compare > v.price) {
+        origEl.textContent = fmt(v.compare);
+        origEl.style.display = 'inline';
+        const pct = Math.round((1 - v.price/v.compare)*100);
+        badge.textContent = pct+'% OFF';
+        badge.style.display = 'inline';
+      } else {
+        origEl.style.display = 'none';
+        badge.style.display = 'none';
+      }
+      note.textContent = `${selectedColor} · EU ${selectedSize} · Free delivery above ₦50,000`;
+    }
+  } else {
+    priceEl.textContent = '₦38,000 – ₦52,000';
+    origEl.style.display = 'none';
+    badge.style.display = 'none';
+    note.textContent = 'Price varies by size & color · Free delivery above ₦50,000';
+  }
+}
+
+function updateStockStatus() {
+  const bar  = document.getElementById('stockBar');
+  const txt  = document.getElementById('stockText');
+  const card = document.getElementById('variantInfoCard');
+  const btn  = document.getElementById('addToCartBtn');
+
+  bar.className = 'stock-bar';
+
+  if (!selectedColor || !selectedSize) {
+    txt.innerHTML = 'Select color &amp; size to check availability';
+    card.classList.remove('show');
+    btn.disabled = false;
+    return;
+  }
+
+  const v = getVariant(selectedColor, selectedSize);
+  if (!v || v.stock === 0) {
+    bar.classList.add('out-stock');
+    txt.textContent = 'Out of stock for this combination';
+    btn.disabled = true;
+    btn.style.opacity = '.5';
+    btn.style.cursor = 'not-allowed';
+    card.classList.remove('show');
+  } else if (v.stock < 5) {
+    bar.classList.add('low');
+    txt.textContent = `Only ${v.stock} left in stock — order soon!`;
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    showVariantCard(v);
+  } else {
+    bar.classList.add('in');
+    txt.textContent = `In stock (${v.stock} units available)`;
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    showVariantCard(v);
+  }
+}
+
+function showVariantCard(v) {
+  const card = document.getElementById('variantInfoCard');
+  document.getElementById('vicSku').textContent     = v.sku || '—';
+  document.getElementById('vicBarcode').textContent = v.barcode || '—';
+  card.classList.add('show');
+}
+
+function selectColor(color) {
+  selectedColor = color;
+  document.getElementById('selectedColorLabel').textContent = color;
+  document.getElementById('colorTip').textContent =
+    `${getAvailableSizesForColor(color).filter(a=>a.stock>0).length} sizes available in ${color}`;
+  // If previously selected size not available in new color, reset it
+  if (selectedSize) {
+    const v = getVariant(selectedColor, selectedSize);
+    if (!v) { selectedSize = null; document.getElementById('selectedSizeLabel').textContent = '— choose one'; }
+  }
+  renderColorOptions();
+  renderSizeOptions();
+  renderGallery();
+  updatePriceDisplay();
+  updateStockStatus();
+}
+
+function selectSize(size) {
+  if (!selectedColor) { toast('Please select a color first'); return; }
+  selectedSize = size;
+  document.getElementById('selectedSizeLabel').textContent = 'EU ' + size;
+  renderSizeOptions();
+  updatePriceDisplay();
+  updateStockStatus();
+}
+
+function changeQty(d) {
+  qty = Math.max(1, qty + d);
+  document.getElementById('qtyVal').value = qty;
+}
+
+function handleAddToCart() {
+  if (!selectedColor || !selectedSize) { toast('Please select a color and size'); return; }
+  const v = getVariant(selectedColor, selectedSize);
+  if (!v || v.stock === 0) { toast('This variant is out of stock'); return; }
+  toast(`✅ Added ${qty}× ${selectedColor} EU${selectedSize} to cart`);
+}
+
+function currentVariantLabel() {
+  if (!selectedColor || !selectedSize) return '(no variant selected)';
+  return `${selectedColor} EU${selectedSize}`;
+}
+
+function switchDesc(el, panelId) {
+  document.querySelectorAll('.dtab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.desc-panel').forEach(p => p.style.display='none');
+  el.classList.add('active');
+  document.getElementById(panelId).style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DASHBOARD VIEW — RENDER
+// ═══════════════════════════════════════════════════════════
+function renderVarSummaryCards() {
+  const wrap = document.getElementById('varSummaryCards');
+  wrap.innerHTML = VARIATIONS.map(v => {
+    const opts = v.options.map(o => {
+      const cls = v.type === 'color' ? 'ctag ctag-color' : 'ctag ctag-size';
+      const swatch = v.type === 'color' && COLOR_META[o.value]
+        ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${COLOR_META[o.value].hex};margin-right:4px;"></span>`
+        : '';
+      return `<span class="${cls}">${swatch}${o.value}</span>`;
+    }).join('');
+    return `<div class="vs-card">
+      <div class="vs-type">${v.name} <span style="font-weight:400;">(${v.options.length} options)</span></div>
+      <div class="vs-options">${opts}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderColorFilter() {
+  const sel = document.getElementById('colorFilter');
+  const colors = getAllColors();
+  sel.innerHTML = '<option value="">All Colors</option>' +
+    colors.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
+function applyFilters() {
+  filteredVariants = VARIANTS.filter(v => {
+    const matchSearch = !filterSearch ||
+      v.color.toLowerCase().includes(filterSearch) ||
+      v.size.includes(filterSearch) ||
+      (v.sku||'').toLowerCase().includes(filterSearch);
+    const matchStatus = !filterStatus ||
+      (filterStatus==='active' && v.active) ||
+      (filterStatus==='inactive' && !v.active);
+    const matchColor  = !filterColor || v.color === filterColor;
+    return matchSearch && matchStatus && matchColor;
+  });
+  renderVariantsTable();
+}
+
+function filterVariants(val)  { filterSearch = val.toLowerCase(); applyFilters(); }
+function filterByStatus(val)  { filterStatus = val; applyFilters(); }
+function filterByColor(val)   { filterColor = val; applyFilters(); }
+
+function renderVariantsTable() {
+  const tbody = document.getElementById('variantsTableBody');
+  tbody.innerHTML = filteredVariants.map(v => {
+    const colorMeta = COLOR_META[v.color] || { hex:'#ccc' };
+    const stockClass = v.stock === 0 ? 'badge-red' : v.stock < 5 ? 'badge-yellow' : 'badge-green';
+    return `<tr id="vrow-${v.id}">
+      <td>
+        <div class="combo-tags">
+          <span class="ctag ctag-color">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colorMeta.hex};margin-right:4px;vertical-align:middle;"></span>
+            ${v.color}
+          </span>
+          <span class="ctag ctag-size">${v.size}</span>
+        </div>
+      </td>
+      <td class="price-cell">${fmt(v.price)}</td>
+      <td>
+        <span class="badge ${stockClass}" style="cursor:default;">${v.stock} units</span>
+      </td>
+      <td><span class="mono">${v.sku||'—'}</span></td>
+      <td><span class="mono">${v.barcode||'—'}</span></td>
+      <td>
+        <label class="toggle">
+          <input type="checkbox" ${v.active?'checked':''} onchange="toggleVariantStatus(${v.id},this.checked)"/>
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm btn-icon" title="Edit" onclick="openEditModal(${v.id})">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleVariantStatus(id, active) {
+  const v = VARIANTS.find(x => x.id === id);
+  if (v) {
+    v.active = active;
+    toast(`${v.color} EU${v.size} ${active?'activated':'deactivated'}`);
+    updateDashboardStats();
+  }
+}
+
+function updateDashboardStats() {
+  const total = VARIANTS.reduce((s,v) => s + v.stock, 0);
+  const active = VARIANTS.filter(v => v.active).length;
+  const low = VARIANTS.filter(v => v.stock > 0 && v.stock < 5).length;
+  document.getElementById('totalStockStat').textContent = total;
+  document.getElementById('activeVariantsStat').textContent = active;
+  document.getElementById('lowStockStat').textContent = low;
+}
+
+function renderPriceRangeRows() {
+  const wrap = document.getElementById('priceRangeRows');
+  const colors = getAllColors();
+  const maxStock = Math.max(...colors.map(c => VARIANTS.filter(v=>v.color===c).reduce((s,v)=>s+v.stock,0)));
+  wrap.innerHTML = colors.map(c => {
+    const stock = VARIANTS.filter(v=>v.color===c).reduce((s,v)=>s+v.stock,0);
+    const pct = maxStock > 0 ? Math.round((stock/maxStock)*100) : 0;
+    const meta = COLOR_META[c] || { hex:'#6c63ff' };
+    return `<div class="pr-row">
+      <span class="pr-label">
+        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${meta.hex};margin-right:4px;vertical-align:middle;"></span>
+        ${c}
+      </span>
+      <div class="pr-track"><div class="pr-fill" style="width:${pct}%;background:${meta.hex};"></div></div>
+      <span class="pr-val">${stock} units</span>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EDIT MODAL
+// ═══════════════════════════════════════════════════════════
+function openEditModal(id) {
+  const v = VARIANTS.find(x => x.id === id);
+  if (!v) return;
+  editingId = id;
+  document.getElementById('editModalTitle').textContent = `${v.color} / EU ${v.size}`;
+  document.getElementById('editPrice').value    = v.price;
+  document.getElementById('editCompare').value  = v.compare || '';
+  document.getElementById('editStock').value    = v.stock;
+  document.getElementById('editLowAlert').value = 5;
+  document.getElementById('editSku').value      = v.sku || '';
+  document.getElementById('editBarcode').value  = v.barcode || '';
+  document.getElementById('editImage').value    = '';
+  document.getElementById('editActive').checked = v.active;
+  document.getElementById('editModal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('editModal').classList.remove('open');
+  editingId = null;
+}
+
+function saveVariant() {
+  const v = VARIANTS.find(x => x.id === editingId);
+  if (!v) return;
+  v.price    = parseInt(document.getElementById('editPrice').value) || v.price;
+  v.compare  = parseInt(document.getElementById('editCompare').value) || null;
+  v.stock    = parseInt(document.getElementById('editStock').value) || 0;
+  v.sku      = document.getElementById('editSku').value || v.sku;
+  v.barcode  = document.getElementById('editBarcode').value || v.barcode;
+  v.active   = document.getElementById('editActive').checked;
+  closeModal();
+  applyFilters();
+  updateDashboardStats();
+  toast(`✅ Variant saved — ${v.color} EU${v.size}`);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  VIEW SWITCHING
+// ═══════════════════════════════════════════════════════════
+function switchView(view) {
+  document.getElementById('store-view').style.display     = view==='store'     ? 'block' : 'none';
+  document.getElementById('dashboard-view').style.display = view==='dashboard' ? 'block' : 'none';
+  document.querySelectorAll('.vtab').forEach((t,i) => {
+    t.classList.toggle('active', (i===0&&view==='store') || (i===1&&view==='dashboard'));
+  });
+}
+
+function switchDbTab(el, tabId) {
+  document.querySelectorAll('.db-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-variants').style.display = 'none';
+  document.getElementById('tab-overview').style.display = 'none';
+  el.classList.add('active');
+  document.getElementById(tabId).style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════
+renderColorOptions();
+renderSizeOptions();
+renderGallery();
+updatePriceDisplay();
+updateStockStatus();
+renderVarSummaryCards();
+renderColorFilter();
+renderVariantsTable();
+renderPriceRangeRows();
+</script>
+</body>
+</html>

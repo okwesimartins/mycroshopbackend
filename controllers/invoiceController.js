@@ -2,6 +2,20 @@ const { Sequelize } = require('sequelize');
 const moment = require('moment');
 // Tax: only manual tax_rate is used when creating invoices (no automatic country-based tax)
 const { getTenantById } = require('../config/tenant');
+
+/**
+ * Converts a relative URL path to a full absolute URL.
+ * If the value already starts with http/https it is returned unchanged.
+ * e.g. "/uploads/invoices/previews/file.html" → "https://backend.mycroshop.com/uploads/invoices/previews/file.html"
+ */
+function toFullUrl(urlPath) {
+  if (!urlPath) return null;
+  const trimmed = urlPath.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  const base = (process.env.BASE_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+  return `${base}${trimmed.startsWith('/') ? '' : '/'}${trimmed}`;
+}
 const { extractColorsFromLogo, generateColorPalette } = require('../services/colorExtractionService');
 const { generateTemplateOptions } = require('../services/invoiceTemplateGenerator');
 const invoiceHtmlTemplates = require('../services/invoiceHtmlTemplates');
@@ -276,8 +290,8 @@ async function getAllInvoices(req, res) {
       
       return {
         ...invoiceJson,
-        preview_url: hasPreview ? previewUrls[invoice.id] : null,
-        pdf_url: hasPdf ? pdfUrls[invoice.id] : null,
+        preview_url: hasPreview ? toFullUrl(previewUrls[invoice.id]) : null,
+        pdf_url: hasPdf ? toFullUrl(pdfUrls[invoice.id]) : null,
         ...(error && !hasPreview && !hasPdf ? { 
           url_error: error,
           error_message: error 
@@ -1199,8 +1213,8 @@ async function getInvoiceById(req, res) {
     const { tax_breakdown: _tb, Customer: _C, InvoiceItems: _I, InvoiceItem: _Ii, ...invoiceRest } = invoiceJson;
     const invoiceWithPreview = {
       ...invoiceRest,
-      preview_url: previewUrl,
-      pdf_url: pdfUrl,
+      preview_url: toFullUrl(previewUrl),
+      pdf_url: toFullUrl(pdfUrl),
       customer: customer,
       items: items,
       invoice_details,
