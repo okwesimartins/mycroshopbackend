@@ -40,24 +40,40 @@ async function getAllInvoices(req, res) {
     // Parse and validate pagination parameters
     let page = parseInt(req.query.page) || 1;
     let limit = parseInt(req.query.limit) || 50;
-    
+
     // Validate and constrain pagination values
     if (page < 1) page = 1;
     if (limit < 1) limit = 50;
     if (limit > 100) limit = 100; // Max limit to prevent performance issues
-    
+
     const offset = (page - 1) * limit;
 
     // Extract filter parameters
     const { status, customer_id, store_id, start_date, end_date, all_stores } = req.query;
 
+    // Determine tenant scope (free plan users share a DB — must filter by tenant_id)
+    const tenantId = req.user.tenantId;
+    const parsedTenantId = parseInt(tenantId, 10);
+    let isFreePlan = false;
+    try {
+      const tenantRecord = await getTenantById(tenantId);
+      isFreePlan = !!(tenantRecord && tenantRecord.subscription_plan === 'free');
+    } catch (err) {
+      console.warn('getAllInvoices: could not determine subscription plan, defaulting to no extra filter:', err.message);
+    }
+
     const where = {};
-    
+
+    // SECURITY: scope to this tenant for free plan users (shared database)
+    if (isFreePlan) {
+      where.tenant_id = parsedTenantId;
+    }
+
     // Filter by store if store_id provided, unless all_stores is true
     if (store_id && all_stores !== 'true') {
       where.store_id = store_id;
     }
-    
+
     if (status) {
       where.status = status;
     }
@@ -391,13 +407,13 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       industry: (tenant && tenant.business_category) || 'general'
     };
 
-    // Default brand colors (fallback)
+    // Default brand colors (fallback) — background is always white for invoices
     const defaultBrandColors = {
       primary: '#0F172A',
       secondary: '#64748B',
       accent: '#4F46E5',
       text: '#0F172A',
-      background: '#F9FAFB',
+      background: '#FFFFFF',
       border: '#E5E7EB',
       table_header: '#111827',
       table_row_alt: '#F3F4F6'
@@ -439,20 +455,18 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         const fs = require('fs');
         const path = require('path');
         
-        // If logoUrl is relative, try to read the file and convert to absolute URL
+        // If logoUrl is relative, resolve the full local path using the URL's own subdirectory
         if (logoUrl.startsWith('/uploads/') || logoUrl.startsWith('uploads/')) {
-          const logoFilename = logoUrl.split('/').pop();
-          const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
-          
+          const relativePath = logoUrl.startsWith('/') ? logoUrl.slice(1) : logoUrl;
+          const logoFilePath = path.join(__dirname, '..', relativePath);
+
           if (fs.existsSync(logoFilePath)) {
-            // Read file as buffer for color extraction (Gemini can use buffer)
             logoForColorExtraction = fs.readFileSync(logoFilePath);
             console.log(`✅ Read logo file for color extraction: ${logoFilePath} (${fs.statSync(logoFilePath).size} bytes)`);
           } else {
-            // Fallback: construct absolute URL
-            const baseUrl = process.env.BASE_URL || process.env.API_URL || process.env.BACKEND_URL || 'http://backend.mycroshop.com';
-            logoForColorExtraction = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
-            console.log(`⚠️ Logo file not found, using absolute URL for color extraction: ${logoForColorExtraction}`);
+            const baseUrl = (process.env.BASE_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+            logoForColorExtraction = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}/${relativePath}`;
+            console.log(`⚠️ Logo file not found locally, using absolute URL: ${logoForColorExtraction}`);
           }
         }
         
@@ -469,14 +483,15 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         
         const fullPalette = await Promise.race([colorExtractionPromise, timeoutPromise]);
         
+        const extractedPrimary = fullPalette.primary || defaultBrandColors.primary;
         brandColors = {
-          primary: fullPalette.primary || defaultBrandColors.primary,
+          primary: extractedPrimary,
           secondary: fullPalette.secondary || defaultBrandColors.secondary,
           accent: fullPalette.accent || defaultBrandColors.accent,
           text: fullPalette.text || defaultBrandColors.text,
-          background: fullPalette.background || defaultBrandColors.background,
+          background: '#FFFFFF', // always white for invoices
           border: fullPalette.border || defaultBrandColors.border,
-          table_header: fullPalette.table_header || defaultBrandColors.table_header,
+          table_header: fullPalette.table_header || extractedPrimary, // use logo primary color
           table_row_alt: fullPalette.table_row_alt || defaultBrandColors.table_row_alt
         };
         
@@ -550,31 +565,35 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         const fs = require('fs');
         const path = require('path');
         
-        // Extract filename from logo URL (e.g., /uploads/logos/logo.jpg -> logo.jpg)
-        const logoFilename = logoUrl.split('/').pop();
-        const logoFilePath = path.join(__dirname, '..', 'uploads', 'logos', logoFilename);
-        
-        // Check if file exists and read it as base64
-        if (fs.existsSync(logoFilePath)) {
-          const logoBuffer = fs.readFileSync(logoFilePath);
-          const logoMimeType = logoUrl.endsWith('.png') ? 'image/png' :
-                              logoUrl.endsWith('.jpg') || logoUrl.endsWith('.jpeg') ? 'image/jpeg' :
-                              logoUrl.endsWith('.gif') ? 'image/gif' :
-                              logoUrl.endsWith('.webp') ? 'image/webp' : 'image/png';
-          
-          logoDataUri = `data:${logoMimeType};base64,${logoBuffer.toString('base64')}`;
-          console.log(`✅ Converted logo to base64 data URI (${logoBuffer.length} bytes)`);
+        // Resolve full local file path using the URL's own relative path (not just the filename)
+        // This correctly handles /uploads/logos/, /uploads/store_logos/, etc.
+        let logoFilePath;
+        if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
+          // Already an absolute URL — use directly (Puppeteer will fetch it)
+          logoDataUri = logoUrl;
         } else {
-          // Fallback: try to construct absolute URL if file doesn't exist locally
-          const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://backend.mycroshop.com';
-          logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
-          console.log(`⚠️ Logo file not found at ${logoFilePath}, using absolute URL: ${logoDataUri}`);
+          const relativePath = logoUrl.startsWith('/') ? logoUrl.slice(1) : logoUrl;
+          logoFilePath = path.join(__dirname, '..', relativePath);
+
+          if (fs.existsSync(logoFilePath)) {
+            const logoBuffer = fs.readFileSync(logoFilePath);
+            const logoMimeType = logoUrl.endsWith('.png')  ? 'image/png'  :
+                                 logoUrl.endsWith('.jpg') || logoUrl.endsWith('.jpeg') ? 'image/jpeg' :
+                                 logoUrl.endsWith('.gif')  ? 'image/gif'  :
+                                 logoUrl.endsWith('.webp') ? 'image/webp' : 'image/png';
+            logoDataUri = `data:${logoMimeType};base64,${logoBuffer.toString('base64')}`;
+            console.log(`✅ Converted logo to base64 data URI (${logoBuffer.length} bytes)`);
+          } else {
+            const baseUrl = (process.env.BASE_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+            logoDataUri = `${baseUrl}/${relativePath}`;
+            console.log(`⚠️ Logo file not found at ${logoFilePath}, using absolute URL: ${logoDataUri}`);
+          }
         }
       } catch (logoError) {
         console.warn('Failed to convert logo to base64, using absolute URL:', logoError.message);
-        // Fallback to absolute URL
-        const baseUrl = process.env.BASE_URL || process.env.API_URL || 'http://backend.mycroshop.com';
-        logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
+        const baseUrl = (process.env.BASE_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+        const relativePath = logoUrl.startsWith('/') ? logoUrl.slice(1) : logoUrl;
+        logoDataUri = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}/${relativePath}`;
       }
     }
 
@@ -878,13 +897,21 @@ async function generateAiTemplatesForInvoice(req, res) {
     });
 
     if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: 'Invoice not found'
-      });
+      return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
 
     const tenantId = req.user.tenantId;
+    const parsedTenantId = parseInt(tenantId, 10);
+
+    // SECURITY: verify ownership for free plan users (shared database)
+    try {
+      const tenantRecord = await getTenantById(tenantId);
+      const isFreePlan = !!(tenantRecord && tenantRecord.subscription_plan === 'free');
+      if (isFreePlan && invoice.tenant_id !== null && invoice.tenant_id !== parsedTenantId) {
+        return res.status(404).json({ success: false, message: 'Invoice not found' });
+      }
+    } catch (e) { /* non-fatal */ }
+
     const templateData = await generateTemplatesForInvoice(invoice, tenantId, req);
 
     res.json({
@@ -944,14 +971,20 @@ async function getInvoiceById(req, res) {
     let previewUrl = null;
     let pdfUrl = null;
     let urlError = null;
-    
+
     try {
       const tenantId = req.user.tenantId;
+      const parsedTenantId = parseInt(tenantId, 10);
       // Get subscription plan from tenant
       let isFreePlan = false;
       try {
         const tenant = await getTenantById(tenantId);
-        isFreePlan = tenant && tenant.subscription_plan === 'free';
+        isFreePlan = !!(tenant && tenant.subscription_plan === 'free');
+
+        // SECURITY: free plan users share a database — reject invoices belonging to other tenants
+        if (isFreePlan && invoice.tenant_id !== null && invoice.tenant_id !== parsedTenantId) {
+          return res.status(404).json({ success: false, message: 'Invoice not found' });
+        }
       } catch (err) {
         urlError = `Failed to determine subscription plan: ${err.message}`;
         console.warn('Could not determine subscription plan, defaulting to enterprise', err);

@@ -26,14 +26,14 @@ function generateDefaultTemplate(data) {
     colors = {}
   } = data;
 
-  // Extract colors from logo - use these throughout
+  // Extract colors from logo — background is always white for invoices
   const primary = colors.primary || '#2563EB';
   const secondary = colors.secondary || '#64748B';
-  const accent = colors.accent || '#F59E0B';
+  const accent = colors.accent || primary;
   const text = colors.text || '#111827';
-  const background = colors.background || '#FFFFFF';
+  const background = '#FFFFFF';
   const border = colors.border || '#E5E7EB';
-  const tableHeader = colors.table_header || primary;
+  const tableHeader = colors.table_header || primary; // driven by logo primary color
   const tableRowAlt = colors.table_row_alt || '#F9FAFB';
 
   // Business info
