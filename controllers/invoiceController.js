@@ -419,29 +419,31 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
       table_row_alt: '#F3F4F6'
     };
 
-    // Try to extract colors from tenant logo
+    // Try to extract colors from logo
     let brandColors = defaultBrandColors;
     let logoUrl = null;
 
-    // Check tenant logo first
-    if (tenant && tenant.logo_url) {
-      logoUrl = tenant.logo_url;
-    } else {
-      // Fallback: Check for OnlineStore logo if available
-      try {
-        const OnlineStore = req.db.models.OnlineStore;
-        if (OnlineStore) {
-          const onlineStore = await OnlineStore.findOne({
-            where: { tenant_id: tenantId },
-            attributes: ['profile_logo_url']
-          });
-          if (onlineStore && onlineStore.profile_logo_url) {
-            logoUrl = onlineStore.profile_logo_url;
-          }
+    // Logo must come from online_stores.profile_logo_url — no fallback
+    try {
+      const OnlineStore = req.db.models.OnlineStore;
+      if (OnlineStore) {
+        const isFreePlanForLogo = tenant && tenant.subscription_plan === 'free';
+        const onlineStoreWhere = isFreePlanForLogo ? { tenant_id: tenantId } : {};
+        const onlineStore = await OnlineStore.findOne({
+          where: onlineStoreWhere,
+          attributes: ['profile_logo_url'],
+          order: [['id', 'ASC']]
+        });
+        if (onlineStore && onlineStore.profile_logo_url) {
+          logoUrl = onlineStore.profile_logo_url;
         }
-      } catch (error) {
-        console.warn('Could not fetch OnlineStore logo:', error);
       }
+    } catch (error) {
+      console.warn('Could not fetch OnlineStore profile_logo_url:', error.message);
+    }
+
+    if (!logoUrl) {
+      throw Object.assign(new Error('Please upload your store logo before generating an invoice. Go to your Online Store settings and upload a logo.'), { statusCode: 400 });
     }
 
     // Extract colors from logo if available (with timeout to prevent blocking)
