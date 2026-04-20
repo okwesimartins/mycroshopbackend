@@ -28,6 +28,65 @@ function getFullUrl(req, relativePath) {
 }
 
 /**
+ * Format product_variants into a clean array for API responses.
+ * Each variant includes its price/stock/SKU and the option combination it represents
+ * (e.g. Color: Black + Size: 42).
+ */
+function formatVariants(variants, req) {
+  if (!variants || variants.length === 0) return [];
+  return variants.map(variant => {
+    let imageUrl = null;
+    if (variant.image_url) {
+      imageUrl = variant.image_url.startsWith('/uploads/')
+        ? getFullUrl(req, variant.image_url)
+        : variant.image_url;
+    }
+    return {
+      id: variant.id,
+      sku: variant.sku || null,
+      barcode: variant.barcode || null,
+      price: parseFloat(variant.price) || 0,
+      stock: variant.stock || 0,
+      image_url: imageUrl,
+      is_active: variant.is_active !== false,
+      // The option combination this variant represents (e.g. [{Color: Black}, {Size: 42}])
+      options: (variant.ProductVariationOptions || []).map(opt => ({
+        option_id: opt.id,
+        option_value: opt.option_value,
+        display_name: opt.option_display_name || opt.option_value,
+        variation_id: opt.variation_id,
+        variation_name: opt.ProductVariation ? opt.ProductVariation.variation_name : null,
+        variation_type: opt.ProductVariation ? opt.ProductVariation.variation_type : null
+      }))
+    };
+  });
+}
+
+/**
+ * Build the ProductVariant Sequelize include (shared across list and detail queries).
+ */
+function variantInclude(models) {
+  return {
+    model: models.ProductVariant,
+    include: [
+      {
+        model: models.ProductVariationOption,
+        through: { attributes: [] },
+        attributes: ['id', 'variation_id', 'option_value', 'option_display_name'],
+        include: [
+          {
+            model: models.ProductVariation,
+            attributes: ['id', 'variation_name', 'variation_type']
+          }
+        ],
+        required: false
+      }
+    ],
+    required: false
+  };
+}
+
+/**
  * Get all products (store-specific or all stores)
  * For enterprise users only - full inventory management
  */
@@ -65,31 +124,26 @@ async function getAllProducts(req, res) {
         },
         {
           model: req.db.models.ProductVariation,
-          include: [
-            {
-              model: req.db.models.ProductVariationOption
-            }
-          ],
+          include: [{ model: req.db.models.ProductVariationOption }],
           required: false
-        }
+        },
+        variantInclude(req.db.models)
       ],
       limit: parseInt(limit),
       offset: parseInt(offset),
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
+      distinct: true
     });
 
-    // Enhance products with full image URLs and variations array
+    // Enhance products with full image URLs, variations, and variants
     const enhancedProducts = rows.map(product => {
       const productData = product.toJSON();
-      
-      // Convert product image_url to full URL if it's a relative path
-      if (productData.image_url) {
-        if (productData.image_url.startsWith('/uploads/')) {
-          productData.image_url = getFullUrl(req, productData.image_url);
-        }
+
+      if (productData.image_url && productData.image_url.startsWith('/uploads/')) {
+        productData.image_url = getFullUrl(req, productData.image_url);
       }
-      
-      // Format variations as clean array with full image URLs
+
+      // Format variation types + their options
       if (productData.ProductVariations && productData.ProductVariations.length > 0) {
         productData.variations = productData.ProductVariations.map(variation => {
           const variationData = {
@@ -100,8 +154,6 @@ async function getAllProducts(req, res) {
             sort_order: variation.sort_order,
             options: []
           };
-          
-          // Process variation options with full image URLs
           if (variation.ProductVariationOptions && variation.ProductVariationOptions.length > 0) {
             variationData.options = variation.ProductVariationOptions.map(option => {
               const optionData = {
@@ -115,31 +167,25 @@ async function getAllProducts(req, res) {
                 is_default: option.is_default || false,
                 is_available: option.is_available !== false,
                 sort_order: option.sort_order || 0,
-                image_url: null
+                image_url: option.image_url
+                  ? (option.image_url.startsWith('/uploads/') ? getFullUrl(req, option.image_url) : option.image_url)
+                  : null
               };
-              
-              // Convert variation option image_url to full URL
-              if (option.image_url) {
-                if (option.image_url.startsWith('/uploads/')) {
-                  optionData.image_url = getFullUrl(req, option.image_url);
-                } else {
-                  optionData.image_url = option.image_url; // Already full URL
-                }
-              }
-              
               return optionData;
             });
           }
-          
           return variationData;
         });
       } else {
         productData.variations = [];
       }
-      
-      // Remove the raw ProductVariations data (we've converted it to variations array)
+
+      // Format sellable variant combinations (e.g. Black/42, Brown/41)
+      productData.variants = formatVariants(productData.ProductVariants, req);
+
       delete productData.ProductVariations;
-      
+      delete productData.ProductVariants;
+
       return productData;
     });
 
@@ -303,13 +349,16 @@ async function getBasicInventoryForFreeUsers(req, res) {
     if (collection_id) {
       collectionWhere.collection_id = collection_id;
     }
-    
+
     include.push({
       model: req.db.models.StoreCollectionProduct,
       where: collectionWhere,
       attributes: ['id', 'collection_id', 'sort_order', 'is_pinned'],
       required: !!collection_id // Required only when filtering by collection
     });
+
+    // Include sellable variant combinations
+    include.push(variantInclude(req.db.models));
 
     // For free users, explicitly list only columns that exist in their products table
     // Free users' products table has fewer columns than enterprise users
@@ -431,11 +480,15 @@ async function getBasicInventoryForFreeUsers(req, res) {
         productData.variations = [];
       }
       
-      // Remove the raw ProductVariations data (we've converted it to variations array)
+      // Format sellable variant combinations
+      productData.variants = formatVariants(productData.ProductVariants, req);
+
+      // Remove raw Sequelize association keys
       delete productData.ProductVariations;
+      delete productData.ProductVariants;
       delete productData.StoreProducts;
       delete productData.StoreCollectionProducts;
-      
+
       return productData;
     });
 
@@ -482,18 +535,15 @@ async function getProductById(req, res) {
         },
         {
           model: req.db.models.Store,
-          as: 'Stores', // Products in multiple stores via ProductStore
+          as: 'Stores',
           through: { attributes: ['stock', 'price_override'] }
         },
         {
           model: req.db.models.ProductVariation,
-          include: [
-            {
-              model: req.db.models.ProductVariationOption
-            }
-          ],
+          include: [{ model: req.db.models.ProductVariationOption }],
           required: false
-        }
+        },
+        variantInclude(req.db.models)
       ]
     });
     
@@ -562,8 +612,11 @@ async function getProductById(req, res) {
       productData.variations = [];
     }
     
-    // Remove the raw ProductVariations data (we've converted it to variations array)
+    // Format sellable variant combinations
+    productData.variants = formatVariants(productData.ProductVariants, req);
+
     delete productData.ProductVariations;
+    delete productData.ProductVariants;
 
     res.json({
       success: true,
