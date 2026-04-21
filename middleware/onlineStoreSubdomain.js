@@ -25,52 +25,40 @@ async function identifyStoreBySubdomain(req, res, next) {
     const host = req.headers.host || req.headers['x-forwarded-host'];
 
     if (!host) {
-      return next(); // No host header, continue
-    }
-
-    // Remove port if present
-    const domain = host.split(':')[0].toLowerCase();
-
-    // Get main domain (e.g., "mycroshop.com")
-    const mainDomain = process.env.MAIN_DOMAIN || 'mycroshop.com';
-    const apiDomain = process.env.API_DOMAIN || 'api.mycroshop.com';
-    const backendDomain = process.env.BACKEND_DOMAIN || 'backend.mycroshop.com';
-
-    // Check if it's a subdomain of main domain (e.g., "mystore.mycroshop.com")
-    let subdomain = null;
-    if (domain.endsWith(`.${mainDomain}`)) {
-      const parts = domain.split('.');
-      if (parts.length >= 3) {
-        subdomain = parts[0];
-      }
-    }
-
-    // If Host is the backend/api domain, the frontend store subdomain won't be in Host.
-    // Instead read it from the Origin header (browser sends this automatically on cross-origin requests).
-    // e.g. frontend at stride.mycroshop.com → Origin: https://stride.mycroshop.com
-    if (!subdomain && (domain === mainDomain || domain === apiDomain || domain === backendDomain)) {
-      const origin = req.headers.origin || req.headers.referer || '';
-      try {
-        const originHost = new URL(origin).hostname.toLowerCase();
-        if (originHost.endsWith(`.${mainDomain}`)) {
-          const parts = originHost.split('.');
-          if (parts.length >= 3) {
-            subdomain = parts[0];
-          }
-        }
-      } catch (_) {
-        // invalid Origin URL — skip
-      }
-    }
-
-    // Skip entirely if this is the backend/api domain and no subdomain was found in Origin
-    if (!subdomain && (domain === mainDomain || domain === apiDomain || domain === backendDomain)) {
       return next();
     }
 
-    // Skip reserved subdomains
-    const reservedWords = ['www', 'api', 'admin', 'app', 'mail', 'ftp', 'cpanel', 'backend'];
-    if (!subdomain || reservedWords.includes(subdomain.toLowerCase())) {
+    const domain = host.split(':')[0].toLowerCase();
+    const mainDomain = process.env.MAIN_DOMAIN || 'mycroshop.com';
+
+    const reservedWords = new Set(['www', 'api', 'admin', 'app', 'mail', 'ftp', 'cpanel', 'backend']);
+
+    // Helper: extract a valid store subdomain from any hostname
+    function extractStoreSubdomain(hostname) {
+      if (!hostname || !hostname.endsWith(`.${mainDomain}`)) return null;
+      const parts = hostname.split('.');
+      if (parts.length < 3) return null;
+      const candidate = parts[0].toLowerCase();
+      return reservedWords.has(candidate) ? null : candidate;
+    }
+
+    // 1. Try the Host header first (direct store subdomain access)
+    let subdomain = extractStoreSubdomain(domain);
+
+    // 2. If Host is backend/api/main domain, the store subdomain is in the Origin header.
+    //    The browser always sends Origin on cross-origin requests, so
+    //    stride.mycroshop.com → backend.mycroshop.com will have Origin: https://stride.mycroshop.com
+    if (!subdomain) {
+      const origin = req.headers.origin || req.headers.referer || '';
+      try {
+        const originHost = new URL(origin).hostname.toLowerCase();
+        subdomain = extractStoreSubdomain(originHost);
+      } catch (_) {
+        // invalid URL — skip
+      }
+    }
+
+    if (!subdomain) {
       return next();
     }
 
