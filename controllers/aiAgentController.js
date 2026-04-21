@@ -5,6 +5,7 @@ const fs = require('fs');
 const { getTenantById } = require('../config/tenant');
 const { mainSequelize, getTenantConnection } = require('../config/database');
 const { fetchVariantsForProductIds } = require('./onlineStoreController');
+const { checkAndIncrementFollowUpUsage } = require('./whatsappPlanController');
 
 /**
  * Verify webhook signature from Meta
@@ -2287,6 +2288,37 @@ async function submitRefundRequest(req, res) {
 
 
 
+/**
+ * Send an AI-initiated follow-up WhatsApp message to a customer.
+ *
+ * These messages go OUTSIDE the 24-hour free customer-service window, so WhatsApp
+ * charges for them as Business Initiated Messages.  Before sending, this function:
+ *   1. Checks the tenant's WhatsApp AI plan allows more follow-ups this billing period.
+ *   2. Increments the counter atomically.
+ *   3. Sends the message via the tenant's connected WhatsApp number.
+ *
+ * Returns { sent: true } on success, or { sent: false, reason } when blocked.
+ *
+ * Usage (from any future follow-up scheduler or abandoned-cart flow):
+ *   const { sent, reason } = await sendFollowUpMessage(tenantId, customerPhone, messageText);
+ */
+async function sendFollowUpMessage(tenantId, customerPhone, messageText) {
+  // Gate: check subscription allows this follow-up
+  const check = await checkAndIncrementFollowUpUsage(tenantId);
+  if (!check.allowed) {
+    console.warn(`sendFollowUpMessage blocked for tenant ${tenantId}: ${check.reason}`);
+    return { sent: false, reason: check.reason };
+  }
+
+  const wa = await getWhatsappConnectionForTenant(tenantId);
+  if (!wa?.phone_number_id || !wa?.access_token) {
+    return { sent: false, reason: 'no_whatsapp_connection' };
+  }
+
+  const ok = await sendWhatsAppTextRaw(wa.phone_number_id, wa.access_token, customerPhone, messageText);
+  return ok ? { sent: true } : { sent: false, reason: 'send_failed' };
+}
+
 module.exports = {
   handleWebhook,
   getConfig,
@@ -2306,6 +2338,7 @@ module.exports = {
   submitRefundRequest,
   listServices,
   getServiceAvailability,
-  createBooking
+  createBooking,
+  sendFollowUpMessage
 };
 

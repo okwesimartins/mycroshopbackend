@@ -562,6 +562,190 @@ async function createTenant(tenantData) {
   return tenant;
 }
 
+// Platform-level settings (Paystack keys, Gemini key, etc.) — managed by platform admins
+const PlatformSetting = mainSequelize.define('PlatformSetting', {
+  id: {
+    type: require('sequelize').DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  key: {
+    type: require('sequelize').DataTypes.STRING(100),
+    allowNull: false,
+    unique: true,
+    comment: 'Setting identifier, e.g. paystack_secret_key'
+  },
+  value: {
+    type: require('sequelize').DataTypes.TEXT,
+    allowNull: true,
+    comment: 'Setting value. Encrypted when is_secret = true.'
+  },
+  is_secret: {
+    type: require('sequelize').DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: 'true = value is AES-256-CBC encrypted at rest'
+  },
+  label: {
+    type: require('sequelize').DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'Human-readable label shown in platform admin UI'
+  },
+  group: {
+    type: require('sequelize').DataTypes.STRING(100),
+    allowNull: true,
+    defaultValue: 'general',
+    comment: 'Logical group: paystack | gemini | general | email'
+  },
+  created_at: {
+    type: require('sequelize').DataTypes.DATE,
+    defaultValue: require('sequelize').DataTypes.NOW
+  },
+  updated_at: {
+    type: require('sequelize').DataTypes.DATE,
+    defaultValue: require('sequelize').DataTypes.NOW
+  }
+}, {
+  tableName: 'platform_settings',
+  timestamps: false
+});
+
+// WhatsApp AI Sales Agent Plans (platform-level — stored in main DB)
+const WhatsAppPlan = mainSequelize.define('WhatsAppPlan', {
+  id: {
+    type: require('sequelize').DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  name: {
+    type: require('sequelize').DataTypes.STRING(100),
+    allowNull: false,
+    comment: 'e.g. Starter, Growth, Scale, Enterprise'
+  },
+  slug: {
+    type: require('sequelize').DataTypes.STRING(50),
+    allowNull: false,
+    unique: true,
+    comment: 'URL-safe identifier: starter | growth | scale | enterprise'
+  },
+  price_kobo: {
+    type: require('sequelize').DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Monthly price in kobo (NGN × 100). NULL for Enterprise (custom pricing).'
+  },
+  max_customers: {
+    type: require('sequelize').DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Max monthly active customers. NULL = unlimited.'
+  },
+  max_whatsapp_numbers: {
+    type: require('sequelize').DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 1,
+    comment: 'Number of WhatsApp numbers allowed'
+  },
+  follow_up_limit: {
+    type: require('sequelize').DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'Max AI follow-up messages per billing period (outside 24h free window). NULL = unlimited.'
+  },
+  features: {
+    type: require('sequelize').DataTypes.JSON,
+    allowNull: true,
+    comment: 'Array of feature strings shown in pricing UI'
+  },
+  best_for: {
+    type: require('sequelize').DataTypes.STRING(255),
+    allowNull: true,
+    comment: 'Short description of ideal customer segment'
+  },
+  is_custom: {
+    type: require('sequelize').DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: 'true for Enterprise — no self-serve payment, requires contact'
+  },
+  is_active: {
+    type: require('sequelize').DataTypes.BOOLEAN,
+    defaultValue: true
+  },
+  sort_order: {
+    type: require('sequelize').DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  created_at: {
+    type: require('sequelize').DataTypes.DATE,
+    defaultValue: require('sequelize').DataTypes.NOW
+  }
+}, {
+  tableName: 'whatsapp_plans',
+  timestamps: false
+});
+
+// WhatsApp AI Subscriptions — one active subscription per tenant
+const WhatsAppSubscription = mainSequelize.define('WhatsAppSubscription', {
+  id: {
+    type: require('sequelize').DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  tenant_id: {
+    type: require('sequelize').DataTypes.INTEGER,
+    allowNull: false,
+    references: { model: 'Tenant', key: 'id' }
+  },
+  plan_id: {
+    type: require('sequelize').DataTypes.INTEGER,
+    allowNull: false,
+    references: { model: 'whatsapp_plans', key: 'id' }
+  },
+  status: {
+    type: require('sequelize').DataTypes.ENUM('pending', 'active', 'cancelled', 'expired'),
+    defaultValue: 'pending'
+  },
+  paystack_reference: {
+    type: require('sequelize').DataTypes.STRING(100),
+    allowNull: true,
+    comment: 'Paystack transaction reference for last payment'
+  },
+  paystack_customer_code: {
+    type: require('sequelize').DataTypes.STRING(100),
+    allowNull: true
+  },
+  current_period_start: {
+    type: require('sequelize').DataTypes.DATE,
+    allowNull: true
+  },
+  current_period_end: {
+    type: require('sequelize').DataTypes.DATE,
+    allowNull: true,
+    comment: 'Subscription expires after this date if not renewed'
+  },
+  follow_ups_used: {
+    type: require('sequelize').DataTypes.INTEGER,
+    defaultValue: 0,
+    comment: 'AI follow-up messages sent outside 24h window in current billing period'
+  },
+  follow_up_reset_at: {
+    type: require('sequelize').DataTypes.DATE,
+    allowNull: true,
+    comment: 'When follow_ups_used was last reset (start of billing period)'
+  },
+  cancelled_at: {
+    type: require('sequelize').DataTypes.DATE,
+    allowNull: true
+  },
+  created_at: {
+    type: require('sequelize').DataTypes.DATE,
+    defaultValue: require('sequelize').DataTypes.NOW
+  },
+  updated_at: {
+    type: require('sequelize').DataTypes.DATE,
+    defaultValue: require('sequelize').DataTypes.NOW
+  }
+}, {
+  tableName: 'whatsapp_subscriptions',
+  timestamps: false
+});
+
 // Define relationships between models
 User.belongsTo(Tenant, { foreignKey: 'tenant_id', as: 'Tenant' });
 Tenant.hasMany(User, { foreignKey: 'tenant_id', as: 'Users' });
@@ -569,12 +753,19 @@ LicenseKey.belongsTo(Tenant, { foreignKey: 'tenant_id', as: 'Tenant' });
 Tenant.hasMany(LicenseKey, { foreignKey: 'tenant_id', as: 'LicenseKeys' });
 DomainLookup.belongsTo(Tenant, { foreignKey: 'tenant_id', as: 'Tenant' });
 Tenant.hasMany(DomainLookup, { foreignKey: 'tenant_id', as: 'DomainLookups' });
+WhatsAppSubscription.belongsTo(Tenant, { foreignKey: 'tenant_id', as: 'Tenant' });
+Tenant.hasOne(WhatsAppSubscription, { foreignKey: 'tenant_id', as: 'WhatsAppSubscription' });
+WhatsAppSubscription.belongsTo(WhatsAppPlan, { foreignKey: 'plan_id', as: 'Plan' });
+WhatsAppPlan.hasMany(WhatsAppSubscription, { foreignKey: 'plan_id', as: 'Subscriptions' });
 
 module.exports = {
   Tenant,
   User,
   LicenseKey,
   DomainLookup,
+  PlatformSetting,
+  WhatsAppPlan,
+  WhatsAppSubscription,
   initializeMainDatabase,
   getTenantById,
   getTenantBySubdomain,

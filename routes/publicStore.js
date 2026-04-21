@@ -5,6 +5,19 @@ const publicStoreController = require('../controllers/publicStoreController');
 // Public routes - no authentication required
 // These routes are for customers viewing the online store
 
+// ── Subdomain-resolved routes (no username in path) ──────────────────────────
+// Used when the frontend is served from stride.mycroshop.com and calls
+// /api/v1/public-store — the middleware sets req.onlineStoreUsername automatically.
+router.get('/',                                           publicStoreController.getPublicStore);
+router.get('/products',                                   publicStoreController.getPublicProducts);
+router.get('/products/:product_id',                       publicStoreController.getPublicProduct);
+router.get('/collections/:collection_id/products',        publicStoreController.getPublicCollectionProducts);
+router.get('/services',                                   publicStoreController.getPublicServices);
+router.get('/services/:service_id',                       publicStoreController.getPublicService);
+router.get('/collections/:collection_id/services',        publicStoreController.getPublicCollectionServices);
+
+// ── Explicit username routes (username in path) ───────────────────────────────
+// Used when calling from a non-store domain, e.g. /api/v1/public-store/stride
 // Get online store by username (public)
 router.get('/:username', publicStoreController.getPublicStore);
 

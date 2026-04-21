@@ -90,6 +90,7 @@ app.use('/api/v1/loyalty', require('./routes/loyalty')); // Loyalty program
 app.use('/api/v1/platform-admin', require('./routes/platformAdmin')); // Platform admin (Mycroshop owners)
 app.use('/api/v1/payment-gateways', require('./routes/paymentGateways')); // Payment gateway configuration
 app.use('/api/v1/payments', require('./routes/payments')); // Payment processing
+app.use('/api/v1/whatsapp-plans', require('./routes/whatsappPlans')); // WhatsApp AI Sales Agent plans & subscriptions
 // AI Agent endpoints (for BMT to AI communication)
 app.use('/api/v1/ai-agent', require('./routes/aiAgent'));
 // AI Image Enhancement endpoints

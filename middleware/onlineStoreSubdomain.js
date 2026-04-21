@@ -23,34 +23,49 @@ async function identifyStoreBySubdomain(req, res, next) {
 
     // Get the domain from HTTP Host header
     const host = req.headers.host || req.headers['x-forwarded-host'];
-    
+
     if (!host) {
       return next(); // No host header, continue
     }
 
     // Remove port if present
     const domain = host.split(':')[0].toLowerCase();
-    
+
     // Get main domain (e.g., "mycroshop.com")
     const mainDomain = process.env.MAIN_DOMAIN || 'mycroshop.com';
     const apiDomain = process.env.API_DOMAIN || 'api.mycroshop.com';
     const backendDomain = process.env.BACKEND_DOMAIN || 'backend.mycroshop.com';
-    
-    // Skip if it's the main MycroShop domain or API domain
-    if (domain === mainDomain || 
-        domain === apiDomain || 
-        domain === backendDomain) {
-      return next();
-    }
 
     // Check if it's a subdomain of main domain (e.g., "mystore.mycroshop.com")
     let subdomain = null;
     if (domain.endsWith(`.${mainDomain}`)) {
-      // Extract subdomain (e.g., "mystore" from "mystore.mycroshop.com")
       const parts = domain.split('.');
       if (parts.length >= 3) {
-        subdomain = parts[0]; // First part is the subdomain
+        subdomain = parts[0];
       }
+    }
+
+    // If Host is the backend/api domain, the frontend store subdomain won't be in Host.
+    // Instead read it from the Origin header (browser sends this automatically on cross-origin requests).
+    // e.g. frontend at stride.mycroshop.com → Origin: https://stride.mycroshop.com
+    if (!subdomain && (domain === mainDomain || domain === apiDomain || domain === backendDomain)) {
+      const origin = req.headers.origin || req.headers.referer || '';
+      try {
+        const originHost = new URL(origin).hostname.toLowerCase();
+        if (originHost.endsWith(`.${mainDomain}`)) {
+          const parts = originHost.split('.');
+          if (parts.length >= 3) {
+            subdomain = parts[0];
+          }
+        }
+      } catch (_) {
+        // invalid Origin URL — skip
+      }
+    }
+
+    // Skip entirely if this is the backend/api domain and no subdomain was found in Origin
+    if (!subdomain && (domain === mainDomain || domain === apiDomain || domain === backendDomain)) {
+      return next();
     }
 
     // Skip reserved subdomains

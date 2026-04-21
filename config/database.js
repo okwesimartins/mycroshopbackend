@@ -1796,7 +1796,86 @@ async function initializeMainDatabaseTables() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     console.log('✅ order_receipt_message_context table created/verified in main database');
-    
+
+    // ── Platform Settings (Paystack keys, Gemini key, etc.) ───────────────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS platform_settings (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        \`key\`    VARCHAR(100) NOT NULL UNIQUE,
+        value      TEXT         NULL     COMMENT 'Encrypted when is_secret = 1',
+        is_secret  TINYINT(1)   NOT NULL DEFAULT 0,
+        label      VARCHAR(255) NULL     COMMENT 'Human-readable label for admin UI',
+        \`group\`  VARCHAR(100) NOT NULL DEFAULT 'general' COMMENT 'paystack | gemini | email | general',
+        created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_group (\`group\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ platform_settings table created/verified in main database');
+
+    // ── WhatsApp AI Sales Agent Plans ──────────────────────────────────────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS whatsapp_plans (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        slug VARCHAR(50) NOT NULL UNIQUE,
+        price_kobo INT NULL COMMENT 'Monthly price in kobo (NGN x 100). NULL = custom/Enterprise',
+        max_customers INT NULL COMMENT 'Max monthly active customers. NULL = unlimited',
+        max_whatsapp_numbers INT NOT NULL DEFAULT 1,
+        follow_up_limit INT NULL COMMENT 'Max AI follow-up messages per billing period. NULL = unlimited',
+        features JSON NULL,
+        best_for VARCHAR(255) NULL,
+        is_custom TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = Enterprise custom pricing',
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_slug (slug),
+        INDEX idx_is_active (is_active)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ whatsapp_plans table created/verified in main database');
+
+    // Seed the 4 plans if the table is empty
+    const [planRows] = await connection.query(`SELECT COUNT(*) AS cnt FROM whatsapp_plans`);
+    if (planRows[0].cnt === 0) {
+      await connection.query(`
+        INSERT INTO whatsapp_plans (name, slug, price_kobo, max_customers, max_whatsapp_numbers, follow_up_limit, features, best_for, is_custom, is_active, sort_order)
+        VALUES
+          ('Starter',    'starter',    5000000,  300,  1, 500,  '["300 monthly active customers","1 WhatsApp number","Basic AI follow-up messages","Order confirmation & updates","Standard response templates","Email support"]',                                           'Small businesses just getting started with WhatsApp sales', 0, 1, 1),
+          ('Growth',     'growth',    12000000, 1000,  1, 2000, '["1,000 monthly active customers","1 WhatsApp number","Smarter personalised follow-ups","Abandoned order recovery messages","Multi-product recommendations","Priority support"]',                          'Growing businesses ready to scale customer engagement',     0, 1, 2),
+          ('Scale',      'scale',     25000000, 3000,  2, 5000, '["3,000 monthly active customers","2 WhatsApp numbers","Advanced multi-step follow-up flows","Multi-step order assistance","Custom greeting & unavailability messages","Dedicated account support"]',       'High-volume sellers and established brands',                0, 1, 3),
+          ('Enterprise', 'enterprise', NULL,    NULL,  NULL, NULL,'["Unlimited monthly active customers","Multiple WhatsApp numbers","Custom AI integrations","Bespoke follow-up workflows","SLA-backed uptime","Dedicated success manager","Custom onboarding"]',           'Large businesses with complex or high-volume requirements', 1, 1, 4)
+      `);
+      console.log('✅ whatsapp_plans seeded with 4 default plans');
+    }
+
+    // ── WhatsApp AI Subscriptions ──────────────────────────────────────────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS whatsapp_subscriptions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        tenant_id INT NOT NULL,
+        plan_id INT NOT NULL,
+        status ENUM('pending','active','cancelled','expired') NOT NULL DEFAULT 'pending',
+        paystack_reference VARCHAR(100) NULL,
+        paystack_customer_code VARCHAR(100) NULL,
+        current_period_start DATETIME NULL,
+        current_period_end DATETIME NULL,
+        follow_ups_used INT NOT NULL DEFAULT 0,
+        follow_up_reset_at DATETIME NULL,
+        cancelled_at DATETIME NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_tenant_subscription (tenant_id),
+        INDEX idx_tenant_id (tenant_id),
+        INDEX idx_plan_id (plan_id),
+        INDEX idx_status (status),
+        INDEX idx_current_period_end (current_period_end),
+        FOREIGN KEY (tenant_id) REFERENCES Tenant(id) ON DELETE CASCADE,
+        FOREIGN KEY (plan_id) REFERENCES whatsapp_plans(id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ whatsapp_subscriptions table created/verified in main database');
+
     await connection.end();
     return true;
   } catch (error) {
