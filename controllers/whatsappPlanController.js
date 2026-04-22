@@ -72,7 +72,7 @@ async function getPlans(req, res) {
  */
 async function getMySubscription(req, res) {
   try {
-    const tenantId = req.tenantId;
+    const tenantId = req.user?.tenantId;
     const sub = await getActiveSubscription(tenantId);
 
     if (!sub) {
@@ -131,9 +131,12 @@ async function getMySubscription(req, res) {
  */
 async function subscribeToPlan(req, res) {
   try {
-    const tenantId = req.tenantId;
+    const tenantId = req.user?.tenantId;
     const { plan_id, email, callback_url } = req.body;
 
+    if (!tenantId) {
+      return res.status(401).json({ success: false, message: 'Unable to identify tenant from token' });
+    }
     if (!plan_id) {
       return res.status(400).json({ success: false, message: 'plan_id is required' });
     }
@@ -250,7 +253,7 @@ async function subscribeToPlan(req, res) {
  */
 async function cancelSubscription(req, res) {
   try {
-    const tenantId = req.tenantId;
+    const tenantId = req.user?.tenantId;
     const sub = await WhatsAppSubscription.findOne({ where: { tenant_id: tenantId } });
 
     if (!sub || sub.status === 'cancelled') {
