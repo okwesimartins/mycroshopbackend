@@ -132,6 +132,14 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const { initializeMainDatabaseTables } = require('./config/database');
+
+// Initialize main DB tables (platform_settings, whatsapp_plans, whatsapp_subscriptions, etc.)
+// Safe to call on every startup — uses CREATE TABLE IF NOT EXISTS
+initializeMainDatabaseTables()
+  .then(() => console.log('✅ Main database tables initialized'))
+  .catch(err => console.error('⚠️  Main database table initialization error:', err.message));
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);

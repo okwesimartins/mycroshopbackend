@@ -233,10 +233,12 @@ async function subscribeToPlan(req, res) {
       }
     });
   } catch (err) {
-    console.error('subscribeToPlan error:', err.response?.data || err.message);
+    const detail = err.response?.data || err.message || String(err);
+    console.error('subscribeToPlan error:', detail);
     return res.status(500).json({
       success: false,
-      message: err.response?.data?.message || 'Failed to initiate payment. Please try again.'
+      message: err.response?.data?.message || 'Failed to initiate payment. Please try again.',
+      ...(process.env.NODE_ENV !== 'production' && { debug: detail })
     });
   }
 }
