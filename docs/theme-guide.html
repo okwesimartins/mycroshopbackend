@@ -250,15 +250,22 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
 /* ── Mobile: collection cards ── */
 .sf-m .coll-list{padding:14px 16px 8px;}
 .sf-m .coll-card-m{background:var(--card);border-radius:14px;overflow:hidden;border:1px solid var(--border);margin-bottom:12px;cursor:pointer;}
-.sf-m .coll-card-m-img{width:100%;height:118px;background:var(--mid);overflow:hidden;position:relative;}
-.sf-m .coll-card-m-img img{width:100%;height:100%;object-fit:cover;}
-.sf-m .coll-card-m-overlay{position:absolute;inset:0;background:linear-gradient(to right,rgba(0,0,0,.52) 0%,transparent 65%);}
-.sf-m .coll-card-m-info{position:absolute;bottom:12px;left:14px;}
-.sf-m .coll-card-m-name{font-family:var(--font-display);font-size:14px;font-weight:600;color:#fff;margin-bottom:2px;}
-.sf-m .coll-card-m-count{font-size:10px;color:rgba(255,255,255,.75);}
-.sf-m .coll-card-m-footer{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;}
-.sf-m .coll-card-m-desc{font-size:10px;color:var(--muted);}
-.sf-m .coll-card-m-btn{font-size:11px;color:var(--accent);font-weight:600;cursor:pointer;}
+/* mosaic: 1 large left + 2 stacked right */
+.coll-mosaic{width:100%;display:flex;gap:2px;background:var(--border);overflow:hidden;}
+.sf-m .coll-mosaic{height:96px;border-radius:14px 14px 0 0;}
+.coll-mosaic-main{flex:0 0 57%;overflow:hidden;background:var(--mid);}
+.coll-mosaic-main img{width:100%;height:100%;object-fit:cover;display:block;}
+.coll-mosaic-side{flex:1;display:flex;flex-direction:column;gap:2px;}
+.coll-mosaic-side .mosaic-cell{flex:1;overflow:hidden;background:var(--mid);}
+.coll-mosaic-side .mosaic-cell img{width:100%;height:100%;object-fit:cover;display:block;}
+.mosaic-cell.mosaic-empty{background:var(--accent-muted);display:flex;align-items:center;justify-content:center;}
+.mosaic-cell.mosaic-empty svg{opacity:.22;}
+.sf-m .coll-card-m-body{padding:10px 14px 11px;}
+.sf-m .coll-card-m-row{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.sf-m .coll-card-m-left{flex:1;min-width:0;}
+.sf-m .coll-card-m-name{font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--text);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sf-m .coll-card-m-count{font-size:10px;color:var(--muted);}
+.sf-m .coll-card-m-btn{font-size:11px;color:var(--accent);font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;}
 
 /* ── Mobile: service cards ── */
 .sf-m .svc-list{padding:14px 16px 8px;}
@@ -304,14 +311,13 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
 .sf-w .collections-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;padding:20px 40px 40px;}
 .sf-w .coll-card{border-radius:14px;overflow:hidden;border:1px solid var(--border);background:var(--card);cursor:pointer;transition:transform .2s,box-shadow .2s;}
 .sf-w .coll-card:hover{transform:translateY(-4px);box-shadow:0 16px 40px rgba(0,0,0,.15);}
-.sf-w .coll-card-img{width:100%;height:180px;background:var(--mid);overflow:hidden;position:relative;}
-.sf-w .coll-card-img img{width:100%;height:100%;object-fit:cover;transition:transform .4s;}
-.sf-w .coll-card:hover .coll-card-img img{transform:scale(1.05);}
-.sf-w .coll-card-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.48) 0%,transparent 55%);}
-.sf-w .coll-badge{position:absolute;top:12px;right:12px;background:var(--accent);color:var(--btn-font);font-size:9px;font-weight:700;padding:3px 9px;border-radius:100px;letter-spacing:.05em;text-transform:uppercase;}
-.sf-w .coll-card-body{padding:16px;}
-.sf-w .coll-card-name{font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--text);margin-bottom:4px;}
-.sf-w .coll-card-desc{font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5;}
+/* mosaic on web */
+.sf-w .coll-mosaic{height:168px;border-radius:14px 14px 0 0;}
+.sf-w .coll-card:hover .coll-mosaic-main img,.sf-w .coll-card:hover .mosaic-cell img{transform:scale(1.05);}
+.sf-w .coll-mosaic-main img{transition:transform .4s;}
+.sf-w .mosaic-cell img{transition:transform .4s;}
+.sf-w .coll-card-body{padding:14px 16px 16px;}
+.sf-w .coll-card-name{font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--text);margin:6px 0 10px;}
 .sf-w .coll-card-foot{display:flex;align-items:center;justify-content:space-between;}
 .sf-w .coll-card-count{font-size:11px;color:var(--muted);}
 .sf-w .coll-view-btn{padding:7px 18px;border-radius:20px;background:var(--accent);color:var(--btn-font);font-size:11px;font-weight:600;border:none;cursor:pointer;font-family:var(--font-body);}
@@ -679,98 +685,124 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
 
             <!-- PRODUCT collections -->
             <div class="coll-card-m">
-              <div class="coll-card-m-img">
-                <img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt="Sneakers & Loafers"/>
-                <div class="coll-card-m-overlay"></div>
-                <div class="coll-card-m-info">
-                  <div class="coll-card-m-name">Sneakers &amp; Loafers</div>
-                  <div class="coll-card-m-count">12 products</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
                 </div>
-                <div class="coll-type-tag-m coll-type-product-m">
+              </div>
+              <div class="coll-card-m-body">
+                <div class="coll-type-tag-m coll-type-product-m" style="position:static;margin-bottom:5px;">
                   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
                   Products
                 </div>
-              </div>
-              <div class="coll-card-m-footer">
-                <div class="coll-card-m-desc">Casual comfort meets street style</div>
-                <div class="coll-card-m-btn">View →</div>
+                <div class="coll-card-m-row">
+                  <div class="coll-card-m-left">
+                    <div class="coll-card-m-name">Sneakers &amp; Loafers</div>
+                    <div class="coll-card-m-count">12 items</div>
+                  </div>
+                  <div class="coll-card-m-btn">View →</div>
+                </div>
               </div>
             </div>
 
             <div class="coll-card-m">
-              <div class="coll-card-m-img">
-                <img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt="Formal Footwear"/>
-                <div class="coll-card-m-overlay"></div>
-                <div class="coll-card-m-info">
-                  <div class="coll-card-m-name">Formal Footwear</div>
-                  <div class="coll-card-m-count">8 products</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                  <div class="mosaic-cell mosaic-empty">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                  </div>
                 </div>
-                <div class="coll-type-tag-m coll-type-product-m">
+              </div>
+              <div class="coll-card-m-body">
+                <div class="coll-type-tag-m coll-type-product-m" style="position:static;margin-bottom:5px;">
                   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
                   Products
                 </div>
-              </div>
-              <div class="coll-card-m-footer">
-                <div class="coll-card-m-desc">Oxfords, Derbies &amp; more</div>
-                <div class="coll-card-m-btn">View →</div>
+                <div class="coll-card-m-row">
+                  <div class="coll-card-m-left">
+                    <div class="coll-card-m-name">Formal Footwear</div>
+                    <div class="coll-card-m-count">8 items</div>
+                  </div>
+                  <div class="coll-card-m-btn">View →</div>
+                </div>
               </div>
             </div>
 
             <div class="coll-card-m">
-              <div class="coll-card-m-img">
-                <img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt="Boots & Chelsea"/>
-                <div class="coll-card-m-overlay"></div>
-                <div class="coll-card-m-info">
-                  <div class="coll-card-m-name">Boots &amp; Chelsea</div>
-                  <div class="coll-card-m-count">10 products</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
                 </div>
-                <div class="coll-type-tag-m coll-type-product-m">
+              </div>
+              <div class="coll-card-m-body">
+                <div class="coll-type-tag-m coll-type-product-m" style="position:static;margin-bottom:5px;">
                   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
                   Products
                 </div>
-              </div>
-              <div class="coll-card-m-footer">
-                <div class="coll-card-m-desc">Bold silhouettes, tough leather</div>
-                <div class="coll-card-m-btn">View →</div>
+                <div class="coll-card-m-row">
+                  <div class="coll-card-m-left">
+                    <div class="coll-card-m-name">Boots &amp; Chelsea</div>
+                    <div class="coll-card-m-count">10 items</div>
+                  </div>
+                  <div class="coll-card-m-btn">View →</div>
+                </div>
               </div>
             </div>
 
             <!-- SERVICE collections -->
             <div class="coll-card-m">
-              <div class="coll-card-m-img">
-                <img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Shoe Care Packages"/>
-                <div class="coll-card-m-overlay"></div>
-                <div class="coll-card-m-info">
-                  <div class="coll-card-m-name">Shoe Care Packages</div>
-                  <div class="coll-card-m-count">3 services</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
                 </div>
-                <div class="coll-type-tag-m coll-type-service-m">
+              </div>
+              <div class="coll-card-m-body">
+                <div class="coll-type-tag-m coll-type-service-m" style="position:static;margin-bottom:5px;">
                   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                   Services
                 </div>
-              </div>
-              <div class="coll-card-m-footer">
-                <div class="coll-card-m-desc">Clean, condition &amp; protect bundles</div>
-                <div class="coll-card-m-btn">View →</div>
+                <div class="coll-card-m-row">
+                  <div class="coll-card-m-left">
+                    <div class="coll-card-m-name">Shoe Care Packages</div>
+                    <div class="coll-card-m-count">3 items</div>
+                  </div>
+                  <div class="coll-card-m-btn">View →</div>
+                </div>
               </div>
             </div>
 
             <div class="coll-card-m">
-              <div class="coll-card-m-img">
-                <img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Custom & Restoration"/>
-                <div class="coll-card-m-overlay"></div>
-                <div class="coll-card-m-info">
-                  <div class="coll-card-m-name">Custom &amp; Restoration</div>
-                  <div class="coll-card-m-count">2 services</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell mosaic-empty">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  </div>
+                  <div class="mosaic-cell mosaic-empty">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  </div>
                 </div>
-                <div class="coll-type-tag-m coll-type-service-m">
+              </div>
+              <div class="coll-card-m-body">
+                <div class="coll-type-tag-m coll-type-service-m" style="position:static;margin-bottom:5px;">
                   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                   Services
                 </div>
-              </div>
-              <div class="coll-card-m-footer">
-                <div class="coll-card-m-desc">Bespoke design &amp; expert restoration</div>
-                <div class="coll-card-m-btn">View →</div>
+                <div class="coll-card-m-row">
+                  <div class="coll-card-m-left">
+                    <div class="coll-card-m-name">Custom &amp; Restoration</div>
+                    <div class="coll-card-m-count">2 items</div>
+                  </div>
+                  <div class="coll-card-m-btn">View →</div>
+                </div>
               </div>
             </div>
 
@@ -1236,10 +1268,12 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
 
             <!-- PRODUCT collections -->
             <div class="coll-card">
-              <div class="coll-card-img">
-                <img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt="Sneakers & Loafers"/>
-                <div class="coll-card-overlay"></div>
-                <div class="coll-badge">12 items</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                </div>
               </div>
               <div class="coll-card-body">
                 <div class="coll-type-tag coll-type-product">
@@ -1247,19 +1281,22 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
                   Products
                 </div>
                 <div class="coll-card-name">Sneakers &amp; Loafers</div>
-                <div class="coll-card-desc">Laid-back silhouettes built for all-day wear. Casual comfort meets street-ready style.</div>
                 <div class="coll-card-foot">
-                  <div class="coll-card-count">12 products</div>
+                  <div class="coll-card-count">12 items</div>
                   <button class="coll-view-btn">View Collection</button>
                 </div>
               </div>
             </div>
 
             <div class="coll-card">
-              <div class="coll-card-img">
-                <img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt="Formal Footwear"/>
-                <div class="coll-card-overlay"></div>
-                <div class="coll-badge">8 items</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                  <div class="mosaic-cell mosaic-empty">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                  </div>
+                </div>
               </div>
               <div class="coll-card-body">
                 <div class="coll-type-tag coll-type-product">
@@ -1267,19 +1304,20 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
                   Products
                 </div>
                 <div class="coll-card-name">Formal Footwear</div>
-                <div class="coll-card-desc">Oxfords, Derbies and brogues crafted from premium full-grain leather for the boardroom.</div>
                 <div class="coll-card-foot">
-                  <div class="coll-card-count">8 products</div>
+                  <div class="coll-card-count">8 items</div>
                   <button class="coll-view-btn">View Collection</button>
                 </div>
               </div>
             </div>
 
             <div class="coll-card">
-              <div class="coll-card-img">
-                <img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt="Boots & Chelsea"/>
-                <div class="coll-card-overlay"></div>
-                <div class="coll-badge">10 items</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                </div>
               </div>
               <div class="coll-card-body">
                 <div class="coll-type-tag coll-type-product">
@@ -1287,9 +1325,8 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
                   Products
                 </div>
                 <div class="coll-card-name">Boots &amp; Chelsea</div>
-                <div class="coll-card-desc">Bold silhouettes. Tough waxed leather and ankle-hugging Chelsea cuts for any season.</div>
                 <div class="coll-card-foot">
-                  <div class="coll-card-count">10 products</div>
+                  <div class="coll-card-count">10 items</div>
                   <button class="coll-view-btn">View Collection</button>
                 </div>
               </div>
@@ -1297,10 +1334,12 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
 
             <!-- SERVICE collections -->
             <div class="coll-card">
-              <div class="coll-card-img">
-                <img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Shoe Care Packages"/>
-                <div class="coll-card-overlay"></div>
-                <div class="coll-badge">3 items</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                  <div class="mosaic-cell"><img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt=""/></div>
+                </div>
               </div>
               <div class="coll-card-body">
                 <div class="coll-type-tag coll-type-service">
@@ -1308,19 +1347,24 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
                   Services
                 </div>
                 <div class="coll-card-name">Shoe Care Packages</div>
-                <div class="coll-card-desc">Bundled care packages — deep clean, conditioning and waterproof treatment in one booking.</div>
                 <div class="coll-card-foot">
-                  <div class="coll-card-count">3 services</div>
+                  <div class="coll-card-count">3 items</div>
                   <button class="coll-view-btn">View Collection</button>
                 </div>
               </div>
             </div>
 
             <div class="coll-card">
-              <div class="coll-card-img">
-                <img src="http://backend.mycroshop.com/uploads/products/product-1774377938199-715556323.jpeg" alt="Custom & Restoration"/>
-                <div class="coll-card-overlay"></div>
-                <div class="coll-badge">2 items</div>
+              <div class="coll-mosaic">
+                <div class="coll-mosaic-main"><img src="http://backend.mycroshop.com/uploads/stores/store-1775983171686-220331814.png" alt=""/></div>
+                <div class="coll-mosaic-side">
+                  <div class="mosaic-cell mosaic-empty">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  </div>
+                  <div class="mosaic-cell mosaic-empty">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  </div>
+                </div>
               </div>
               <div class="coll-card-body">
                 <div class="coll-type-tag coll-type-service">
@@ -1328,9 +1372,8 @@ pre{font-size:12px;line-height:1.8;overflow-x:auto;color:#ccc;}
                   Services
                 </div>
                 <div class="coll-card-name">Custom &amp; Restoration</div>
-                <div class="coll-card-desc">Bespoke design commissions and expert sole &amp; heel restoration by our master cobblers.</div>
                 <div class="coll-card-foot">
-                  <div class="coll-card-count">2 services</div>
+                  <div class="coll-card-count">2 items</div>
                   <button class="coll-view-btn">View Collection</button>
                 </div>
               </div>

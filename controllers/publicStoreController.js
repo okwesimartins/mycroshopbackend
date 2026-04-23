@@ -1297,6 +1297,9 @@ async function getPublicCollectionServices(req, res) {
  * GET /api/v1/public-store/collections
  * GET /api/v1/public-store/:username/collections
  * Optional query: type=product|service
+ *
+ * Each collection includes up to 3 preview items (id + name + image_url)
+ * so the frontend can render a mosaic without extra API calls.
  */
 async function getPublicCollections(req, res) {
   try {
@@ -1355,8 +1358,9 @@ async function getPublicCollections(req, res) {
       const typeFilter = type ? 'AND sc.collection_type = :type' : '';
       const replacements = { tenantId: effectiveTenantId, ...(type ? { type } : {}) };
 
+      // Step 1: fetch collections with item counts
       const rows = await sequelize.query(`
-        SELECT sc.id, sc.name, sc.description, sc.image_url, sc.collection_type,
+        SELECT sc.id, sc.collection_name, sc.collection_type, sc.layout_type,
                sc.sort_order, sc.is_pinned,
                CASE
                  WHEN sc.collection_type = 'product' THEN (
@@ -1378,17 +1382,95 @@ async function getPublicCollections(req, res) {
         ORDER BY sc.is_pinned DESC, sc.sort_order ASC
       `, { replacements, type: Sequelize.QueryTypes.SELECT });
 
+      if (rows.length === 0) {
+        return res.json({ success: true, data: { collections: [] } });
+      }
+
+      // Step 2: batch-fetch up to 3 preview items for each collection
+      const productCollectionIds = rows.filter(r => r.collection_type === 'product').map(r => r.id);
+      const serviceCollectionIds = rows.filter(r => r.collection_type === 'service').map(r => r.id);
+
+      // Map: collection_id → [{ id, name, image_url }]
+      const previewByCollection = {};
+
+      if (productCollectionIds.length > 0) {
+        const productRows = await sequelize.query(`
+          SELECT scp.collection_id, p.id, p.name,
+                 COALESCE(
+                   NULLIF(p.image_url, ''),
+                   (SELECT pvo.image_url
+                    FROM product_variation_options pvo
+                    INNER JOIN product_variations pv ON pvo.variation_id = pv.id
+                    WHERE pv.product_id = p.id
+                      AND pv.tenant_id = :tenantId
+                      AND pvo.tenant_id = :tenantId
+                      AND pvo.image_url IS NOT NULL
+                      AND pvo.image_url != ''
+                    ORDER BY pv.sort_order ASC, pvo.sort_order ASC
+                    LIMIT 1)
+                 ) AS image_url
+          FROM store_collection_products scp
+          INNER JOIN products p ON scp.product_id = p.id
+          WHERE scp.collection_id IN (:collectionIds)
+            AND p.tenant_id = :tenantId
+            AND p.is_active = 1
+          ORDER BY scp.collection_id, scp.sort_order ASC
+        `, {
+          replacements: { collectionIds: productCollectionIds, tenantId: effectiveTenantId },
+          type: Sequelize.QueryTypes.SELECT
+        });
+
+        productRows.forEach(row => {
+          if (!previewByCollection[row.collection_id]) previewByCollection[row.collection_id] = [];
+          if (previewByCollection[row.collection_id].length < 3) {
+            previewByCollection[row.collection_id].push({
+              id: row.id,
+              name: row.name,
+              image_url: row.image_url ? getFullUrl(row.image_url) : null
+            });
+          }
+        });
+      }
+
+      if (serviceCollectionIds.length > 0) {
+        const serviceRows = await sequelize.query(`
+          SELECT scs.collection_id, ss.id, ss.service_title AS name, ss.service_image_url AS image_url
+          FROM store_collection_services scs
+          INNER JOIN store_services ss ON scs.service_id = ss.id
+          WHERE scs.collection_id IN (:collectionIds)
+            AND ss.tenant_id = :tenantId
+            AND ss.is_active = 1
+          ORDER BY scs.collection_id, scs.sort_order ASC
+        `, {
+          replacements: { collectionIds: serviceCollectionIds, tenantId: effectiveTenantId },
+          type: Sequelize.QueryTypes.SELECT
+        });
+
+        serviceRows.forEach(row => {
+          if (!previewByCollection[row.collection_id]) previewByCollection[row.collection_id] = [];
+          if (previewByCollection[row.collection_id].length < 3) {
+            previewByCollection[row.collection_id].push({
+              id: row.id,
+              name: row.name,
+              image_url: row.image_url ? getFullUrl(row.image_url) : null
+            });
+          }
+        });
+      }
+
       collections = rows.map(row => ({
         id: row.id,
-        name: row.name,
-        description: row.description,
-        image_url: row.image_url ? getFullUrl(row.image_url) : null,
+        collection_name: row.collection_name,
         collection_type: row.collection_type,
+        layout_type: row.layout_type,
         item_count: parseInt(row.item_count || 0),
+        preview_items: previewByCollection[row.id] || [],
         sort_order: row.sort_order,
         is_pinned: !!row.is_pinned
       }));
+
     } else {
+      // Enterprise: Sequelize
       const where = {
         online_store_id: onlineStore.id,
         is_visible: true,
@@ -1400,25 +1482,121 @@ async function getPublicCollections(req, res) {
         order: [['is_pinned', 'DESC'], ['sort_order', 'ASC']]
       });
 
-      collections = await Promise.all(rows.map(async col => {
+      if (rows.length === 0) {
+        return res.json({ success: true, data: { collections: [] } });
+      }
+
+      const productCollectionIds = rows.filter(r => r.collection_type === 'product').map(r => r.id);
+      const serviceCollectionIds = rows.filter(r => r.collection_type === 'service').map(r => r.id);
+
+      // Batch-fetch preview items for all product collections
+      const previewByCollection = {};
+
+      if (productCollectionIds.length > 0) {
+        // Raw SQL so we can COALESCE product image with first variation option image
+        const cpRows = await sequelize.query(`
+          SELECT scp.collection_id, p.id, p.name,
+                 COALESCE(
+                   NULLIF(p.image_url, ''),
+                   (SELECT pvo.image_url
+                    FROM product_variation_options pvo
+                    INNER JOIN product_variations pv ON pvo.variation_id = pv.id
+                    WHERE pv.product_id = p.id
+                      AND pvo.image_url IS NOT NULL
+                      AND pvo.image_url != ''
+                    ORDER BY pv.sort_order ASC, pvo.sort_order ASC
+                    LIMIT 1)
+                 ) AS image_url
+          FROM store_collection_products scp
+          INNER JOIN products p ON scp.product_id = p.id
+          WHERE scp.collection_id IN (:collectionIds)
+            AND p.is_active = 1
+          ORDER BY scp.collection_id, scp.sort_order ASC
+        `, {
+          replacements: { collectionIds: productCollectionIds },
+          type: Sequelize.QueryTypes.SELECT
+        });
+
+        cpRows.forEach(row => {
+          const cid = row.collection_id;
+          if (!previewByCollection[cid]) previewByCollection[cid] = [];
+          if (previewByCollection[cid].length < 3) {
+            previewByCollection[cid].push({
+              id: row.id,
+              name: row.name,
+              image_url: row.image_url ? getFullUrl(row.image_url) : null
+            });
+          }
+        });
+      }
+
+      if (serviceCollectionIds.length > 0) {
+        const csRows = await sequelize.query(`
+          SELECT scs.collection_id, ss.id, ss.service_title AS name,
+                 NULLIF(ss.service_image_url, '') AS image_url
+          FROM store_collection_services scs
+          INNER JOIN store_services ss ON scs.service_id = ss.id
+          WHERE scs.collection_id IN (:collectionIds)
+            AND ss.is_active = 1
+          ORDER BY scs.collection_id, scs.sort_order ASC
+        `, {
+          replacements: { collectionIds: serviceCollectionIds },
+          type: Sequelize.QueryTypes.SELECT
+        });
+
+        csRows.forEach(row => {
+          const cid = row.collection_id;
+          if (!previewByCollection[cid]) previewByCollection[cid] = [];
+          if (previewByCollection[cid].length < 3) {
+            previewByCollection[cid].push({
+              id: row.id,
+              name: row.name,
+              image_url: row.image_url ? getFullUrl(row.image_url) : null
+            });
+          }
+        });
+      }
+
+      // Batch-count items per collection
+      const productCounts = {};
+      const serviceCounts = {};
+
+      if (productCollectionIds.length > 0) {
+        const counts = await models.StoreCollectionProduct.findAll({
+          where: { collection_id: productCollectionIds },
+          attributes: ['collection_id', [sequelize.fn('COUNT', sequelize.col('id')), 'cnt']],
+          group: ['collection_id'],
+          raw: true
+        });
+        counts.forEach(r => { productCounts[r.collection_id] = parseInt(r.cnt || 0); });
+      }
+
+      if (serviceCollectionIds.length > 0) {
+        const counts = await models.StoreCollectionService.findAll({
+          where: { collection_id: serviceCollectionIds },
+          attributes: ['collection_id', [sequelize.fn('COUNT', sequelize.col('id')), 'cnt']],
+          group: ['collection_id'],
+          raw: true
+        });
+        counts.forEach(r => { serviceCounts[r.collection_id] = parseInt(r.cnt || 0); });
+      }
+
+      collections = rows.map(col => {
         const colData = col.toJSON();
-        let item_count = 0;
-        if (colData.collection_type === 'product') {
-          item_count = await models.StoreCollectionProduct.count({ where: { collection_id: col.id } });
-        } else if (colData.collection_type === 'service') {
-          item_count = await models.StoreCollectionService.count({ where: { collection_id: col.id } });
-        }
+        const item_count = colData.collection_type === 'product'
+          ? (productCounts[col.id] || 0)
+          : (serviceCounts[col.id] || 0);
         return {
           id: colData.id,
-          name: colData.name,
-          description: colData.description,
-          image_url: colData.image_url ? getFullUrl(colData.image_url) : null,
+          collection_name: colData.collection_name,
           collection_type: colData.collection_type,
+          layout_type: colData.layout_type,
           item_count,
+          preview_items: previewByCollection[col.id] || [],
           sort_order: colData.sort_order,
           is_pinned: !!colData.is_pinned
         };
-      }));
+      });
     }
 
     res.json({ success: true, data: { collections } });
