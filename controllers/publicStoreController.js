@@ -1121,6 +1121,7 @@ async function getPublicCollectionProducts(req, res) {
 
 /**
  * Get services in a collection (public)
+ * GET /api/v1/public-store/collections/:collection_id/services
  * GET /api/v1/public-store/:username/collections/:collection_id/services
  * Supports pagination with page and limit query parameters
  */
@@ -1129,10 +1130,19 @@ async function getPublicCollectionServices(req, res) {
     const { username, collection_id } = req.params;
     const { tenant_id, page = 1, limit = 20 } = req.query;
 
-    if (!tenant_id) {
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id query parameter is required'
+        message: 'tenant_id query parameter is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined. Use the store\'s domain or use the path /public-store/:username with tenant_id in query.'
       });
     }
 
@@ -1142,7 +1152,7 @@ async function getPublicCollectionServices(req, res) {
     const offset = (pageNum - 1) * limitNum;
 
     const { getTenantById } = require('../config/tenant');
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -1150,14 +1160,17 @@ async function getPublicCollectionServices(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
+    const { Sequelize } = require('sequelize');
+    const isFreePlan = (tenant.subscription_plan || 'free') !== 'enterprise';
 
-    // Find online store
+    // Find online store — scope to tenant for free users
     const onlineStore = await models.OnlineStore.findOne({
-      where: { 
-        username: username.toLowerCase(), 
-        is_published: true 
+      where: {
+        username: effectiveUsername,
+        is_published: true,
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
       }
     });
 
@@ -1168,55 +1181,104 @@ async function getPublicCollectionServices(req, res) {
       });
     }
 
-    // Get collection services with pagination
-    const { count, rows } = await models.StoreCollectionService.findAndCountAll({
-      where: {
-        collection_id: collection_id
-      },
-      include: [
-        {
-          model: models.StoreService,
-          where: { is_active: true },
-          required: true
-        }
-      ],
-      order: [['sort_order', 'ASC'], ['is_pinned', 'DESC']],
-      limit: limitNum,
-      offset: offset,
-      distinct: true
-    });
-
     // Normalize image URLs
     function getFullUrl(relativePath) {
       if (!relativePath) return null;
-      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
-        return relativePath;
-      }
-      const protocol = req.protocol;
-      const host = req.get('host');
-      return `${protocol}://${host}${relativePath}`;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) return relativePath;
+      return `${req.protocol}://${req.get('host')}${relativePath}`;
     }
 
-    const services = rows.map(cs => {
-      const serviceData = cs.StoreService ? cs.StoreService.toJSON() : null;
-      if (serviceData && serviceData.service_image_url) {
-        serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
-      }
-      return {
-        ...cs.toJSON(),
-        StoreService: serviceData
-      };
-    });
+    let services = [];
+    let totalCount = 0;
+
+    if (isFreePlan) {
+      // Free users: raw SQL — scope services by tenant_id
+      const replacements = { tenantId: effectiveTenantId, collectionId: collection_id, limit: limitNum, offset };
+
+      const [countResult] = await sequelize.query(`
+        SELECT COUNT(DISTINCT ss.id) as count
+        FROM store_collection_services scs
+        INNER JOIN store_services ss ON scs.service_id = ss.id
+        WHERE scs.collection_id = :collectionId
+          AND ss.tenant_id = :tenantId
+          AND ss.is_active = 1
+      `, { replacements, type: Sequelize.QueryTypes.SELECT });
+      totalCount = parseInt(countResult?.count || 0);
+
+      const rows = await sequelize.query(`
+        SELECT scs.sort_order, scs.is_pinned,
+               ss.id, ss.tenant_id, ss.service_title, ss.description, ss.price,
+               ss.service_image_url, ss.duration_minutes, ss.location_type,
+               ss.availability, ss.is_active, ss.created_at, ss.updated_at
+        FROM store_collection_services scs
+        INNER JOIN store_services ss ON scs.service_id = ss.id
+        WHERE scs.collection_id = :collectionId
+          AND ss.tenant_id = :tenantId
+          AND ss.is_active = 1
+        ORDER BY scs.is_pinned DESC, scs.sort_order ASC
+        LIMIT :limit OFFSET :offset
+      `, { replacements, type: Sequelize.QueryTypes.SELECT });
+
+      services = rows.map(row => {
+        let availability = {};
+        if (row.availability) {
+          try { availability = typeof row.availability === 'string' ? JSON.parse(row.availability) : row.availability; } catch (e) {}
+        }
+        return {
+          id: row.id,
+          tenant_id: row.tenant_id,
+          service_title: row.service_title,
+          description: row.description,
+          price: row.price,
+          service_image_url: row.service_image_url ? getFullUrl(row.service_image_url) : null,
+          duration_minutes: row.duration_minutes,
+          location_type: row.location_type,
+          availability,
+          is_active: row.is_active,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          sort_order: row.sort_order,
+          is_pinned: row.is_pinned
+        };
+      });
+    } else {
+      // Enterprise users: Sequelize
+      const { count, rows } = await models.StoreCollectionService.findAndCountAll({
+        where: { collection_id },
+        include: [{
+          model: models.StoreService,
+          where: { is_active: true },
+          required: true
+        }],
+        order: [['is_pinned', 'DESC'], ['sort_order', 'ASC']],
+        limit: limitNum,
+        offset,
+        distinct: true
+      });
+      totalCount = count;
+      services = rows.map(cs => {
+        const serviceData = cs.StoreService ? cs.StoreService.toJSON() : null;
+        if (serviceData) {
+          if (serviceData.availability && typeof serviceData.availability === 'string') {
+            try { serviceData.availability = JSON.parse(serviceData.availability); } catch (e) { serviceData.availability = {}; }
+          } else if (!serviceData.availability) {
+            serviceData.availability = {};
+          }
+          if (serviceData.service_image_url) serviceData.service_image_url = getFullUrl(serviceData.service_image_url);
+        }
+        return { ...cs.toJSON(), StoreService: serviceData };
+      });
+    }
 
     res.json({
       success: true,
-      data: { 
+      data: {
         services,
         pagination: {
           page: pageNum,
           limit: limitNum,
-          total_pages: Math.ceil(count / limitNum),
-          total_items: count
+          total_pages: Math.ceil(totalCount / limitNum),
+          total_items: totalCount
         }
       }
     });
@@ -1225,6 +1287,146 @@ async function getPublicCollectionServices(req, res) {
     res.status(500).json({
       success: false,
       message: 'Failed to get collection services',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
+/**
+ * Get all collections for an online store (public)
+ * GET /api/v1/public-store/collections
+ * GET /api/v1/public-store/:username/collections
+ * Optional query: type=product|service
+ */
+async function getPublicCollections(req, res) {
+  try {
+    const { username } = req.params;
+    const { tenant_id, type } = req.query;
+
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id query parameter is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined. Use the store\'s domain or use the path /public-store/:username with tenant_id in query.'
+      });
+    }
+
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(effectiveTenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Store not found' });
+    }
+
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
+    const models = initModels(sequelize);
+    const { Sequelize } = require('sequelize');
+    const isFreePlan = (tenant.subscription_plan || 'free') !== 'enterprise';
+
+    const onlineStore = await models.OnlineStore.findOne({
+      where: {
+        username: effectiveUsername,
+        is_published: true,
+        ...(isFreePlan ? { tenant_id: effectiveTenantId } : {})
+      },
+      attributes: ['id']
+    });
+
+    if (!onlineStore) {
+      return res.status(404).json({ success: false, message: 'Store not found or not published' });
+    }
+
+    function getFullUrl(relativePath) {
+      if (!relativePath) return null;
+      if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) return relativePath;
+      return `${req.protocol}://${req.get('host')}${relativePath}`;
+    }
+
+    let collections = [];
+
+    if (isFreePlan) {
+      const typeFilter = type ? 'AND sc.collection_type = :type' : '';
+      const replacements = { tenantId: effectiveTenantId, ...(type ? { type } : {}) };
+
+      const rows = await sequelize.query(`
+        SELECT sc.id, sc.name, sc.description, sc.image_url, sc.collection_type,
+               sc.sort_order, sc.is_pinned,
+               CASE
+                 WHEN sc.collection_type = 'product' THEN (
+                   SELECT COUNT(*) FROM store_collection_products scp
+                   INNER JOIN products p ON scp.product_id = p.id
+                   WHERE scp.collection_id = sc.id AND p.is_active = 1
+                 )
+                 WHEN sc.collection_type = 'service' THEN (
+                   SELECT COUNT(*) FROM store_collection_services scs
+                   INNER JOIN store_services ss ON scs.service_id = ss.id
+                   WHERE scs.collection_id = sc.id AND ss.is_active = 1
+                 )
+                 ELSE 0
+               END as item_count
+        FROM store_collections sc
+        WHERE sc.tenant_id = :tenantId
+          AND sc.is_visible = 1
+          ${typeFilter}
+        ORDER BY sc.is_pinned DESC, sc.sort_order ASC
+      `, { replacements, type: Sequelize.QueryTypes.SELECT });
+
+      collections = rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        image_url: row.image_url ? getFullUrl(row.image_url) : null,
+        collection_type: row.collection_type,
+        item_count: parseInt(row.item_count || 0),
+        sort_order: row.sort_order,
+        is_pinned: !!row.is_pinned
+      }));
+    } else {
+      const where = {
+        online_store_id: onlineStore.id,
+        is_visible: true,
+        ...(type ? { collection_type: type } : {})
+      };
+
+      const rows = await models.StoreCollection.findAll({
+        where,
+        order: [['is_pinned', 'DESC'], ['sort_order', 'ASC']]
+      });
+
+      collections = await Promise.all(rows.map(async col => {
+        const colData = col.toJSON();
+        let item_count = 0;
+        if (colData.collection_type === 'product') {
+          item_count = await models.StoreCollectionProduct.count({ where: { collection_id: col.id } });
+        } else if (colData.collection_type === 'service') {
+          item_count = await models.StoreCollectionService.count({ where: { collection_id: col.id } });
+        }
+        return {
+          id: colData.id,
+          name: colData.name,
+          description: colData.description,
+          image_url: colData.image_url ? getFullUrl(colData.image_url) : null,
+          collection_type: colData.collection_type,
+          item_count,
+          sort_order: colData.sort_order,
+          is_pinned: !!colData.is_pinned
+        };
+      }));
+    }
+
+    res.json({ success: true, data: { collections } });
+  } catch (error) {
+    console.error('Error getting public collections:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get collections',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -2219,6 +2421,7 @@ module.exports = {
   getPublicStore,
   getPublicProducts,
   getPublicProduct,
+  getPublicCollections,
   getPublicCollectionProducts,
   getPublicServices,
   getPublicService,

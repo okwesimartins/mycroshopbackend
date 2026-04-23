@@ -11,35 +11,22 @@ const publicStoreController = require('../controllers/publicStoreController');
 router.get('/',                                           publicStoreController.getPublicStore);
 router.get('/products',                                   publicStoreController.getPublicProducts);
 router.get('/products/:product_id',                       publicStoreController.getPublicProduct);
+router.get('/collections',                                publicStoreController.getPublicCollections);
 router.get('/collections/:collection_id/products',        publicStoreController.getPublicCollectionProducts);
+router.get('/collections/:collection_id/services',        publicStoreController.getPublicCollectionServices);
 router.get('/services',                                   publicStoreController.getPublicServices);
 router.get('/services/:service_id',                       publicStoreController.getPublicService);
-router.get('/collections/:collection_id/services',        publicStoreController.getPublicCollectionServices);
 
 // ── Explicit username routes (username in path) ───────────────────────────────
-// Used when calling from a non-store domain, e.g. /api/v1/public-store/stride
-// Get online store by username (public)
-router.get('/:username', publicStoreController.getPublicStore);
-
-// Get all products for an online store (public - ALL products with filters)
-// Filters: collection_id, search, category, store_id
-router.get('/:username/products', publicStoreController.getPublicProducts);
-
-// Get product by ID (public)
-router.get('/:username/products/:product_id', publicStoreController.getPublicProduct);
-
-// Get products in a specific collection (public)
-router.get('/:username/collections/:collection_id/products', publicStoreController.getPublicCollectionProducts);
-
-// Get all services for an online store (public - ALL services with filters)
-// Filters: collection_id, search
-router.get('/:username/services', publicStoreController.getPublicServices);
-
-// Get service by ID (public)
-router.get('/:username/services/:service_id', publicStoreController.getPublicService);
-
-// Get services in a specific collection (public)
-router.get('/:username/collections/:collection_id/services', publicStoreController.getPublicCollectionServices);
+// Dev/fallback: used when calling from a non-store domain with ?tenant_id=
+router.get('/:username',                                            publicStoreController.getPublicStore);
+router.get('/:username/products',                                   publicStoreController.getPublicProducts);
+router.get('/:username/products/:product_id',                       publicStoreController.getPublicProduct);
+router.get('/:username/collections',                                publicStoreController.getPublicCollections);
+router.get('/:username/collections/:collection_id/products',        publicStoreController.getPublicCollectionProducts);
+router.get('/:username/collections/:collection_id/services',        publicStoreController.getPublicCollectionServices);
+router.get('/:username/services',                                   publicStoreController.getPublicServices);
+router.get('/:username/services/:service_id',                       publicStoreController.getPublicService);
 
 module.exports = router;
 
