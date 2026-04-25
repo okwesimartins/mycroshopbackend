@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const onlineStoreController = require('../controllers/onlineStoreController');
+const onlineStoreShippingController = require('../controllers/onlineStoreShippingController');
 const { authenticate, authorize } = require('../middleware/auth');
 const { attachTenantDb } = require('../middleware/tenant');
 const { initializeTenantModels } = require('../middleware/models');
@@ -197,6 +198,12 @@ router.get('/:id/products', onlineStoreController.getOnlineStoreProducts);
 
 // Get detailed product information (includes variants, metrics, publish status)
 router.get('/:id/products/:product_id/details', onlineStoreController.getOnlineStoreProductDetails);
+
+// Shipping rates (optional delivery zones & prices)
+router.get('/:id/shipping-rates', onlineStoreShippingController.getShippingRates);
+router.post('/:id/shipping-rates', onlineStoreShippingController.createShippingRate);
+router.put('/:id/shipping-rates/:rate_id', onlineStoreShippingController.updateShippingRate);
+router.delete('/:id/shipping-rates/:rate_id', onlineStoreShippingController.deleteShippingRate);
 
 module.exports = router;
 

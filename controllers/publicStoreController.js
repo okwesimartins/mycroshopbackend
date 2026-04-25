@@ -2595,6 +2595,79 @@ async function getPublicProduct(req, res) {
   }
 }
 
+/**
+ * Get shipping rates for a store (public — no auth required)
+ * GET /api/v1/public-store/shipping-rates
+ * GET /api/v1/public-store/:username/shipping-rates?tenant_id=123
+ */
+async function getPublicShippingRates(req, res) {
+  try {
+    const { username } = req.params;
+    const { tenant_id } = req.query;
+
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined'
+      });
+    }
+
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(effectiveTenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Store not found' });
+    }
+
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
+    const isFreePlan = tenant.subscription_plan === 'free';
+
+    let rates;
+
+    if (isFreePlan) {
+      const tenantId = parseInt(effectiveTenantId, 10);
+      const [rows] = await sequelize.query(`
+        SELECT ssr.id, ssr.zone_name, ssr.description, ssr.price,
+               ssr.min_order_amount, ssr.estimated_days, ssr.sort_order
+        FROM store_shipping_rates ssr
+        INNER JOIN online_stores os ON ssr.online_store_id = os.id AND os.tenant_id = :tenantId
+        WHERE ssr.tenant_id = :tenantId
+          AND LOWER(os.username) = :username
+          AND ssr.is_active = TRUE
+        ORDER BY ssr.sort_order ASC, ssr.created_at ASC
+      `, { replacements: { tenantId, username: effectiveUsername } });
+      rates = rows;
+    } else {
+      const [rows] = await sequelize.query(`
+        SELECT ssr.id, ssr.zone_name, ssr.description, ssr.price,
+               ssr.min_order_amount, ssr.estimated_days, ssr.sort_order
+        FROM store_shipping_rates ssr
+        INNER JOIN online_stores os ON ssr.online_store_id = os.id
+        WHERE LOWER(os.username) = :username
+          AND ssr.is_active = TRUE
+        ORDER BY ssr.sort_order ASC, ssr.created_at ASC
+      `, { replacements: { username: effectiveUsername } });
+      rates = rows;
+    }
+
+    res.json({ success: true, data: rates });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get shipping rates',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
 module.exports = {
   getPublicStore,
   getPublicProducts,
@@ -2603,6 +2676,7 @@ module.exports = {
   getPublicCollectionProducts,
   getPublicServices,
   getPublicService,
-  getPublicCollectionServices
+  getPublicCollectionServices,
+  getPublicShippingRates
 };
 

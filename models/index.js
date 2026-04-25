@@ -2164,6 +2164,61 @@ function initializeModels(sequelize) {
   StoreService.hasMany(StoreCollectionService, { foreignKey: 'service_id', onDelete: 'CASCADE' });
   StoreCollectionService.belongsTo(StoreService, { foreignKey: 'service_id' });
 
+  // Store Shipping Rate Model
+  const StoreShippingRate = sequelize.define('StoreShippingRate', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true
+    },
+    online_store_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: 'online_stores', key: 'id' }
+    },
+    zone_name: {
+      type: DataTypes.STRING(255),
+      allowNull: false
+    },
+    description: {
+      type: DataTypes.STRING(500),
+      allowNull: true
+    },
+    price: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00
+    },
+    min_order_amount: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true
+    },
+    estimated_days: {
+      type: DataTypes.STRING(50),
+      allowNull: true
+    },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true
+    },
+    sort_order: {
+      type: DataTypes.INTEGER,
+      defaultValue: 1
+    }
+  }, {
+    tableName: 'store_shipping_rates',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+  });
+
+  OnlineStore.hasMany(StoreShippingRate, { foreignKey: 'online_store_id', onDelete: 'CASCADE' });
+  StoreShippingRate.belongsTo(OnlineStore, { foreignKey: 'online_store_id' });
+
   // Staff Model
   const Staff = sequelize.define('Staff', {
     id: {
@@ -3455,6 +3510,7 @@ function initializeModels(sequelize) {
     StoreCollectionProduct,
     StoreCollectionService,
     Domain,
+    StoreShippingRate,
     OnlineStoreOrder,
     OnlineStoreOrderItem,
     Staff,

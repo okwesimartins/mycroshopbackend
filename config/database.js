@@ -1580,6 +1580,31 @@ async function runTenantMigrations(connection, isSharedDb = false) {
     }
   }
 
+  // Store Shipping Rates table (optional delivery zones & prices set by the business owner)
+  const shippingRateTenantId = isSharedDb ? 'tenant_id INT NOT NULL,' : '';
+  const shippingRateTenantIndex = isSharedDb ? 'INDEX idx_tenant_id (tenant_id),' : '';
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS store_shipping_rates (
+      ${shippingRateTenantId}
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      online_store_id INT NOT NULL,
+      zone_name VARCHAR(255) NOT NULL,
+      description VARCHAR(500) NULL,
+      price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+      min_order_amount DECIMAL(10, 2) NULL,
+      estimated_days VARCHAR(50) NULL,
+      is_active BOOLEAN DEFAULT TRUE,
+      sort_order INT DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      ${shippingRateTenantIndex}
+      FOREIGN KEY (online_store_id) REFERENCES online_stores(id) ON DELETE CASCADE,
+      INDEX idx_online_store_id (online_store_id),
+      INDEX idx_is_active (is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
   // All online store tables are now complete!
   // Note: Additional enterprise-only tables (roles, suppliers, purchase_orders, pos_transactions, etc.)
   // are not included here as free users only need online store functionality
@@ -1642,7 +1667,8 @@ async function migrateFreeUserToEnterprise(tenantId) {
       'online_store_orders',
       'online_store_order_items',
       'ai_agent_configs',
-      'whatsapp_connections'
+      'whatsapp_connections',
+      'store_shipping_rates'
     ];
 
     // Migrate each table

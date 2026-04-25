@@ -16,6 +16,7 @@ router.get('/collections/:collection_id/products',        publicStoreController.
 router.get('/collections/:collection_id/services',        publicStoreController.getPublicCollectionServices);
 router.get('/services',                                   publicStoreController.getPublicServices);
 router.get('/services/:service_id',                       publicStoreController.getPublicService);
+router.get('/shipping-rates',                             publicStoreController.getPublicShippingRates);
 
 // ── Explicit username routes (username in path) ───────────────────────────────
 // Dev/fallback: used when calling from a non-store domain with ?tenant_id=
@@ -27,6 +28,7 @@ router.get('/:username/collections/:collection_id/products',        publicStoreC
 router.get('/:username/collections/:collection_id/services',        publicStoreController.getPublicCollectionServices);
 router.get('/:username/services',                                   publicStoreController.getPublicServices);
 router.get('/:username/services/:service_id',                       publicStoreController.getPublicService);
+router.get('/:username/shipping-rates',                             publicStoreController.getPublicShippingRates);
 
 module.exports = router;
 
