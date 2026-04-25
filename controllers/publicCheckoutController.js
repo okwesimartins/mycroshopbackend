@@ -109,12 +109,10 @@ async function initializeFlutterwavePayment(paymentData, secretKey, testMode) {
 async function createPublicOrder(req, res) {
   try {
     const {
-      tenant_id, // Required for BOTH free and enterprise users - to identify which tenant database to connect to
-      // NOTE: For enterprise users, tenant_id is NOT saved in the order record (NULL), but still needed to determine database
-      // NOTE: For free users, tenant_id IS saved in the order record (from online_store.tenant_id)
+      tenant_id,
       online_store_id,
-      store_id, // Physical store to fulfill order (optional)
-      idempotency_key, // Optional - Unique key to prevent duplicate orders
+      store_id,
+      idempotency_key,
       customer_name,
       customer_email,
       customer_phone,
@@ -124,7 +122,7 @@ async function createPublicOrder(req, res) {
       country,
       delivery_date,
       delivery_time,
-      items, // Array of { product_id, quantity, unit_price }
+      items,
       tax_rate = 0,
       shipping_amount = 0,
       discount_amount = 0,
@@ -132,14 +130,19 @@ async function createPublicOrder(req, res) {
       notes
     } = req.body;
 
-    if (!tenant_id) {
+    // Resolve store identity from subdomain/custom-domain middleware first,
+    // fall back to explicit body params (for dev/direct API calls)
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveOnlineStoreId = online_store_id || req.onlineStoreId;
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id is required'
+        message: 'tenant_id is required (or access via store subdomain)'
       });
     }
 
-    if (!online_store_id || !items || !Array.isArray(items) || items.length === 0) {
+    if (!effectiveOnlineStoreId || !items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'online_store_id and items are required'
@@ -147,7 +150,7 @@ async function createPublicOrder(req, res) {
     }
 
     // Get tenant database connection
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -155,15 +158,11 @@ async function createPublicOrder(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
-    // Get tenant_id for order queries (for free users)
     const isFreePlan = tenant.subscription_plan === 'free';
-    // For free users: always use tenant_id from request (they share database)
-    // For enterprise users: tenant_id is NULL (separate database)
-    // Ensure tenant_id is parsed as integer (in case it comes as string)
-    const parsedTenantId = parseInt(tenant_id, 10);
+    const parsedTenantId = parseInt(effectiveTenantId, 10);
     if (isNaN(parsedTenantId) || parsedTenantId <= 0) {
       return res.status(400).json({
         success: false,
@@ -191,8 +190,8 @@ async function createPublicOrder(req, res) {
               idempotency_key: trimmedIdempotencyKey // Must match unique constraint
             }
           : {
-              idempotency_key: trimmedIdempotencyKey, // Must match unique constraint
-              online_store_id: online_store_id // Additional safety filter for enterprise
+              idempotency_key: trimmedIdempotencyKey,
+              online_store_id: effectiveOnlineStoreId
             };
         
         console.log('[Duplicate Check] Where clause:', JSON.stringify(whereClause));
@@ -273,7 +272,7 @@ async function createPublicOrder(req, res) {
       // Verify online store exists and is published
       const onlineStore = await models.OnlineStore.findOne({
         where: {
-          id: online_store_id,
+          id: effectiveOnlineStoreId,
           is_published: true
         },
         attributes: ['id', 'tenant_id', 'username', 'store_name', 'is_published'] // Include tenant_id
@@ -336,7 +335,7 @@ async function createPublicOrder(req, res) {
       if (!isFreePlan && store_id) {
         // Enterprise users: verify store is linked to online store
         const storeLink = await models.OnlineStoreLocation.findOne({
-          where: { online_store_id, store_id }
+          where: { online_store_id: effectiveOnlineStoreId, store_id }
         });
         if (!storeLink) {
           await transaction.rollback();
@@ -347,9 +346,8 @@ async function createPublicOrder(req, res) {
         }
         finalStoreId = store_id;
       } else if (!isFreePlan && !store_id) {
-        // Enterprise users: get default store for online store if no store_id provided
         const defaultStore = await models.OnlineStoreLocation.findOne({
-          where: { online_store_id, is_default: true }
+          where: { online_store_id: effectiveOnlineStoreId, is_default: true }
         });
         if (defaultStore) {
           finalStoreId = defaultStore.store_id;
@@ -362,12 +360,12 @@ async function createPublicOrder(req, res) {
       const orderItems = [];
 
       for (const item of items) {
-        let { 
-          product_id, 
-          quantity, 
+        let {
+          product_id,
+          quantity,
           unit_price,
-          variation_id,        // Optional - variation ID (e.g., Color variation)
-          variation_option_id  // Optional - specific option ID (e.g., Red option)
+          variant_id,          // Multi-variation: specific SKU combination (preferred)
+          variation_option_id  // Single-variation: specific option ID
         } = item;
 
         if (!product_id || !quantity || !unit_price) {
@@ -378,17 +376,15 @@ async function createPublicOrder(req, res) {
           });
         }
 
+        const { Sequelize } = require('sequelize');
+
         // Verify product exists and is active
-        // For free users: exclude store_id and other enterprise-only columns
-        const productAttributes = isFreePlan 
+        const productAttributes = isFreePlan
           ? ['id', 'tenant_id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'low_stock_threshold', 'category', 'image_url', 'expiry_date', 'is_active', 'created_at', 'updated_at']
-          : undefined; // Enterprise users: select all columns
-        
+          : undefined;
+
         const product = await models.Product.findOne({
-          where: {
-            id: product_id,
-            is_active: true
-          },
+          where: { id: product_id, is_active: true },
           ...(productAttributes ? { attributes: productAttributes } : {})
         });
 
@@ -400,150 +396,177 @@ async function createPublicOrder(req, res) {
           });
         }
 
-        // Verify and get variation option if provided
-        let variationOption = null;
+        let finalUnitPrice;
         let variationName = null;
         let variationOptionValue = null;
-        
-        if (variation_option_id || variation_id) {
-          // If variation_option_id is provided, verify it exists and belongs to the product
-          if (variation_option_id) {
-            // For free users, we need to verify via the variation's product_id and tenant_id
-            const { Sequelize } = require('sequelize');
-            const variationOptionQuery = isFreePlan && orderTenantId
-              ? `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name, 
-                        pvo.price_adjustment, pv.variation_name, pv.product_id
-                 FROM product_variation_options pvo
-                 INNER JOIN product_variations pv ON pvo.variation_id = pv.id
-                 WHERE pvo.id = :optionId AND pv.product_id = :productId AND pvo.tenant_id = :tenantId`
-              : `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name, 
-                        pvo.price_adjustment, pv.variation_name, pv.product_id
-                 FROM product_variation_options pvo
-                 INNER JOIN product_variations pv ON pvo.variation_id = pv.id
-                 WHERE pvo.id = :optionId AND pv.product_id = :productId`;
-            
-            const variationOptionRows = await sequelize.query(variationOptionQuery, {
-              replacements: { 
-                optionId: variation_option_id,
-                productId: product_id,
-                ...(isFreePlan && orderTenantId ? { tenantId: orderTenantId } : {})
-              },
-              type: Sequelize.QueryTypes.SELECT,
-              transaction
-            });
+        let resolvedVariantId = null;
+        let resolvedVariationId = null;
+        let resolvedVariationOptionId = null;
 
-            if (!variationOptionRows || variationOptionRows.length === 0) {
-              await transaction.rollback();
-              return res.status(400).json({
-                success: false,
-                message: `Invalid variation option for product ${product.name}`
-              });
-            }
-
-            const variationOptionRow = variationOptionRows[0];
-            variationOption = {
-              id: variationOptionRow.id,
-              variation_id: variationOptionRow.variation_id,
-              option_value: variationOptionRow.option_value,
-              option_display_name: variationOptionRow.option_display_name,
-              price_adjustment: parseFloat(variationOptionRow.price_adjustment || 0)
-            };
-            variationName = variationOptionRow.variation_name;
-            variationOptionValue = variationOptionRow.option_display_name || variationOptionRow.option_value;
-            variation_id = variationOptionRow.variation_id; // Update variation_id from option
-          } else if (variation_id) {
-            // Only variation_id provided - verify it belongs to the product
-            const { Sequelize } = require('sequelize');
-            const variationQuery = isFreePlan && orderTenantId
-              ? `SELECT id, variation_name, product_id 
-                 FROM product_variations 
-                 WHERE id = :variationId AND product_id = :productId AND tenant_id = :tenantId`
-              : `SELECT id, variation_name, product_id 
-                 FROM product_variations 
-                 WHERE id = :variationId AND product_id = :productId`;
-            
-            const variationRows = await sequelize.query(variationQuery, {
-              replacements: { 
-                variationId: variation_id,
-                productId: product_id,
-                ...(isFreePlan && orderTenantId ? { tenantId: orderTenantId } : {})
-              },
-              type: Sequelize.QueryTypes.SELECT,
-              transaction
-            });
-
-            if (!variationRows || variationRows.length === 0) {
-              await transaction.rollback();
-              return res.status(400).json({
-                success: false,
-                message: `Invalid variation for product ${product.name}`
-              });
-            }
-
-            variationName = variationRows[0].variation_name;
-          }
-        }
-
-        // Calculate correct price: product base price + variation price adjustment (if applicable)
-        const productBasePrice = parseFloat(product.price || 0);
-        const variationPriceAdjustment = variationOption ? (variationOption.price_adjustment || 0) : 0;
-        const calculatedPrice = productBasePrice + variationPriceAdjustment;
-        const passedPrice = parseFloat(unit_price || 0);
-
-        // Validate that the passed price matches the calculated price (with small tolerance for floating point)
-        const priceTolerance = 0.01; // Allow 0.01 difference for floating point precision
-        if (Math.abs(passedPrice - calculatedPrice) > priceTolerance) {
-          await transaction.rollback();
-          return res.status(400).json({
-            success: false,
-            message: `Price mismatch for product ${product.name}${variationOptionValue ? ` (${variationOptionValue})` : ''}. Expected: ${calculatedPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
-          });
-        }
-
-        // Use calculated price for security (don't trust client-provided price)
-        const finalUnitPrice = calculatedPrice;
-
-        // Check stock - for variations, check stock on the variation option
-        // For free users: check stock directly from products table or variation options
-        // For enterprise users: check stock from product_stores table if store_id is provided, or variation options
-        if (variationOption) {
-          // Check stock on variation option
-          const { Sequelize } = require('sequelize');
-          const stockQuery = `SELECT stock FROM product_variation_options WHERE id = :optionId`;
-          const stockRows = await sequelize.query(stockQuery, {
-            replacements: { optionId: variation_option_id },
+        // ── PATH A: variant_id provided (multi-variation product) ─────────────
+        if (variant_id) {
+          const tenantFilter = isFreePlan && orderTenantId ? 'AND pv.tenant_id = :tenantId' : '';
+          const variantRows = await sequelize.query(`
+            SELECT pv.id, pv.sku, pv.price, pv.stock, pv.is_active
+            FROM product_variants pv
+            WHERE pv.id = :variantId
+              AND pv.product_id = :productId
+              AND pv.is_active = 1
+              ${tenantFilter}
+            LIMIT 1
+          `, {
+            replacements: {
+              variantId: variant_id,
+              productId: product_id,
+              ...(isFreePlan && orderTenantId ? { tenantId: orderTenantId } : {})
+            },
             type: Sequelize.QueryTypes.SELECT,
             transaction
           });
 
-          if (stockRows && stockRows.length > 0 && stockRows[0].stock !== null && stockRows[0].stock < quantity) {
+          if (!variantRows || variantRows.length === 0) {
             await transaction.rollback();
             return res.status(400).json({
               success: false,
-              message: `Insufficient stock for ${product.name} - ${variationOptionValue}. Available: ${stockRows[0].stock}, Requested: ${quantity}`
+              message: `Invalid or unavailable variant for product ${product.name}`
             });
           }
-        } else if (isFreePlan) {
-          // Free users: stock is on the products table directly
-          if (product.stock !== null && product.stock < quantity) {
+
+          const variant = variantRows[0];
+
+          // Stock check on the variant itself
+          if (variant.stock !== null && variant.stock < quantity) {
             await transaction.rollback();
             return res.status(400).json({
               success: false,
-              message: `Insufficient stock for product ${product.name}. Available: ${product.stock}, Requested: ${quantity}`
+              message: `Insufficient stock for ${product.name} (selected variant). Available: ${variant.stock}, Requested: ${quantity}`
             });
           }
-        } else if (finalStoreId) {
-          // Enterprise users: check stock from product_stores table
-          const productStore = await models.ProductStore.findOne({
-            where: { product_id, store_id: finalStoreId }
+
+          // Fetch all selected options for this variant to build a readable label
+          const optionRows = await sequelize.query(`
+            SELECT pvar.variation_name, pvo.option_display_name, pvo.option_value
+            FROM product_variant_options pvop
+            INNER JOIN product_variation_options pvo ON pvop.option_id = pvo.id
+            INNER JOIN product_variations pvar ON pvop.variation_id = pvar.id
+            WHERE pvop.variant_id = :variantId
+            ORDER BY pvar.sort_order ASC
+          `, {
+            replacements: { variantId: variant_id },
+            type: Sequelize.QueryTypes.SELECT,
+            transaction
           });
 
-          if (productStore && productStore.stock !== null && productStore.stock < quantity) {
+          // Build human-readable label: "Size: 40, Color: White"
+          if (optionRows.length > 0) {
+            variationName = optionRows.map(o => o.variation_name).join(' / ');
+            variationOptionValue = optionRows.map(o => o.option_display_name || o.option_value).join(' / ');
+          }
+
+          finalUnitPrice = parseFloat(variant.price || product.price || 0);
+          resolvedVariantId = variant_id;
+
+          // Price validation against variant price
+          const passedPrice = parseFloat(unit_price || 0);
+          if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
             await transaction.rollback();
             return res.status(400).json({
               success: false,
-              message: `Insufficient stock for product ${product.name}. Available: ${productStore.stock}, Requested: ${quantity}`
+              message: `Price mismatch for ${product.name} (${variationOptionValue || 'selected variant'}). Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
             });
+          }
+
+        // ── PATH B: variation_option_id provided (single-variation legacy) ────
+        } else if (variation_option_id) {
+          const variationOptionQuery = isFreePlan && orderTenantId
+            ? `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name,
+                      pvo.price_adjustment, pvo.stock, pv.variation_name
+               FROM product_variation_options pvo
+               INNER JOIN product_variations pv ON pvo.variation_id = pv.id
+               WHERE pvo.id = :optionId AND pv.product_id = :productId AND pvo.tenant_id = :tenantId`
+            : `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name,
+                      pvo.price_adjustment, pvo.stock, pv.variation_name
+               FROM product_variation_options pvo
+               INNER JOIN product_variations pv ON pvo.variation_id = pv.id
+               WHERE pvo.id = :optionId AND pv.product_id = :productId`;
+
+          const variationOptionRows = await sequelize.query(variationOptionQuery, {
+            replacements: {
+              optionId: variation_option_id,
+              productId: product_id,
+              ...(isFreePlan && orderTenantId ? { tenantId: orderTenantId } : {})
+            },
+            type: Sequelize.QueryTypes.SELECT,
+            transaction
+          });
+
+          if (!variationOptionRows || variationOptionRows.length === 0) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Invalid variation option for product ${product.name}`
+            });
+          }
+
+          const opt = variationOptionRows[0];
+
+          // Stock check on variation option
+          if (opt.stock !== null && opt.stock < quantity) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Insufficient stock for ${product.name} - ${opt.option_display_name || opt.option_value}. Available: ${opt.stock}, Requested: ${quantity}`
+            });
+          }
+
+          finalUnitPrice = parseFloat(product.price || 0) + parseFloat(opt.price_adjustment || 0);
+          variationName = opt.variation_name;
+          variationOptionValue = opt.option_display_name || opt.option_value;
+          resolvedVariationId = opt.variation_id;
+          resolvedVariationOptionId = variation_option_id;
+
+          const passedPrice = parseFloat(unit_price || 0);
+          if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Price mismatch for ${product.name} (${variationOptionValue}). Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
+            });
+          }
+
+        // ── PATH C: no variation — plain product ──────────────────────────────
+        } else {
+          finalUnitPrice = parseFloat(product.price || 0);
+
+          const passedPrice = parseFloat(unit_price || 0);
+          if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Price mismatch for product ${product.name}. Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
+            });
+          }
+
+          // Stock check: variation option stock → product stock → product_stores stock
+          if (isFreePlan) {
+            if (product.stock !== null && product.stock < quantity) {
+              await transaction.rollback();
+              return res.status(400).json({
+                success: false,
+                message: `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${quantity}`
+              });
+            }
+          } else if (finalStoreId) {
+            const productStore = await models.ProductStore.findOne({
+              where: { product_id, store_id: finalStoreId }
+            });
+            if (productStore && productStore.stock !== null && productStore.stock < quantity) {
+              await transaction.rollback();
+              return res.status(400).json({
+                success: false,
+                message: `Insufficient stock for ${product.name}. Available: ${productStore.stock}, Requested: ${quantity}`
+              });
+            }
           }
         }
 
@@ -555,10 +578,11 @@ async function createPublicOrder(req, res) {
           product_name: product.name,
           product_sku: product.sku || null,
           quantity,
-          unit_price: finalUnitPrice, // Use calculated price, not client-provided price
+          unit_price: finalUnitPrice,
           total: itemTotal,
-          variation_id: variation_id || null,
-          variation_option_id: variation_option_id || null,
+          variant_id: resolvedVariantId || null,
+          variation_id: resolvedVariationId || null,
+          variation_option_id: resolvedVariationOptionId || null,
           variation_name: variationName || null,
           variation_option_value: variationOptionValue || null
         });
@@ -624,7 +648,7 @@ async function createPublicOrder(req, res) {
       
       // Create order with explicit tenant_id handling
       const orderData = {
-        online_store_id,
+        online_store_id: effectiveOnlineStoreId,
         store_id: finalStoreId,
         order_number: orderNumber,
         idempotency_key: finalIdempotencyKey,
@@ -835,8 +859,8 @@ async function createPublicOrder(req, res) {
                 idempotency_key: trimmedIdempotencyKey // Match unique constraint
               }
             : {
-                idempotency_key: trimmedIdempotencyKey, // Match unique constraint
-                online_store_id: online_store_id // Additional safety filter
+                idempotency_key: trimmedIdempotencyKey,
+                online_store_id: effectiveOnlineStoreId
               };
           
           console.log('[Duplicate Error Handler] Where clause:', JSON.stringify(whereClause));
@@ -902,7 +926,7 @@ async function createPublicOrder(req, res) {
 async function initializePublicPayment(req, res) {
   try {
     const {
-      tenant_id, // Required - to identify which tenant
+      tenant_id,
       order_id,
       invoice_id,
       amount,
@@ -913,10 +937,12 @@ async function initializePublicPayment(req, res) {
       metadata
     } = req.body;
 
-    if (!tenant_id) {
+    const effectiveTenantId = tenant_id || req.tenantId;
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id is required'
+        message: 'tenant_id is required (or access via store subdomain)'
       });
     }
 
@@ -927,8 +953,7 @@ async function initializePublicPayment(req, res) {
       });
     }
 
-    // Get tenant database connection
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -936,14 +961,12 @@ async function initializePublicPayment(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
-    // Determine if this is a free plan user
     const isFreePlan = tenant.subscription_plan === 'free';
 
-    // Parse tenant_id as integer (JSON body may send it as string)
-    const parsedTenantId = parseInt(tenant_id, 10);
+    const parsedTenantId = parseInt(effectiveTenantId, 10);
     if (isNaN(parsedTenantId) || parsedTenantId <= 0) {
       return res.status(400).json({
         success: false,
@@ -1119,15 +1142,16 @@ async function getPublicOrderByNumber(req, res) {
     const { order_number } = req.params;
     const { tenant_id } = req.query;
 
-    if (!tenant_id) {
+    const effectiveTenantId = tenant_id || req.tenantId;
+
+    if (!effectiveTenantId) {
       return res.status(400).json({
         success: false,
-        message: 'tenant_id query parameter is required'
+        message: 'tenant_id query parameter is required (or access via store subdomain)'
       });
     }
 
-    // Get tenant database connection
-    const tenant = await getTenantById(tenant_id);
+    const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -1135,12 +1159,12 @@ async function getPublicOrderByNumber(req, res) {
       });
     }
 
-    const sequelize = await getTenantConnection(tenant_id, tenant.subscription_plan || 'enterprise');
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
     const models = initModels(sequelize);
 
-    // Get tenant_id for query (for free users)
     const isFreePlan = tenant.subscription_plan === 'free';
-    const orderTenantId = isFreePlan ? tenant_id : null;
+    const parsedTenantId = parseInt(effectiveTenantId, 10);
+    const orderTenantId = isFreePlan ? parsedTenantId : null;
 
     // Find order by order number
     const where = { order_number };
