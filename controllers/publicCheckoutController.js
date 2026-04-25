@@ -368,11 +368,11 @@ async function createPublicOrder(req, res) {
           variation_option_id  // Single-variation: specific option ID
         } = item;
 
-        if (!product_id || !quantity || !unit_price) {
+        if (!product_id || !quantity) {
           await transaction.rollback();
           return res.status(400).json({
             success: false,
-            message: 'Each item must have product_id, quantity, and unit_price'
+            message: 'Each item must have product_id and quantity'
           });
         }
 
@@ -466,14 +466,16 @@ async function createPublicOrder(req, res) {
           finalUnitPrice = parseFloat(variant.price || product.price || 0);
           resolvedVariantId = variant_id;
 
-          // Price validation against variant price
-          const passedPrice = parseFloat(unit_price || 0);
-          if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
-            await transaction.rollback();
-            return res.status(400).json({
-              success: false,
-              message: `Price mismatch for ${product.name} (${variationOptionValue || 'selected variant'}). Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
-            });
+          // Price confirmation: only validate if client explicitly passed unit_price
+          if (unit_price !== undefined && unit_price !== null) {
+            const passedPrice = parseFloat(unit_price);
+            if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
+              await transaction.rollback();
+              return res.status(400).json({
+                success: false,
+                message: `Price mismatch for ${product.name} (${variationOptionValue || 'selected variant'}). Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
+              });
+            }
           }
 
         // ── PATH B: variation_option_id provided (single-variation legacy) ────
@@ -525,26 +527,30 @@ async function createPublicOrder(req, res) {
           resolvedVariationId = opt.variation_id;
           resolvedVariationOptionId = variation_option_id;
 
-          const passedPrice = parseFloat(unit_price || 0);
-          if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
-            await transaction.rollback();
-            return res.status(400).json({
-              success: false,
-              message: `Price mismatch for ${product.name} (${variationOptionValue}). Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
-            });
+          if (unit_price !== undefined && unit_price !== null) {
+            const passedPrice = parseFloat(unit_price);
+            if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
+              await transaction.rollback();
+              return res.status(400).json({
+                success: false,
+                message: `Price mismatch for ${product.name} (${variationOptionValue}). Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
+              });
+            }
           }
 
         // ── PATH C: no variation — plain product ──────────────────────────────
         } else {
           finalUnitPrice = parseFloat(product.price || 0);
 
-          const passedPrice = parseFloat(unit_price || 0);
-          if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
-            await transaction.rollback();
-            return res.status(400).json({
-              success: false,
-              message: `Price mismatch for product ${product.name}. Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
-            });
+          if (unit_price !== undefined && unit_price !== null) {
+            const passedPrice = parseFloat(unit_price);
+            if (Math.abs(passedPrice - finalUnitPrice) > 0.01) {
+              await transaction.rollback();
+              return res.status(400).json({
+                success: false,
+                message: `Price mismatch for product ${product.name}. Expected: ${finalUnitPrice.toFixed(2)}, Provided: ${passedPrice.toFixed(2)}`
+              });
+            }
           }
 
           // Stock check: variation option stock → product stock → product_stores stock
@@ -588,9 +594,44 @@ async function createPublicOrder(req, res) {
         });
       }
 
+      // Validate shipping_amount against store's configured rates (if any)
+      const requestedShipping = shipping_amount !== undefined && shipping_amount !== null ? parseFloat(shipping_amount) : 0;
+      {
+        const tenantFilter = isFreePlan ? 'AND ssr.tenant_id = :tenantId' : '';
+        const [activeRates] = await sequelize.query(`
+          SELECT id, zone_name, price
+          FROM store_shipping_rates ssr
+          WHERE ssr.online_store_id = :onlineStoreId
+            AND ssr.is_active = TRUE
+            ${tenantFilter}
+          ORDER BY ssr.sort_order ASC
+        `, {
+          replacements: {
+            onlineStoreId: effectiveOnlineStoreId,
+            ...(isFreePlan ? { tenantId: orderTenantId } : {})
+          }
+        });
+
+        if (activeRates && activeRates.length > 0) {
+          const validPrices = activeRates.map(r => parseFloat(r.price));
+          const isValid = validPrices.some(p => Math.abs(p - requestedShipping) < 0.01);
+          if (!isValid) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: 'Invalid shipping_amount. Choose one of the store\'s delivery options.',
+              valid_rates: activeRates.map(r => ({
+                zone_name: r.zone_name,
+                price: parseFloat(r.price)
+              }))
+            });
+          }
+        }
+      }
+
       // Handle optional tax_rate, shipping_amount, discount_amount (default to 0 if not provided)
       const finalTaxRate = tax_rate !== undefined && tax_rate !== null ? parseFloat(tax_rate) : 0;
-      const finalShippingAmount = shipping_amount !== undefined && shipping_amount !== null ? parseFloat(shipping_amount) : 0;
+      const finalShippingAmount = requestedShipping;
       const finalDiscountAmount = discount_amount !== undefined && discount_amount !== null ? parseFloat(discount_amount) : 0;
       
       const taxAmount = subtotal * (finalTaxRate / 100);
