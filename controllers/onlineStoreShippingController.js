@@ -1,16 +1,26 @@
 const initModels = require('../models');
 
+function getTenantContext(req) {
+  const isFreePlan = req.tenant?.subscription_plan === 'free';
+  const tenantId = isFreePlan ? (req.user?.tenantId || null) : null;
+  return { isFreePlan, tenantId };
+}
+
 /**
  * List all shipping rates for an online store
- * GET /api/v1/online-stores/:id/shipping-rates
+ * GET /api/v1/stores/online/:id/shipping-rates
  */
 async function getShippingRates(req, res) {
   try {
     const { id: online_store_id } = req.params;
+    const { isFreePlan, tenantId } = getTenantContext(req);
     const models = initModels(req.db);
 
+    const where = { online_store_id };
+    if (isFreePlan && tenantId) where.tenant_id = tenantId;
+
     const rates = await models.StoreShippingRate.findAll({
-      where: { online_store_id },
+      where,
       order: [['sort_order', 'ASC'], ['created_at', 'ASC']]
     });
 
@@ -26,20 +36,33 @@ async function getShippingRates(req, res) {
 
 /**
  * Create a shipping rate
- * POST /api/v1/online-stores/:id/shipping-rates
+ * POST /api/v1/stores/online/:id/shipping-rates
  * Body: { zone_name, description, price, min_order_amount, estimated_days, is_active, sort_order }
  */
 async function createShippingRate(req, res) {
   try {
     const { id: online_store_id } = req.params;
     const { zone_name, description, price, min_order_amount, estimated_days, is_active, sort_order } = req.body;
+    const { isFreePlan, tenantId } = getTenantContext(req);
     const models = initModels(req.db);
 
     if (!zone_name || price === undefined || price === null || price === '') {
       return res.status(400).json({ success: false, message: 'zone_name and price are required' });
     }
 
-    const rate = await models.StoreShippingRate.create({
+    // Duplicate zone_name check for this store
+    const duplicateWhere = { online_store_id, zone_name: zone_name.trim() };
+    if (isFreePlan && tenantId) duplicateWhere.tenant_id = tenantId;
+
+    const existing = await models.StoreShippingRate.findOne({ where: duplicateWhere });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: `A shipping rate with zone name "${zone_name.trim()}" already exists for this store`
+      });
+    }
+
+    const createData = {
       online_store_id,
       zone_name: zone_name.trim(),
       description: description || null,
@@ -48,7 +71,10 @@ async function createShippingRate(req, res) {
       estimated_days: estimated_days || null,
       is_active: is_active !== undefined ? Boolean(is_active) : true,
       sort_order: sort_order !== undefined ? parseInt(sort_order) : 1
-    });
+    };
+    if (isFreePlan && tenantId) createData.tenant_id = tenantId;
+
+    const rate = await models.StoreShippingRate.create(createData);
 
     res.status(201).json({ success: true, data: rate });
   } catch (error) {
@@ -62,17 +88,35 @@ async function createShippingRate(req, res) {
 
 /**
  * Update a shipping rate
- * PUT /api/v1/online-stores/:id/shipping-rates/:rate_id
+ * PUT /api/v1/stores/online/:id/shipping-rates/:rate_id
  */
 async function updateShippingRate(req, res) {
   try {
     const { id: online_store_id, rate_id } = req.params;
     const { zone_name, description, price, min_order_amount, estimated_days, is_active, sort_order } = req.body;
+    const { isFreePlan, tenantId } = getTenantContext(req);
     const models = initModels(req.db);
 
-    const rate = await models.StoreShippingRate.findOne({ where: { id: rate_id, online_store_id } });
+    const findWhere = { id: rate_id, online_store_id };
+    if (isFreePlan && tenantId) findWhere.tenant_id = tenantId;
+
+    const rate = await models.StoreShippingRate.findOne({ where: findWhere });
     if (!rate) {
       return res.status(404).json({ success: false, message: 'Shipping rate not found' });
+    }
+
+    // Duplicate zone_name check (exclude current record)
+    if (zone_name !== undefined) {
+      const { Op } = require('sequelize');
+      const dupWhere = { online_store_id, zone_name: zone_name.trim(), id: { [Op.ne]: rate_id } };
+      if (isFreePlan && tenantId) dupWhere.tenant_id = tenantId;
+      const dup = await models.StoreShippingRate.findOne({ where: dupWhere });
+      if (dup) {
+        return res.status(409).json({
+          success: false,
+          message: `A shipping rate with zone name "${zone_name.trim()}" already exists for this store`
+        });
+      }
     }
 
     const updates = {};
@@ -98,14 +142,18 @@ async function updateShippingRate(req, res) {
 
 /**
  * Delete a shipping rate
- * DELETE /api/v1/online-stores/:id/shipping-rates/:rate_id
+ * DELETE /api/v1/stores/online/:id/shipping-rates/:rate_id
  */
 async function deleteShippingRate(req, res) {
   try {
     const { id: online_store_id, rate_id } = req.params;
+    const { isFreePlan, tenantId } = getTenantContext(req);
     const models = initModels(req.db);
 
-    const rate = await models.StoreShippingRate.findOne({ where: { id: rate_id, online_store_id } });
+    const findWhere = { id: rate_id, online_store_id };
+    if (isFreePlan && tenantId) findWhere.tenant_id = tenantId;
+
+    const rate = await models.StoreShippingRate.findOne({ where: findWhere });
     if (!rate) {
       return res.status(404).json({ success: false, message: 'Shipping rate not found' });
     }

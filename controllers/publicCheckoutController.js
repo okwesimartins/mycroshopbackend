@@ -547,6 +547,24 @@ async function createPublicOrder(req, res) {
 
         // ── PATH C: no variation — plain product ──────────────────────────────
         } else {
+          // Reject if product has variation groups — client must specify variant_id or variation_option_id
+          const vcQuery = isFreePlan && orderTenantId
+            ? `SELECT COUNT(*) AS cnt FROM product_variations WHERE product_id = :productId AND tenant_id = :tenantId`
+            : `SELECT COUNT(*) AS cnt FROM product_variations WHERE product_id = :productId`;
+
+          const [vcRows] = await sequelize.query(vcQuery, {
+            replacements: { productId: product_id, ...(isFreePlan && orderTenantId ? { tenantId: orderTenantId } : {}) },
+            transaction
+          });
+
+          if (vcRows[0].cnt > 0) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `"${product.name}" has variations. Specify variant_id (multi-variation) or variation_option_id (single-variation).`
+            });
+          }
+
           finalUnitPrice = parseFloat(product.price || 0);
 
           if (unit_price !== undefined && unit_price !== null) {
