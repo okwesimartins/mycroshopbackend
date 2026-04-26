@@ -2,13 +2,91 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const axios = require('axios');
 
-// Sharp is optional - only used for image format conversion
-// If not available, we'll skip conversion (Gemini can handle most formats)
+// Sharp is optional — used for pixel-level color extraction (most reliable method)
 let sharp = null;
 try {
   sharp = require('sharp');
 } catch (error) {
-  console.warn('Sharp not available - image format conversion will be skipped. Install with: npm install sharp');
+  console.warn('Sharp not available — pixel color extraction disabled. Install with: npm install sharp');
+}
+
+/**
+ * Convert RGB to HSL
+ */
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      default: h = ((r - g) / d + 4) / 6;
+    }
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Extract dominant brand colors directly from logo pixels using sharp.
+ * This is deterministic and accurate — no AI involved.
+ * Strategy:
+ *   1. Resize to 80×80 thumbnail (speed)
+ *   2. Sample every pixel
+ *   3. Discard near-black, near-white, near-gray (backgrounds/shadows)
+ *   4. Bucket remaining colored pixels into 12 hue segments
+ *   5. Return the two most populated saturated colors
+ */
+async function extractColorsFromLogoPixels(imageBuffer) {
+  if (!sharp) throw new Error('sharp not available');
+
+  const { data } = await sharp(imageBuffer)
+    .resize(80, 80, { fit: 'inside' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const buckets = {}; // hue segment → { count, rSum, gSum, bSum }
+
+  for (let i = 0; i < data.length; i += 3) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const { h, s, l } = rgbToHsl(r, g, b);
+
+    // Skip near-white (l > 90%), near-black (l < 8%), near-gray (s < 18%)
+    if (l > 90 || l < 8 || s < 18) continue;
+
+    const bucket = Math.floor(h / 30); // 12 buckets of 30° each
+    if (!buckets[bucket]) buckets[bucket] = { count: 0, rSum: 0, gSum: 0, bSum: 0 };
+    buckets[bucket].count++;
+    buckets[bucket].rSum += r;
+    buckets[bucket].gSum += g;
+    buckets[bucket].bSum += b;
+  }
+
+  const sorted = Object.values(buckets)
+    .filter(b => b.count > 5)
+    .sort((a, b) => b.count - a.count);
+
+  if (sorted.length === 0) throw new Error('No saturated colors found in logo');
+
+  const toColor = (b) => rgbToHex(
+    Math.round(b.rSum / b.count),
+    Math.round(b.gSum / b.count),
+    Math.round(b.bSum / b.count)
+  );
+
+  return {
+    primary:   toColor(sorted[0]),
+    secondary: sorted[1] ? toColor(sorted[1]) : null,
+    source:    'pixel_extraction'
+  };
 }
 
 // Initialize Gemini AI
@@ -71,23 +149,39 @@ async function extractColorsFromLogo(logoImage) {
     } else {
       // Assume it's a Buffer
       imageBuffer = logoImage;
-      mimeType = 'image/png'; // Default for buffer
+      mimeType = 'image/png';
     }
 
-    // Convert to PNG if needed (Gemini works best with PNG/JPEG)
-    // Only convert if sharp is available, otherwise use original format
+    // ── Priority 1: pixel-level extraction with sharp (deterministic, always accurate) ──
+    if (sharp) {
+      try {
+        const pixelColors = await extractColorsFromLogoPixels(imageBuffer);
+        console.log('✅ Pixel color extraction succeeded:', pixelColors);
+        return {
+          primary:               pixelColors.primary,
+          secondary:             pixelColors.secondary || null,
+          accent:                pixelColors.secondary || null,
+          background_preference: 'light',
+          style:                 'modern',
+          confidence:            1.0,
+          source:                'pixel_extraction',
+          extracted_at:          new Date().toISOString()
+        };
+      } catch (pixelErr) {
+        console.warn('Pixel extraction failed, falling back to Gemini:', pixelErr.message);
+      }
+    }
+
+    // ── Priority 2: Gemini Vision (fallback when sharp unavailable or pixel extraction fails) ──
+    // Convert to PNG/JPEG for Gemini if needed
     if (mimeType !== 'image/png' && mimeType !== 'image/jpeg') {
-      if (sharp) {
-        try {
+      try {
+        if (sharp) {
           imageBuffer = await sharp(imageBuffer).png().toBuffer();
           mimeType = 'image/png';
-        } catch (error) {
-          console.warn('Failed to convert image format with sharp, using original format:', error.message);
-          // Continue with original format - Gemini can often handle it
         }
-      } else {
-        console.warn('Sharp not available - using original image format. Gemini may still process it.');
-        // Continue with original format - Gemini can handle many formats
+      } catch (e) {
+        console.warn('Image format conversion failed:', e.message);
       }
     }
 
@@ -282,6 +376,7 @@ Important:
 
 module.exports = {
   extractColorsFromLogo,
+  extractColorsFromLogoPixels,
   generateColorPalette
 };
 

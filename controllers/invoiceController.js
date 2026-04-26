@@ -422,8 +422,9 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
     // Try to extract colors from logo
     let brandColors = defaultBrandColors;
     let logoUrl = null;
+    let storeSelectedTheme = null;
 
-    // Logo must come from online_stores.profile_logo_url — no fallback
+    // Fetch logo URL and selected_theme together
     try {
       const OnlineStore = req.db.models.OnlineStore;
       if (OnlineStore) {
@@ -431,83 +432,87 @@ async function generateTemplatesForInvoice(invoice, tenantId, req) {
         const onlineStoreWhere = isFreePlanForLogo ? { tenant_id: tenantId } : {};
         const onlineStore = await OnlineStore.findOne({
           where: onlineStoreWhere,
-          attributes: ['profile_logo_url'],
+          attributes: ['profile_logo_url', 'selected_theme'],
           order: [['id', 'ASC']]
         });
-        if (onlineStore && onlineStore.profile_logo_url) {
-          logoUrl = onlineStore.profile_logo_url;
+        if (onlineStore) {
+          if (onlineStore.profile_logo_url) logoUrl = onlineStore.profile_logo_url;
+          if (onlineStore.selected_theme) storeSelectedTheme = onlineStore.selected_theme;
         }
       }
     } catch (error) {
-      console.warn('Could not fetch OnlineStore profile_logo_url:', error.message);
+      console.warn('Could not fetch OnlineStore profile_logo_url/selected_theme:', error.message);
     }
 
     if (!logoUrl) {
       throw Object.assign(new Error('Please upload your store logo before generating an invoice. Go to your Online Store settings and upload a logo.'), { statusCode: 400 });
     }
 
-    // Extract colors from logo if available (with timeout to prevent blocking)
-    // Logo URL might be relative (/uploads/logos/...) so we need to convert it to absolute URL or read the file
-    if (logoUrl && process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== '') {
+    // Priority 1: use the store's selected_theme colors (owner explicitly chose these)
+    if (storeSelectedTheme && storeSelectedTheme.primary) {
+      const theme = storeSelectedTheme;
+      brandColors = {
+        primary:       theme.primary,
+        secondary:     theme.primary_light  || defaultBrandColors.secondary,
+        accent:        theme.button_color   || theme.primary,
+        text:          '#111827',            // always dark text on white invoice background
+        background:    '#FFFFFF',
+        border:        theme.border_default || '#E5E7EB',
+        table_header:  theme.primary,
+        table_row_alt: '#F9FAFB'
+      };
+      console.log('✅ Using store selected_theme colors for invoice:', brandColors.primary);
+
+    // Priority 2: extract from logo via Gemini (only when no theme is set)
+    } else if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== '') {
       try {
-        console.log(`Extracting brand colors from logo: ${logoUrl} (with 10s timeout)`);
-        
-        // Convert relative URL to absolute URL or read file as buffer for color extraction
+        console.log(`Extracting brand colors from logo: ${logoUrl} (with 15s timeout)`);
+
         let logoForColorExtraction = logoUrl;
         const fs = require('fs');
         const path = require('path');
-        
-        // If logoUrl is relative, resolve the full local path using the URL's own subdirectory
+
         if (logoUrl.startsWith('/uploads/') || logoUrl.startsWith('uploads/')) {
           const relativePath = logoUrl.startsWith('/') ? logoUrl.slice(1) : logoUrl;
           const logoFilePath = path.join(__dirname, '..', relativePath);
-
           if (fs.existsSync(logoFilePath)) {
             logoForColorExtraction = fs.readFileSync(logoFilePath);
-            console.log(`✅ Read logo file for color extraction: ${logoFilePath} (${fs.statSync(logoFilePath).size} bytes)`);
+            console.log(`✅ Read logo file for color extraction: ${logoFilePath}`);
           } else {
             const baseUrl = (process.env.BASE_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
             logoForColorExtraction = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}/${relativePath}`;
-            console.log(`⚠️ Logo file not found locally, using absolute URL: ${logoForColorExtraction}`);
           }
         }
-        
-        // Wrap color extraction in a timeout (10 seconds max - non-blocking)
+
         const colorExtractionPromise = (async () => {
           const extractedColors = await extractColorsFromLogo(logoForColorExtraction);
           const fullPalette = await generateColorPalette(extractedColors);
           return fullPalette;
         })();
-        
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Color extraction timeout after 10 seconds')), 10000)
+
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Color extraction timeout after 15 seconds')), 15000)
         );
-        
+
         const fullPalette = await Promise.race([colorExtractionPromise, timeoutPromise]);
-        
+
         const extractedPrimary = fullPalette.primary || defaultBrandColors.primary;
         brandColors = {
-          primary: extractedPrimary,
-          secondary: fullPalette.secondary || defaultBrandColors.secondary,
-          accent: fullPalette.accent || defaultBrandColors.accent,
-          text: fullPalette.text || defaultBrandColors.text,
-          background: '#FFFFFF', // always white for invoices
-          border: fullPalette.border || defaultBrandColors.border,
-          table_header: fullPalette.table_header || extractedPrimary, // use logo primary color
+          primary:       extractedPrimary,
+          secondary:     fullPalette.secondary    || defaultBrandColors.secondary,
+          accent:        fullPalette.accent        || defaultBrandColors.accent,
+          text:          fullPalette.text          || defaultBrandColors.text,
+          background:    '#FFFFFF',
+          border:        fullPalette.border        || defaultBrandColors.border,
+          table_header:  fullPalette.table_header  || extractedPrimary,
           table_row_alt: fullPalette.table_row_alt || defaultBrandColors.table_row_alt
         };
-        
         console.log('✅ Successfully extracted brand colors from logo:', brandColors);
       } catch (error) {
-        console.warn('⚠️ Failed to extract colors from logo (timeout or error), using defaults:', error.message);
-        // Continue with default colors - don't block invoice creation
+        console.warn('⚠️ Color extraction failed, using defaults:', error.message);
       }
     } else {
-      if (!logoUrl) {
-        console.log('ℹ️ No logo found, using default brand colors');
-      } else {
-        console.log('ℹ️ GEMINI_API_KEY not configured, skipping color extraction, using default brand colors');
-      }
+      console.log('ℹ️ No theme and no GEMINI_API_KEY — using default brand colors');
     }
 
     // Generate default template (single template, no AI)
