@@ -104,6 +104,33 @@ async function getSharedFreeDatabase() {
       }
     }
 
+    // One-time table migrations: create tables that were added after initial DB setup
+    try {
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS store_shipping_rates (
+          tenant_id INT NOT NULL,
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          online_store_id INT NOT NULL,
+          zone_name VARCHAR(255) NOT NULL,
+          description VARCHAR(500) NULL,
+          price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          min_order_amount DECIMAL(10, 2) NULL,
+          estimated_days VARCHAR(50) NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          sort_order INT DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_tenant_id (tenant_id),
+          FOREIGN KEY (online_store_id) REFERENCES online_stores(id) ON DELETE CASCADE,
+          INDEX idx_online_store_id (online_store_id),
+          INDEX idx_is_active (is_active)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      console.log('✅ Shared free DB: store_shipping_rates table created/verified');
+    } catch (err) {
+      console.warn('store_shipping_rates table migration (non-fatal):', err.message);
+    }
+
     // Ensure modelManager.models is initialized (should be done by Sequelize, but double-check)
     if (!sequelize.modelManager || sequelize.modelManager.models === null || sequelize.modelManager.models === undefined) {
       console.warn('WARNING: New Sequelize instance has null modelManager.models. Initializing...');

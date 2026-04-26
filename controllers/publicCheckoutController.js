@@ -149,6 +149,13 @@ async function createPublicOrder(req, res) {
       });
     }
 
+    if (!idempotency_key || idempotency_key.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'idempotency_key is required to prevent duplicate orders'
+      });
+    }
+
     // Get tenant database connection
     const tenant = await getTenantById(effectiveTenantId);
     if (!tenant) {

@@ -1,4 +1,4 @@
-const { Op } = require('sequelize');
+const initModels = require('../models');
 
 /**
  * List all shipping rates for an online store
@@ -7,7 +7,7 @@ const { Op } = require('sequelize');
 async function getShippingRates(req, res) {
   try {
     const { id: online_store_id } = req.params;
-    const { models } = req;
+    const models = initModels(req.db);
 
     const rates = await models.StoreShippingRate.findAll({
       where: { online_store_id },
@@ -33,7 +33,7 @@ async function createShippingRate(req, res) {
   try {
     const { id: online_store_id } = req.params;
     const { zone_name, description, price, min_order_amount, estimated_days, is_active, sort_order } = req.body;
-    const { models } = req;
+    const models = initModels(req.db);
 
     if (!zone_name || price === undefined || price === null || price === '') {
       return res.status(400).json({ success: false, message: 'zone_name and price are required' });
@@ -68,7 +68,7 @@ async function updateShippingRate(req, res) {
   try {
     const { id: online_store_id, rate_id } = req.params;
     const { zone_name, description, price, min_order_amount, estimated_days, is_active, sort_order } = req.body;
-    const { models } = req;
+    const models = initModels(req.db);
 
     const rate = await models.StoreShippingRate.findOne({ where: { id: rate_id, online_store_id } });
     if (!rate) {
@@ -103,7 +103,7 @@ async function updateShippingRate(req, res) {
 async function deleteShippingRate(req, res) {
   try {
     const { id: online_store_id, rate_id } = req.params;
-    const { models } = req;
+    const models = initModels(req.db);
 
     const rate = await models.StoreShippingRate.findOne({ where: { id: rate_id, online_store_id } });
     if (!rate) {
