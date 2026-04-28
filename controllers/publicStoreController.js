@@ -2712,30 +2712,25 @@ async function getPublicCategories(req, res) {
       [rows] = await sequelize.query(`
         SELECT DISTINCT p.category
         FROM products p
-        INNER JOIN store_products sp ON sp.product_id = p.id
-        INNER JOIN online_stores os  ON sp.online_store_id = os.id AND os.tenant_id = :tenantId
-        WHERE p.tenant_id   = :tenantId
-          AND sp.tenant_id  = :tenantId
-          AND LOWER(os.username) = :username
+        INNER JOIN store_products sp ON sp.product_id = p.id AND sp.tenant_id = :tenantId
+        WHERE p.tenant_id = :tenantId
           AND sp.is_published = TRUE
           AND p.is_active = TRUE
           AND p.category IS NOT NULL
           AND p.category <> ''
         ORDER BY p.category ASC
-      `, { replacements: { tenantId, username: effectiveUsername } });
+      `, { replacements: { tenantId } });
     } else {
       [rows] = await sequelize.query(`
         SELECT DISTINCT p.category
         FROM products p
         INNER JOIN store_products sp ON sp.product_id = p.id
-        INNER JOIN online_stores os  ON sp.online_store_id = os.id
-        WHERE LOWER(os.username) = :username
-          AND sp.is_published = TRUE
+        WHERE sp.is_published = TRUE
           AND p.is_active = TRUE
           AND p.category IS NOT NULL
           AND p.category <> ''
         ORDER BY p.category ASC
-      `, { replacements: { username: effectiveUsername } });
+      `, { replacements: {} });
     }
 
     const categories = rows.map(r => r.category);
