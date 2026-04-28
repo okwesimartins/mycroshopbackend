@@ -2668,6 +2668,87 @@ async function getPublicShippingRates(req, res) {
   }
 }
 
+/**
+ * Get distinct product categories for a store (public — no auth required)
+ * GET /api/v1/public-store/categories
+ * GET /api/v1/public-store/:username/categories?tenant_id=123
+ *
+ * Returns only categories that have at least one published, active product.
+ */
+async function getPublicCategories(req, res) {
+  try {
+    const { username } = req.params;
+    const { tenant_id } = req.query;
+
+    const effectiveTenantId = tenant_id || req.tenantId;
+    const effectiveUsername = (username || req.onlineStoreUsername || '').toLowerCase();
+
+    if (!effectiveTenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'tenant_id is required when not accessed via store domain'
+      });
+    }
+    if (!effectiveUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'Store could not be determined'
+      });
+    }
+
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(effectiveTenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Store not found' });
+    }
+
+    const sequelize = await getTenantConnection(effectiveTenantId, tenant.subscription_plan || 'enterprise');
+    const isFreePlan = tenant.subscription_plan === 'free';
+
+    let rows;
+
+    if (isFreePlan) {
+      const tenantId = parseInt(effectiveTenantId, 10);
+      [rows] = await sequelize.query(`
+        SELECT DISTINCT p.category
+        FROM products p
+        INNER JOIN store_products sp ON sp.product_id = p.id
+        INNER JOIN online_stores os  ON sp.online_store_id = os.id AND os.tenant_id = :tenantId
+        WHERE p.tenant_id   = :tenantId
+          AND sp.tenant_id  = :tenantId
+          AND LOWER(os.username) = :username
+          AND sp.is_published = TRUE
+          AND p.is_active = TRUE
+          AND p.category IS NOT NULL
+          AND p.category <> ''
+        ORDER BY p.category ASC
+      `, { replacements: { tenantId, username: effectiveUsername } });
+    } else {
+      [rows] = await sequelize.query(`
+        SELECT DISTINCT p.category
+        FROM products p
+        INNER JOIN store_products sp ON sp.product_id = p.id
+        INNER JOIN online_stores os  ON sp.online_store_id = os.id
+        WHERE LOWER(os.username) = :username
+          AND sp.is_published = TRUE
+          AND p.is_active = TRUE
+          AND p.category IS NOT NULL
+          AND p.category <> ''
+        ORDER BY p.category ASC
+      `, { replacements: { username: effectiveUsername } });
+    }
+
+    const categories = rows.map(r => r.category);
+    res.json({ success: true, data: categories });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get categories',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
 module.exports = {
   getPublicStore,
   getPublicProducts,
@@ -2677,6 +2758,7 @@ module.exports = {
   getPublicServices,
   getPublicService,
   getPublicCollectionServices,
-  getPublicShippingRates
+  getPublicShippingRates,
+  getPublicCategories
 };
 
