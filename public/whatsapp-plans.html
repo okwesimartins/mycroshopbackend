@@ -12,16 +12,15 @@
       --wa-dark:       #128C7E;
       --wa-darker:     #075E54;
       --wa-light:      #DCF8C6;
-      --accent:        #25D366;
       --text-primary:  #111827;
       --text-secondary:#6B7280;
       --text-muted:    #9CA3AF;
       --bg-page:       #F0F2F5;
       --bg-card:       #FFFFFF;
       --border:        #E5E7EB;
-      --shadow-sm:     0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+      --shadow-sm:     0 1px 3px rgba(0,0,0,.08);
       --shadow-md:     0 4px 16px rgba(0,0,0,.10);
-      --shadow-lg:     0 12px 40px rgba(37,211,102,.18);
+      --shadow-pop:    0 12px 40px rgba(37,211,102,.20);
       --radius:        16px;
       --radius-sm:     10px;
     }
@@ -33,10 +32,10 @@
       min-height: 100vh;
     }
 
-    /* ── Header ────────────────────────────────────────────── */
+    /* ── Header ─────────────────────────────────────────────── */
     .header {
-      background: linear-gradient(135deg, var(--wa-darker) 0%, var(--wa-dark) 60%, #1DBE5A 100%);
-      padding: 48px 24px 80px;
+      background: linear-gradient(135deg, var(--wa-darker) 0%, var(--wa-dark) 55%, #1fbe5a 100%);
+      padding: 56px 24px 88px;
       text-align: center;
       position: relative;
       overflow: hidden;
@@ -45,910 +44,772 @@
       content: '';
       position: absolute;
       inset: 0;
-      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      background-image: radial-gradient(circle at 20% 80%, rgba(255,255,255,.06) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(255,255,255,.06) 0%, transparent 50%);
     }
     .header-inner { position: relative; z-index: 1; }
-    .header-badge {
+
+    .wa-badge {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 7px;
       background: rgba(255,255,255,.15);
-      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,.25);
       color: #fff;
       font-size: 12px;
-      font-weight: 600;
-      letter-spacing: .6px;
+      font-weight: 700;
+      letter-spacing: .7px;
       text-transform: uppercase;
-      padding: 6px 14px;
+      padding: 7px 16px;
       border-radius: 20px;
-      border: 1px solid rgba(255,255,255,.2);
-      margin-bottom: 20px;
+      margin-bottom: 24px;
     }
-    .header-badge svg { width: 14px; height: 14px; }
+    .wa-badge svg { width: 15px; height: 15px; flex-shrink: 0; }
+
     .header h1 {
-      font-size: clamp(26px, 5vw, 42px);
-      font-weight: 800;
+      font-size: clamp(28px, 5vw, 44px);
+      font-weight: 900;
       color: #fff;
       line-height: 1.15;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
     }
-    .header h1 span { color: var(--wa-light); }
+    .header h1 em { font-style: normal; color: var(--wa-light); }
     .header p {
       font-size: 16px;
-      color: rgba(255,255,255,.82);
-      max-width: 520px;
+      color: rgba(255,255,255,.80);
+      max-width: 500px;
       margin: 0 auto;
-      line-height: 1.6;
+      line-height: 1.65;
     }
 
-    /* ── Current subscription banner ───────────────────────── */
-    .sub-banner {
-      max-width: 900px;
-      margin: -36px auto 0;
+    /* ── Subscription banner ────────────────────────────────── */
+    .sub-wrap {
+      max-width: 960px;
+      margin: -38px auto 0;
       padding: 0 24px;
       position: relative;
       z-index: 10;
-      display: none;
     }
-    .sub-banner.show { display: block; }
-    .sub-banner-inner {
+    .sub-banner {
+      display: none;
       background: #fff;
       border-radius: var(--radius);
       box-shadow: var(--shadow-md);
-      padding: 18px 24px;
-      display: flex;
+      padding: 18px 22px;
       align-items: center;
       gap: 16px;
       flex-wrap: wrap;
     }
-    .sub-banner-icon {
-      width: 44px; height: 44px;
+    .sub-banner.show { display: flex; }
+    .sub-icon {
+      width: 46px; height: 46px;
       background: #ECFDF5;
       border-radius: 50%;
       display: grid; place-items: center;
       flex-shrink: 0;
+      color: var(--wa-dark);
     }
-    .sub-banner-icon svg { color: var(--wa-dark); }
-    .sub-banner-info { flex: 1; min-width: 0; }
-    .sub-banner-info strong { display: block; font-size: 14px; font-weight: 700; color: var(--text-primary); }
-    .sub-banner-info span  { font-size: 13px; color: var(--text-secondary); }
-    .sub-banner-status {
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: .5px;
+    .sub-info { flex: 1; min-width: 180px; }
+    .sub-info strong { display: block; font-size: 14px; font-weight: 700; }
+    .sub-info span   { font-size: 13px; color: var(--text-secondary); }
+    .sub-usage { margin-top: 6px; }
+    .sub-usage-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 3px; }
+    .sub-bar { height: 5px; background: #E5E7EB; border-radius: 4px; overflow: hidden; }
+    .sub-fill { height: 100%; background: var(--wa-green); border-radius: 4px; transition: width .5s; }
+    .sub-fill.warn   { background: #F59E0B; }
+    .sub-fill.danger { background: #EF4444; }
+    .status-pill {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; padding: 4px 12px; border-radius: 20px;
     }
-    .status-active   { background: #ECFDF5; color: #065F46; }
-    .status-expired  { background: #FEF2F2; color: #991B1B; }
-    .status-pending  { background: #FFFBEB; color: #92400E; }
-    .status-cancelled{ background: #F3F4F6; color: #374151; }
+    .s-active    { background: #ECFDF5; color: #065F46; }
+    .s-expired   { background: #FEF2F2; color: #991B1B; }
+    .s-pending   { background: #FFFBEB; color: #92400E; }
+    .s-cancelled { background: #F3F4F6; color: #374151; }
 
-    /* ── Usage bar ──────────────────────────────────────────── */
-    .usage-block { margin-top: 8px; }
-    .usage-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
-    .usage-bar {
-      height: 6px; background: #E5E7EB; border-radius: 4px; overflow: hidden;
-    }
-    .usage-fill { height: 100%; background: var(--wa-green); border-radius: 4px; transition: width .5s; }
-    .usage-fill.warn { background: #F59E0B; }
-    .usage-fill.danger { background: #EF4444; }
-
-    /* ── Plans grid ─────────────────────────────────────────── */
+    /* ── Plans section ──────────────────────────────────────── */
     .plans-section {
-      max-width: 1120px;
+      max-width: 1100px;
       margin: 0 auto;
-      padding: 48px 24px 64px;
+      padding: 52px 24px 64px;
     }
     .plans-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(4, 1fr);
       gap: 20px;
       align-items: start;
     }
+    @media (max-width: 900px) { .plans-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 540px) { .plans-grid { grid-template-columns: 1fr; } }
 
     /* ── Plan card ──────────────────────────────────────────── */
     .plan-card {
-      background: var(--bg-card);
+      background: #fff;
       border-radius: var(--radius);
       border: 2px solid var(--border);
-      padding: 28px 24px 24px;
+      padding: 28px 22px 24px;
       display: flex;
       flex-direction: column;
-      gap: 0;
-      transition: transform .2s, box-shadow .2s, border-color .2s;
       position: relative;
-      cursor: default;
+      transition: transform .2s, box-shadow .2s;
     }
-    .plan-card:hover {
-      transform: translateY(-4px);
-      box-shadow: var(--shadow-md);
-    }
+    .plan-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
+
     .plan-card.popular {
       border-color: var(--wa-green);
-      box-shadow: var(--shadow-lg);
-      transform: translateY(-6px);
+      box-shadow: var(--shadow-pop);
+      transform: translateY(-8px);
     }
-    .plan-card.popular:hover {
-      transform: translateY(-10px);
-      box-shadow: 0 16px 48px rgba(37,211,102,.22);
-    }
-    .plan-card.current-plan {
+    .plan-card.popular:hover { transform: translateY(-12px); }
+
+    .plan-card.is-current {
       border-color: var(--wa-dark);
-      background: linear-gradient(160deg, #F0FDF4 0%, #fff 60%);
+      background: linear-gradient(160deg, #f0fdf4 0%, #fff 70%);
     }
 
-    .popular-badge {
+    .pop-badge {
       position: absolute;
-      top: -14px;
-      left: 50%;
+      top: -14px; left: 50%;
       transform: translateX(-50%);
       background: linear-gradient(90deg, var(--wa-dark), var(--wa-green));
       color: #fff;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: .8px;
-      text-transform: uppercase;
-      padding: 5px 16px;
-      border-radius: 20px;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: .7px; text-transform: uppercase;
+      padding: 5px 16px; border-radius: 20px;
       white-space: nowrap;
       box-shadow: 0 4px 12px rgba(18,140,126,.3);
     }
-
-    .current-badge {
+    .curr-badge {
       position: absolute;
-      top: 12px;
-      right: 12px;
-      background: #ECFDF5;
-      color: #065F46;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: .4px;
-      padding: 3px 10px;
-      border-radius: 20px;
+      top: 12px; right: 12px;
+      background: #ECFDF5; color: #065F46;
+      font-size: 11px; font-weight: 700;
+      padding: 3px 10px; border-radius: 20px;
       border: 1px solid #A7F3D0;
     }
 
-    /* Plan header */
+    /* card body */
     .plan-icon {
-      width: 48px; height: 48px;
+      width: 46px; height: 46px;
       border-radius: 12px;
       display: grid; place-items: center;
-      margin-bottom: 16px;
       font-size: 22px;
+      margin-bottom: 14px;
     }
-    .icon-starter    { background: #EFF6FF; }
-    .icon-growth     { background: #ECFDF5; }
-    .icon-scale      { background: #FDF4FF; }
-    .icon-enterprise { background: #FFF7ED; }
+    .ic-starter    { background: #EFF6FF; }
+    .ic-growth     { background: #ECFDF5; }
+    .ic-scale      { background: #FDF4FF; }
+    .ic-enterprise { background: #FFF7ED; }
 
-    .plan-name {
-      font-size: 18px;
-      font-weight: 800;
-      color: var(--text-primary);
-      margin-bottom: 4px;
-    }
-    .plan-best-for {
-      font-size: 12px;
-      color: var(--text-secondary);
-      line-height: 1.5;
-      margin-bottom: 20px;
-      min-height: 36px;
-    }
+    .plan-name { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+    .plan-for  { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px; min-height: 36px; }
 
     .plan-price {
-      display: flex;
-      align-items: baseline;
-      gap: 4px;
-      margin-bottom: 6px;
+      display: flex; align-items: baseline; gap: 3px;
+      margin-bottom: 4px;
     }
-    .price-currency { font-size: 18px; font-weight: 700; color: var(--text-primary); }
-    .price-amount   { font-size: 36px; font-weight: 900; color: var(--text-primary); line-height: 1; }
-    .price-amount.custom { font-size: 26px; }
-    .price-period   { font-size: 13px; color: var(--text-muted); }
+    .p-symbol  { font-size: 18px; font-weight: 700; }
+    .p-amount  { font-size: 38px; font-weight: 900; line-height: 1; }
+    .p-custom  { font-size: 28px; font-weight: 900; line-height: 1; }
+    .p-period  { font-size: 12px; color: var(--text-muted); margin-bottom: 2px; }
 
-    .plan-divider { height: 1px; background: var(--border); margin: 20px 0; }
+    .divider { height: 1px; background: var(--border); margin: 18px 0; }
 
-    /* Limits row */
-    .plan-limits {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 20px;
+    /* limits */
+    .limits { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+    .limit-row {
+      display: flex; align-items: center; gap: 8px; font-size: 13px;
     }
-    .limit-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-    }
-    .limit-icon {
+    .lico {
       width: 28px; height: 28px;
-      background: #F9FAFB;
-      border-radius: 8px;
+      background: #F9FAFB; border-radius: 8px;
       display: grid; place-items: center;
-      flex-shrink: 0;
-      font-size: 13px;
+      font-size: 13px; flex-shrink: 0;
     }
-    .limit-label { color: var(--text-secondary); flex: 1; }
-    .limit-value { font-weight: 700; color: var(--text-primary); }
-    .limit-value.unlimited { color: var(--wa-dark); }
+    .l-label { color: var(--text-secondary); flex: 1; }
+    .l-val   { font-weight: 700; }
+    .l-unlimited { color: var(--wa-dark); }
 
-    /* Features list */
-    .features-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin-bottom: 24px;
-      flex: 1;
+    /* features */
+    .feat-list {
+      list-style: none; display: flex; flex-direction: column;
+      gap: 9px; margin-bottom: 22px; flex: 1;
     }
-    .features-list li {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.4;
+    .feat-list li {
+      display: flex; align-items: flex-start;
+      gap: 8px; font-size: 13px; color: var(--text-secondary); line-height: 1.4;
     }
-    .feature-check {
-      width: 18px; height: 18px;
-      background: #ECFDF5;
-      border-radius: 50%;
+    .chk {
+      width: 17px; height: 17px; flex-shrink: 0; margin-top: 1px;
+      background: #ECFDF5; border-radius: 50%;
       display: grid; place-items: center;
-      flex-shrink: 0;
-      margin-top: 1px;
     }
-    .feature-check svg { color: var(--wa-dark); }
+    .chk svg { color: var(--wa-dark); }
 
-    /* CTA button */
+    /* buttons */
     .plan-btn {
-      display: block;
-      width: 100%;
-      padding: 13px 20px;
-      border-radius: var(--radius-sm);
-      font-size: 14px;
-      font-weight: 700;
-      text-align: center;
-      cursor: pointer;
-      border: none;
-      transition: all .2s;
-      text-decoration: none;
-      margin-top: auto;
+      display: block; width: 100%;
+      padding: 13px; border-radius: var(--radius-sm);
+      font-size: 14px; font-weight: 700;
+      text-align: center; cursor: pointer;
+      border: 2px solid transparent;
+      transition: all .2s; margin-top: auto;
     }
     .btn-primary {
       background: linear-gradient(135deg, var(--wa-dark), var(--wa-green));
       color: #fff;
-      box-shadow: 0 4px 14px rgba(18,140,126,.3);
+      box-shadow: 0 4px 14px rgba(18,140,126,.28);
     }
     .btn-primary:hover {
       background: linear-gradient(135deg, var(--wa-darker), var(--wa-dark));
-      box-shadow: 0 6px 20px rgba(18,140,126,.4);
       transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(18,140,126,.38);
     }
     .btn-outline {
-      background: transparent;
-      color: var(--wa-dark);
-      border: 2px solid var(--wa-dark);
+      background: transparent; color: var(--wa-dark);
+      border-color: var(--wa-dark);
     }
-    .btn-outline:hover {
-      background: var(--wa-dark);
-      color: #fff;
-    }
-    .btn-enterprise {
+    .btn-outline:hover { background: var(--wa-dark); color: #fff; }
+    .btn-dark {
       background: linear-gradient(135deg, #1E293B, #374151);
       color: #fff;
     }
-    .btn-enterprise:hover {
-      background: linear-gradient(135deg, #0F172A, #1E293B);
+    .btn-dark:hover { background: linear-gradient(135deg, #0F172A, #1E293B); }
+    .btn-disabled {
+      background: #F3F4F6; color: var(--text-muted);
+      cursor: default; border-color: transparent;
     }
-    .btn-current {
-      background: #F3F4F6;
-      color: var(--text-secondary);
-      cursor: default;
-    }
-    .btn-current:hover { transform: none; box-shadow: none; }
+    .btn-disabled:hover { transform: none; box-shadow: none; }
 
-    /* Loading skeleton */
-    .skeleton {
-      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-      background-size: 200% 100%;
-      animation: shimmer 1.5s infinite;
-      border-radius: 8px;
+    /* ── Modal ──────────────────────────────────────────────── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.48); backdrop-filter: blur(4px);
+      z-index: 1000; place-items: center; padding: 20px;
     }
-    @keyframes shimmer { to { background-position: -200% 0; } }
-    .skeleton-card {
-      background: #fff;
-      border-radius: var(--radius);
-      padding: 28px 24px;
-      border: 2px solid var(--border);
-    }
-
-    /* Modal overlay */
-    .modal-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.5);
-      backdrop-filter: blur(4px);
-      z-index: 1000;
-      place-items: center;
-      padding: 20px;
-    }
-    .modal-overlay.open { display: grid; }
+    .overlay.open { display: grid; }
     .modal {
-      background: #fff;
-      border-radius: var(--radius);
-      padding: 32px;
-      max-width: 460px;
-      width: 100%;
-      box-shadow: 0 24px 64px rgba(0,0,0,.2);
-      animation: slideUp .25s ease;
+      background: #fff; border-radius: var(--radius);
+      padding: 32px; max-width: 440px; width: 100%;
+      box-shadow: 0 24px 64px rgba(0,0,0,.18);
+      animation: slideUp .22s ease;
     }
-    @keyframes slideUp { from { opacity:0; transform:translateY(20px); } }
+    @keyframes slideUp { from { opacity:0; transform:translateY(18px); } }
     .modal-icon {
-      width: 56px; height: 56px;
-      background: #ECFDF5;
-      border-radius: 16px;
-      display: grid; place-items: center;
-      margin-bottom: 20px;
-      font-size: 26px;
+      width: 52px; height: 52px; background: #ECFDF5;
+      border-radius: 14px; display: grid;
+      place-items: center; font-size: 24px;
+      margin-bottom: 18px;
     }
-    .modal h2 { font-size: 20px; font-weight: 800; margin-bottom: 8px; }
-    .modal p  { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
-    .modal-input {
-      width: 100%;
-      padding: 12px 14px;
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-size: 14px;
-      margin-bottom: 16px;
-      outline: none;
-      transition: border-color .2s;
+    .modal h2  { font-size: 20px; font-weight: 800; margin-bottom: 8px; }
+    .modal p   { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 18px; }
+    .m-input {
+      width: 100%; padding: 12px 14px;
+      border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+      font-size: 14px; margin-bottom: 16px; outline: none;
+      transition: border-color .2s; font-family: inherit;
     }
-    .modal-input:focus { border-color: var(--wa-green); }
-    .modal-actions { display: flex; gap: 12px; }
-    .modal-actions .plan-btn { flex: 1; }
-    .btn-cancel { background: #F3F4F6; color: var(--text-secondary); border: none; }
-    .btn-cancel:hover { background: #E5E7EB; transform: none; box-shadow: none; }
+    .m-input:focus { border-color: var(--wa-green); }
+    .m-row { display: flex; gap: 12px; }
+    .m-row .plan-btn { flex: 1; }
+    .btn-ghost { background: #F3F4F6; color: var(--text-secondary); border: none; }
+    .btn-ghost:hover { background: #E5E7EB; transform: none; box-shadow: none; }
 
-    /* Enterprise contact modal */
-    .enterprise-contact {
-      background: #F8FAFC;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      padding: 16px;
-      margin-bottom: 20px;
+    .contact-block {
+      background: #F8FAFC; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 14px;
     }
-    .enterprise-contact p { margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
-    .enterprise-contact a {
-      color: var(--wa-dark);
-      font-weight: 700;
-      text-decoration: none;
-      font-size: 14px;
-    }
-    .enterprise-contact a:hover { text-decoration: underline; }
+    .contact-block .c-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .contact-block a { font-size: 14px; font-weight: 700; color: var(--wa-dark); text-decoration: none; }
+    .contact-block a:hover { text-decoration: underline; }
 
-    /* Toast */
-    .toast-container {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 9999;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+    /* ── FAQ ────────────────────────────────────────────────── */
+    .faq-section { max-width: 700px; margin: 0 auto 64px; padding: 0 24px; }
+    .faq-h { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 28px; }
+    .faq-item { border-bottom: 1px solid var(--border); }
+    .faq-q {
+      width: 100%; background: none; border: none;
+      text-align: left; padding: 17px 0;
+      font-size: 15px; font-weight: 600; color: var(--text-primary);
+      cursor: pointer; display: flex; justify-content: space-between;
+      align-items: center; gap: 12px; font-family: inherit;
+    }
+    .faq-q .arr { transition: transform .2s; flex-shrink: 0; }
+    .faq-q.open .arr { transform: rotate(180deg); }
+    .faq-a {
+      font-size: 14px; color: var(--text-secondary);
+      line-height: 1.7; max-height: 0; overflow: hidden;
+      transition: max-height .3s ease, padding-bottom .3s;
+    }
+    .faq-a.open { max-height: 200px; padding-bottom: 16px; }
+
+    /* ── Toast ──────────────────────────────────────────────── */
+    .toasts {
+      position: fixed; bottom: 24px; right: 24px;
+      z-index: 9999; display: flex; flex-direction: column; gap: 10px;
     }
     .toast {
-      padding: 14px 20px;
-      border-radius: var(--radius-sm);
-      font-size: 14px;
-      font-weight: 600;
-      color: #fff;
-      max-width: 340px;
-      box-shadow: var(--shadow-md);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      animation: toastIn .3s ease;
+      padding: 13px 18px; border-radius: var(--radius-sm);
+      font-size: 14px; font-weight: 600; color: #fff;
+      max-width: 320px; box-shadow: var(--shadow-md);
+      display: flex; align-items: center; gap: 8px;
+      animation: toastIn .25s ease;
     }
-    @keyframes toastIn { from { opacity:0; transform:translateX(20px); } }
-    .toast.success { background: var(--wa-dark); }
-    .toast.error   { background: #EF4444; }
-    .toast.info    { background: #3B82F6; }
-
-    /* FAQ */
-    .faq-section {
-      max-width: 720px;
-      margin: 0 auto 64px;
-      padding: 0 24px;
-    }
-    .faq-title { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 24px; }
-    .faq-item { border-bottom: 1px solid var(--border); }
-    .faq-question {
-      width: 100%;
-      background: none;
-      border: none;
-      text-align: left;
-      padding: 18px 0;
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-primary);
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-    }
-    .faq-question .chevron { transition: transform .2s; flex-shrink: 0; }
-    .faq-question.open .chevron { transform: rotate(180deg); }
-    .faq-answer {
-      font-size: 14px;
-      color: var(--text-secondary);
-      line-height: 1.7;
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height .3s ease, padding .3s;
-    }
-    .faq-answer.open { max-height: 200px; padding-bottom: 18px; }
-
-    /* Responsive */
-    @media (max-width: 640px) {
-      .plans-grid { grid-template-columns: 1fr; }
-      .plan-card.popular { transform: none; }
-      .sub-banner-inner { flex-direction: column; align-items: flex-start; }
-    }
+    @keyframes toastIn { from { opacity:0; transform:translateX(16px); } }
+    .t-success { background: var(--wa-dark); }
+    .t-error   { background: #EF4444; }
+    .t-info    { background: #3B82F6; }
   </style>
 </head>
 <body>
 
-<!-- ── Header ───────────────────────────────────────────────────── -->
+<!-- Header -->
 <div class="header">
   <div class="header-inner">
-    <div class="header-badge">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.126 1.534 5.857L0 24l6.27-1.512A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.9 0-3.69-.497-5.24-1.366l-.374-.22-3.724.896.944-3.607-.243-.383A9.936 9.936 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
+    <div class="wa-badge">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+        <path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.126 1.534 5.857L0 24l6.27-1.512A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.9 0-3.69-.497-5.24-1.366l-.374-.22-3.724.896.944-3.607-.243-.383A9.936 9.936 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+      </svg>
       WhatsApp AI Sales Agent
     </div>
-    <h1>Sell More on <span>WhatsApp</span><br>— Automatically</h1>
+    <h1>Sell More on <em>WhatsApp</em><br>— Automatically</h1>
     <p>Your AI-powered sales assistant handles follow-ups, order updates, and customer conversations 24/7. Pick the plan that fits your volume.</p>
   </div>
 </div>
 
-<!-- ── Current Subscription Banner ──────────────────────────────── -->
-<div class="sub-banner" id="subBanner">
-  <div class="sub-banner-inner">
-    <div class="sub-banner-icon">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+<!-- Subscription Banner -->
+<div class="sub-wrap">
+  <div class="sub-banner" id="subBanner">
+    <div class="sub-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+      </svg>
     </div>
-    <div class="sub-banner-info">
-      <strong id="bannerPlanName">Current Plan</strong>
+    <div class="sub-info">
+      <strong id="bannerName">—</strong>
       <span id="bannerExpiry"></span>
-      <div class="usage-block" id="bannerUsageBlock" style="display:none">
-        <div class="usage-label" id="bannerUsageLabel"></div>
-        <div class="usage-bar"><div class="usage-fill" id="bannerUsageFill" style="width:0%"></div></div>
+      <div class="sub-usage" id="bannerUsage" style="display:none">
+        <div class="sub-usage-label" id="bannerUsageLabel"></div>
+        <div class="sub-bar"><div class="sub-fill" id="bannerFill" style="width:0%"></div></div>
       </div>
     </div>
-    <span class="sub-banner-status" id="bannerStatus"></span>
+    <span class="status-pill" id="bannerStatus"></span>
   </div>
 </div>
 
-<!-- ── Plans ─────────────────────────────────────────────────────── -->
+<!-- Plans -->
 <section class="plans-section">
   <div class="plans-grid" id="plansGrid">
-    <!-- skeleton while loading -->
-    <div class="skeleton-card">
-      <div class="skeleton" style="width:48px;height:48px;border-radius:12px;margin-bottom:16px"></div>
-      <div class="skeleton" style="height:20px;width:80px;margin-bottom:8px"></div>
-      <div class="skeleton" style="height:14px;width:140px;margin-bottom:20px"></div>
-      <div class="skeleton" style="height:40px;width:120px;margin-bottom:20px"></div>
-      <div class="skeleton" style="height:1px;margin-bottom:20px"></div>
-      <div class="skeleton" style="height:12px;margin-bottom:8px"></div>
-      <div class="skeleton" style="height:12px;margin-bottom:8px"></div>
-      <div class="skeleton" style="height:12px;width:80%;margin-bottom:24px"></div>
-      <div class="skeleton" style="height:44px;border-radius:10px"></div>
-    </div>
-    <div class="skeleton-card">
-      <div class="skeleton" style="width:48px;height:48px;border-radius:12px;margin-bottom:16px"></div>
-      <div class="skeleton" style="height:20px;width:80px;margin-bottom:8px"></div>
-      <div class="skeleton" style="height:14px;width:140px;margin-bottom:20px"></div>
-      <div class="skeleton" style="height:40px;width:120px;margin-bottom:20px"></div>
-      <div class="skeleton" style="height:1px;margin-bottom:20px"></div>
-      <div class="skeleton" style="height:12px;margin-bottom:8px"></div>
-      <div class="skeleton" style="height:12px;margin-bottom:8px"></div>
-      <div class="skeleton" style="height:12px;width:80%;margin-bottom:24px"></div>
-      <div class="skeleton" style="height:44px;border-radius:10px"></div>
-    </div>
+    <!-- rendered by JS -->
   </div>
 </section>
 
-<!-- ── FAQ ───────────────────────────────────────────────────────── -->
+<!-- FAQ -->
 <section class="faq-section">
-  <div class="faq-title">Frequently Asked Questions</div>
+  <div class="faq-h">Frequently Asked Questions</div>
 
   <div class="faq-item">
-    <button class="faq-question" onclick="toggleFaq(this)">
-      What happens when I reach my follow-up limit?
-      <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    <button class="faq-q" onclick="faq(this)">What happens when I reach my follow-up limit?
+      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
-    <div class="faq-answer">Your AI agent will continue answering customer messages within the 24-hour window — only proactive follow-ups outside that window are counted and paused. You can upgrade at any time to restore them immediately.</div>
+    <div class="faq-a">Your AI agent keeps answering messages within the 24-hour window — only proactive follow-ups outside that window are counted and paused. Upgrade any time to restore them immediately.</div>
   </div>
 
   <div class="faq-item">
-    <button class="faq-question" onclick="toggleFaq(this)">
-      Can I change my plan later?
-      <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    <button class="faq-q" onclick="faq(this)">Can I change my plan later?
+      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
-    <div class="faq-answer">Yes. You can upgrade to a higher plan at any time. The new plan takes effect immediately after payment. Downgrading will apply at the start of your next billing cycle.</div>
+    <div class="faq-a">Yes. Upgrade at any time — takes effect immediately after payment. Downgrading applies at the start of your next billing cycle.</div>
   </div>
 
   <div class="faq-item">
-    <button class="faq-question" onclick="toggleFaq(this)">
-      What does "monthly active customers" mean?
-      <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    <button class="faq-q" onclick="faq(this)">What counts as a "monthly active customer"?
+      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
-    <div class="faq-answer">A monthly active customer is any unique WhatsApp contact your AI agent has had a conversation with during the current 30-day billing period. Contacts that message you but receive no AI response do not count.</div>
+    <div class="faq-a">Any unique WhatsApp contact the AI has had a conversation with during the current 30-day billing period. Contacts who message you but receive no AI response are not counted.</div>
   </div>
 
   <div class="faq-item">
-    <button class="faq-question" onclick="toggleFaq(this)">
-      Is payment secure?
-      <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    <button class="faq-q" onclick="faq(this)">Is payment secure?
+      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
-    <div class="faq-answer">All payments are processed securely through Paystack, a PCI-DSS Level 1 certified payment processor. We never store your card details on our servers.</div>
+    <div class="faq-a">All payments are processed through Paystack, a PCI-DSS Level 1 certified provider. We never store your card details.</div>
   </div>
 
   <div class="faq-item">
-    <button class="faq-question" onclick="toggleFaq(this)">
-      Can I cancel anytime?
-      <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    <button class="faq-q" onclick="faq(this)">Can I cancel anytime?
+      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
-    <div class="faq-answer">Absolutely. Cancel any time from your dashboard. Your subscription remains active until the end of the current 30-day period — no prorated refunds.</div>
+    <div class="faq-a">Yes. Cancel from your dashboard anytime. Your subscription stays active until the end of the current 30-day period — no prorated refunds.</div>
   </div>
 </section>
 
-<!-- ── Subscribe Modal ───────────────────────────────────────────── -->
-<div class="modal-overlay" id="subscribeModal">
+<!-- Subscribe Modal -->
+<div class="overlay" id="subModal">
   <div class="modal">
     <div class="modal-icon">💬</div>
-    <h2 id="modalTitle">Subscribe to Growth Plan</h2>
-    <p id="modalDesc">You'll be redirected to a secure Paystack checkout page to complete your payment.</p>
-    <input type="email" class="modal-input" id="modalEmail" placeholder="Your email address" autocomplete="email" />
-    <div class="modal-actions">
-      <button class="plan-btn btn-cancel" onclick="closeModal()">Cancel</button>
-      <button class="plan-btn btn-primary" id="modalPayBtn" onclick="processPayment()">
-        Pay &amp; Subscribe
-      </button>
+    <h2 id="mTitle">Subscribe to Plan</h2>
+    <p id="mDesc">You'll be redirected to a secure Paystack checkout to complete payment.</p>
+    <input type="email" class="m-input" id="mEmail" placeholder="Your email address" autocomplete="email" />
+    <div class="m-row">
+      <button class="plan-btn btn-ghost" onclick="closeSubModal()">Cancel</button>
+      <button class="plan-btn btn-primary" id="mPayBtn" onclick="doPayment()">Pay &amp; Subscribe</button>
     </div>
   </div>
 </div>
 
-<!-- ── Enterprise Modal ───────────────────────────────────────────── -->
-<div class="modal-overlay" id="enterpriseModal">
+<!-- Enterprise Modal -->
+<div class="overlay" id="entModal">
   <div class="modal">
     <div class="modal-icon">🏢</div>
     <h2>Enterprise Plan</h2>
-    <p>This plan is tailored to your business. Reach out to our sales team and we'll build a custom quote for you.</p>
-    <div class="enterprise-contact">
-      <p>📧 Email us</p>
+    <p>This plan is custom-quoted for your business. Reach our sales team and we'll build the right solution for you.</p>
+    <div class="contact-block">
+      <div class="c-label">📧 Email</div>
       <a href="mailto:sales@mycroshop.com">sales@mycroshop.com</a>
     </div>
-    <div class="enterprise-contact">
-      <p>💬 WhatsApp us</p>
-      <a href="https://wa.me/2348000000000" target="_blank" rel="noopener">Chat with Sales Team →</a>
+    <div class="contact-block">
+      <div class="c-label">💬 WhatsApp</div>
+      <a href="https://wa.me/2348000000000" target="_blank" rel="noopener">Chat with Sales →</a>
     </div>
-    <button class="plan-btn btn-cancel" style="width:100%" onclick="closeEnterpriseModal()">Close</button>
+    <button class="plan-btn btn-ghost" style="width:100%;margin-top:4px" onclick="closeEntModal()">Close</button>
   </div>
 </div>
 
-<!-- ── Toast container ───────────────────────────────────────────── -->
-<div class="toast-container" id="toastContainer"></div>
+<!-- Toasts -->
+<div class="toasts" id="toasts"></div>
 
 <script>
-  // ── Config ────────────────────────────────────────────────────────
-  const API_BASE = '/api/v1/whatsapp-plans';
-  // Replace this with however your app provides the auth token (localStorage, cookie, etc.)
-  const getAuthToken = () => localStorage.getItem('authToken') || '';
+// ── Static plan data (from API) ───────────────────────────────────────────────
+// This is used immediately so the page renders without a network request.
+// When the server is running, fetchPlans() overwrites this with live data.
+const STATIC_PLANS = [
+  {
+    id: 1,
+    name: "Starter",
+    slug: "starter",
+    price_ngn: 50000,
+    price_display: "₦50,000/month",
+    max_customers: 300,
+    max_whatsapp_numbers: 1,
+    follow_up_limit: 500,
+    features: ["300 monthly active customers","1 WhatsApp number","Basic AI follow-up messages","Order confirmation & updates","Standard response templates","Email support"],
+    best_for: "Small businesses just getting started with WhatsApp sales",
+    is_custom: false
+  },
+  {
+    id: 2,
+    name: "Growth",
+    slug: "growth",
+    price_ngn: 120000,
+    price_display: "₦120,000/month",
+    max_customers: 1000,
+    max_whatsapp_numbers: 1,
+    follow_up_limit: 2000,
+    features: ["1,000 monthly active customers","1 WhatsApp number","Smarter personalised follow-ups","Abandoned order recovery messages","Multi-product recommendations","Priority support"],
+    best_for: "Growing businesses ready to scale customer engagement",
+    is_custom: false
+  },
+  {
+    id: 3,
+    name: "Scale",
+    slug: "scale",
+    price_ngn: 250000,
+    price_display: "₦250,000/month",
+    max_customers: 3000,
+    max_whatsapp_numbers: 2,
+    follow_up_limit: 5000,
+    features: ["3,000 monthly active customers","2 WhatsApp numbers","Advanced multi-step follow-up flows","Multi-step order assistance","Custom greeting & unavailability messages","Dedicated account support"],
+    best_for: "High-volume sellers and established brands",
+    is_custom: false
+  },
+  {
+    id: 4,
+    name: "Enterprise",
+    slug: "enterprise",
+    price_ngn: null,
+    price_display: "Custom pricing",
+    max_customers: null,
+    max_whatsapp_numbers: null,
+    follow_up_limit: null,
+    features: ["Unlimited monthly active customers","Multiple WhatsApp numbers","Custom AI integrations","Bespoke follow-up workflows","SLA-backed uptime","Dedicated success manager","Custom onboarding"],
+    best_for: "Large businesses with complex or high-volume requirements",
+    is_custom: true
+  }
+];
 
-  // ── State ─────────────────────────────────────────────────────────
-  let plans = [];
-  let subscription = null;
-  let selectedPlan = null;
+// ── Config ────────────────────────────────────────────────────────────────────
+const API_BASE   = '/api/v1/whatsapp-plans';
+const getToken   = () => localStorage.getItem('authToken') || '';
+const POPULAR    = 'growth';
 
-  // ── Init ──────────────────────────────────────────────────────────
-  document.addEventListener('DOMContentLoaded', () => {
-    Promise.all([fetchPlans(), fetchSubscription()]);
-  });
+const ICONS = {
+  starter:    { e: '🚀', c: 'ic-starter'    },
+  growth:     { e: '📈', c: 'ic-growth'     },
+  scale:      { e: '⚡', c: 'ic-scale'      },
+  enterprise: { e: '🏢', c: 'ic-enterprise' },
+};
 
-  async function fetchPlans() {
-    try {
-      const res = await fetch(API_BASE);
-      const json = await res.json();
-      if (json.success) {
-        plans = json.data;
-        renderPlans();
-      } else {
-        showError('Could not load plans. Please refresh the page.');
-      }
-    } catch (e) {
-      showError('Network error. Please check your connection and refresh.');
+// ── State ─────────────────────────────────────────────────────────────────────
+let plans        = STATIC_PLANS;  // render immediately
+let subscription = null;
+let selected     = null;
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+renderPlans();   // instant render with static data
+
+document.addEventListener('DOMContentLoaded', () => {
+  fetchPlans();           // refresh with live data if server is up
+  fetchSubscription();    // load current subscription if logged in
+  checkPaymentReturn();
+});
+
+// ── Data fetching ─────────────────────────────────────────────────────────────
+async function fetchPlans() {
+  try {
+    const res  = await fetch(API_BASE);
+    const json = await res.json();
+    if (!json.success) return;
+    plans = json.data.map(p => ({
+      ...p,
+      features: typeof p.features === 'string' ? JSON.parse(p.features) : (p.features || [])
+    }));
+    renderPlans();
+  } catch (_) { /* keep static data */ }
+}
+
+async function fetchSubscription() {
+  const token = getToken();
+  if (!token) return;
+  try {
+    const res  = await fetch(`${API_BASE}/my-subscription`, { headers: { Authorization: `Bearer ${token}` } });
+    const json = await res.json();
+    if (json.success && json.data) {
+      subscription = json.data;
+      renderBanner();
+      renderPlans();
     }
-  }
+  } catch (_) {}
+}
 
-  async function fetchSubscription() {
-    const token = getAuthToken();
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_BASE}/my-subscription`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const json = await res.json();
-      if (json.success && json.data) {
-        subscription = json.data;
-        renderSubscriptionBanner();
-        if (plans.length > 0) renderPlans(); // re-render to mark current plan
-      }
-    } catch (e) { /* non-critical */ }
-  }
+// ── Render plans ──────────────────────────────────────────────────────────────
+function renderPlans() {
+  const grid       = document.getElementById('plansGrid');
+  const currentId  = subscription?.plan?.id;
 
-  // ── Render plans ──────────────────────────────────────────────────
-  const planIcons = {
-    starter:    { emoji: '🚀', cls: 'icon-starter'    },
-    growth:     { emoji: '📈', cls: 'icon-growth'     },
-    scale:      { emoji: '⚡', cls: 'icon-scale'      },
-    enterprise: { emoji: '🏢', cls: 'icon-enterprise' }
-  };
-  const popularSlug = 'growth';
+  grid.innerHTML = plans.map(p => {
+    const icon      = ICONS[p.slug] || { e: '📦', c: '' };
+    const isPopular = p.slug === POPULAR;
+    const isCurrent = p.id === currentId;
+    const isCustom  = p.is_custom;
 
-  function renderPlans() {
-    const grid = document.getElementById('plansGrid');
-    if (!plans.length) {
-      grid.innerHTML = '<p style="color:var(--text-secondary);text-align:center;grid-column:1/-1">No plans available.</p>';
-      return;
+    // price block
+    let priceHtml;
+    if (isCustom) {
+      priceHtml = `
+        <div class="plan-price"><span class="p-custom">Custom</span></div>
+        <div class="p-period">Contact for pricing</div>`;
+    } else {
+      const k   = p.price_ngn >= 1000 ? (p.price_ngn / 1000) + 'k' : p.price_ngn.toLocaleString('en-NG');
+      priceHtml = `
+        <div class="plan-price">
+          <span class="p-symbol">₦</span>
+          <span class="p-amount">${k}</span>
+        </div>
+        <div class="p-period">per month</div>`;
     }
 
-    const currentPlanId = subscription?.plan?.id;
+    // limits
+    const numFmt = v => v != null ? Number(v).toLocaleString('en-NG') : null;
+    const limitsHtml = `
+      <div class="limits">
+        <div class="limit-row">
+          <div class="lico">👥</div>
+          <span class="l-label">Monthly customers</span>
+          <span class="l-val ${p.max_customers == null ? 'l-unlimited' : ''}">${p.max_customers != null ? numFmt(p.max_customers) : 'Unlimited'}</span>
+        </div>
+        <div class="limit-row">
+          <div class="lico">📱</div>
+          <span class="l-label">WhatsApp numbers</span>
+          <span class="l-val ${p.max_whatsapp_numbers == null ? 'l-unlimited' : ''}">${p.max_whatsapp_numbers != null ? (p.max_whatsapp_numbers === 0 ? 'Multiple' : p.max_whatsapp_numbers) : 'Unlimited'}</span>
+        </div>
+        <div class="limit-row">
+          <div class="lico">✉️</div>
+          <span class="l-label">Follow-ups / month</span>
+          <span class="l-val ${p.follow_up_limit == null ? 'l-unlimited' : ''}">${p.follow_up_limit != null ? numFmt(p.follow_up_limit) : 'Unlimited'}</span>
+        </div>
+      </div>`;
 
-    grid.innerHTML = plans.map(plan => {
-      const icon = planIcons[plan.slug] || { emoji: '📦', cls: '' };
-      const isPopular = plan.slug === popularSlug;
-      const isCurrent = plan.id === currentPlanId;
-      const isCustom  = plan.is_custom;
+    // features
+    const feats = (Array.isArray(p.features) ? p.features : []).map(f =>
+      `<li>
+        <span class="chk">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>${esc(f)}
+      </li>`
+    ).join('');
 
-      const featuresHtml = (plan.features || []).map(f =>
-        `<li>
-          <span class="feature-check">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          </span>
-          ${escHtml(f)}
-        </li>`
-      ).join('');
+    // button
+    const btnLabel = isCurrent ? '✓ Current Plan'
+                   : isCustom  ? 'Contact Sales'
+                   : subscription?.status === 'active' ? 'Switch Plan'
+                   : 'Get Started';
+    const btnCls   = isCurrent ? 'btn-disabled'
+                   : isCustom  ? 'btn-dark'
+                   : isPopular  ? 'btn-primary'
+                   : 'btn-outline';
+    const btnClick = isCurrent ? '' : isCustom ? 'openEntModal()' : `openSubModal(${p.id})`;
 
-      const [intPart, decPart] = plan.price_ngn != null
-        ? (plan.price_ngn / 1000 >= 1 ? [(plan.price_ngn / 1000).toFixed(plan.price_ngn % 1000 === 0 ? 0 : 1) + 'k', ''] : [plan.price_ngn.toLocaleString('en-NG'), ''])
-        : ['Custom', ''];
+    return `
+      <div class="plan-card ${isPopular ? 'popular' : ''} ${isCurrent ? 'is-current' : ''}">
+        ${isPopular ? `<div class="pop-badge">⭐ Most Popular</div>` : ''}
+        ${isCurrent ? `<div class="curr-badge">Active</div>` : ''}
+        <div class="plan-icon ${icon.c}">${icon.e}</div>
+        <div class="plan-name">${esc(p.name)}</div>
+        <div class="plan-for">${esc(p.best_for || '')}</div>
+        ${priceHtml}
+        <div class="divider"></div>
+        ${limitsHtml}
+        <ul class="feat-list">${feats}</ul>
+        <button class="plan-btn ${btnCls}" ${btnClick ? `onclick="${btnClick}"` : 'disabled'}>${btnLabel}</button>
+      </div>`;
+  }).join('');
+}
 
-      const priceHtml = isCustom
-        ? `<div class="plan-price">
-             <span class="price-amount custom">Custom</span>
-           </div>
-           <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Contact for pricing</div>`
-        : `<div class="plan-price">
-             <span class="price-currency">₦</span>
-             <span class="price-amount">${intPart}</span>
-           </div>
-           <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">per month</div>`;
+// ── Subscription banner ───────────────────────────────────────────────────────
+function renderBanner() {
+  if (!subscription) return;
+  const b = document.getElementById('subBanner');
+  b.classList.add('show');
 
-      const btnLabel = isCurrent ? '✓ Current Plan'
-                     : isCustom  ? 'Contact Sales'
-                     : subscription?.status === 'active' ? 'Switch to this Plan'
-                     : 'Get Started';
-      const btnClass = isCurrent ? 'btn-current'
-                     : isCustom  ? 'btn-enterprise'
-                     : isPopular  ? 'btn-primary'
-                     : 'btn-outline';
-      const btnClick = isCurrent ? '' : isCustom ? `openEnterpriseModal()` : `openSubscribeModal(${plan.id})`;
+  document.getElementById('bannerName').textContent =
+    subscription.plan?.name ? `You're on the ${subscription.plan.name} Plan` : 'WhatsApp AI Subscription';
 
-      const limitsHtml = `
-        <div class="plan-limits">
-          <div class="limit-item">
-            <div class="limit-icon">👥</div>
-            <span class="limit-label">Monthly customers</span>
-            <span class="limit-value ${plan.max_customers == null ? 'unlimited' : ''}">${plan.max_customers != null ? plan.max_customers.toLocaleString() : 'Unlimited'}</span>
-          </div>
-          <div class="limit-item">
-            <div class="limit-icon">📱</div>
-            <span class="limit-label">WhatsApp numbers</span>
-            <span class="limit-value ${plan.max_whatsapp_numbers == null ? 'unlimited' : ''}">${plan.max_whatsapp_numbers != null ? plan.max_whatsapp_numbers : 'Unlimited'}</span>
-          </div>
-          <div class="limit-item">
-            <div class="limit-icon">✉️</div>
-            <span class="limit-label">Follow-ups / month</span>
-            <span class="limit-value ${plan.follow_up_limit == null ? 'unlimited' : ''}">${plan.follow_up_limit != null ? plan.follow_up_limit.toLocaleString() : 'Unlimited'}</span>
-          </div>
-        </div>`;
+  const end = subscription.current_period_end
+    ? new Date(subscription.current_period_end).toLocaleDateString('en-NG', { day:'numeric', month:'long', year:'numeric' })
+    : null;
+  document.getElementById('bannerExpiry').textContent = end ? `Renews ${end}` : '';
 
-      return `
-        <div class="plan-card ${isPopular ? 'popular' : ''} ${isCurrent ? 'current-plan' : ''}">
-          ${isPopular ? '<div class="popular-badge">⭐ Most Popular</div>' : ''}
-          ${isCurrent ? '<div class="current-badge">Active</div>' : ''}
-          <div class="plan-icon ${icon.cls}">${icon.emoji}</div>
-          <div class="plan-name">${escHtml(plan.name)}</div>
-          <div class="plan-best-for">${escHtml(plan.best_for || '')}</div>
-          ${priceHtml}
-          <div class="plan-divider"></div>
-          ${limitsHtml}
-          <ul class="features-list">${featuresHtml}</ul>
-          <button class="plan-btn ${btnClass}" ${btnClick ? `onclick="${btnClick}"` : 'disabled'}>${btnLabel}</button>
-        </div>`;
-    }).join('');
+  const st = document.getElementById('bannerStatus');
+  const s  = subscription.status;
+  st.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+  st.className   = `status-pill s-${s}`;
+
+  if (subscription.follow_up_limit != null) {
+    const used  = subscription.follow_ups_used || 0;
+    const limit = subscription.follow_up_limit;
+    const pct   = Math.min(100, Math.round(used / limit * 100));
+    const uBlock = document.getElementById('bannerUsage');
+    uBlock.style.display = 'block';
+    document.getElementById('bannerUsageLabel').textContent = `Follow-ups: ${used.toLocaleString()} / ${limit.toLocaleString()}`;
+    const fill = document.getElementById('bannerFill');
+    fill.style.width = pct + '%';
+    fill.className = 'sub-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
   }
+}
 
-  // ── Subscription banner ───────────────────────────────────────────
-  function renderSubscriptionBanner() {
-    if (!subscription) return;
-    const banner = document.getElementById('subBanner');
-    banner.classList.add('show');
+// ── Subscribe modal ───────────────────────────────────────────────────────────
+function openSubModal(planId) {
+  const p = plans.find(x => x.id === planId);
+  if (!p) return;
+  selected = p;
+  document.getElementById('mTitle').textContent = `Subscribe to ${p.name} Plan`;
+  document.getElementById('mDesc').textContent  = `${p.price_display} · billed monthly. You'll be redirected to a secure Paystack checkout.`;
+  document.getElementById('mEmail').value       = localStorage.getItem('userEmail') || '';
+  const btn = document.getElementById('mPayBtn');
+  btn.textContent = 'Pay & Subscribe';
+  btn.disabled    = false;
+  document.getElementById('subModal').classList.add('open');
+  setTimeout(() => document.getElementById('mEmail').focus(), 80);
+}
+function closeSubModal() {
+  document.getElementById('subModal').classList.remove('open');
+  selected = null;
+}
 
-    document.getElementById('bannerPlanName').textContent = subscription.plan?.name
-      ? `You're on the ${subscription.plan.name} Plan`
-      : 'WhatsApp AI Subscription';
+async function doPayment() {
+  const email = document.getElementById('mEmail').value.trim();
+  if (!email || !email.includes('@')) { toast('Please enter a valid email address.', 'error'); return; }
+  if (!selected) return;
 
-    const end = subscription.current_period_end
-      ? new Date(subscription.current_period_end).toLocaleDateString('en-NG', { day:'numeric', month:'long', year:'numeric' })
-      : null;
-    document.getElementById('bannerExpiry').textContent = end
-      ? `Renews on ${end}`
-      : '';
+  const btn = document.getElementById('mPayBtn');
+  btn.textContent = 'Initiating…';
+  btn.disabled    = true;
 
-    const statusEl = document.getElementById('bannerStatus');
-    statusEl.textContent = subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1);
-    statusEl.className = `sub-banner-status status-${subscription.status}`;
+  try {
+    const res  = await fetch(`${API_BASE}/subscribe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {})
+      },
+      body: JSON.stringify({
+        plan_id:      selected.id,
+        email,
+        callback_url: window.location.origin + '/dashboard/whatsapp-ai'
+      })
+    });
+    const json = await res.json();
 
-    // Usage bar
-    if (subscription.follow_up_limit != null) {
-      const used  = subscription.follow_ups_used  || 0;
-      const limit = subscription.follow_up_limit;
-      const pct   = Math.min(100, Math.round((used / limit) * 100));
-      const usageBlock = document.getElementById('bannerUsageBlock');
-      usageBlock.style.display = 'block';
-      document.getElementById('bannerUsageLabel').textContent = `Follow-ups: ${used.toLocaleString()} / ${limit.toLocaleString()} used`;
-      const fill = document.getElementById('bannerUsageFill');
-      fill.style.width = pct + '%';
-      fill.className = 'usage-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
-    }
-  }
-
-  // ── Subscribe modal ───────────────────────────────────────────────
-  function openSubscribeModal(planId) {
-    const plan = plans.find(p => p.id === planId);
-    if (!plan) return;
-    selectedPlan = plan;
-
-    document.getElementById('modalTitle').textContent = `Subscribe to ${plan.name} Plan`;
-    document.getElementById('modalDesc').textContent =
-      `${plan.price_display} — billed monthly. You'll be redirected to a secure Paystack checkout to complete your payment.`;
-
-    // Pre-fill email if available
-    const storedEmail = localStorage.getItem('userEmail') || '';
-    document.getElementById('modalEmail').value = storedEmail;
-
-    document.getElementById('subscribeModal').classList.add('open');
-    setTimeout(() => document.getElementById('modalEmail').focus(), 100);
-  }
-
-  function closeModal() {
-    document.getElementById('subscribeModal').classList.remove('open');
-    selectedPlan = null;
-    document.getElementById('modalPayBtn').textContent = 'Pay & Subscribe';
-    document.getElementById('modalPayBtn').disabled = false;
-  }
-
-  async function processPayment() {
-    const email = document.getElementById('modalEmail').value.trim();
-    if (!email || !email.includes('@')) {
-      showToast('Please enter a valid email address.', 'error');
-      return;
-    }
-    if (!selectedPlan) return;
-
-    const btn = document.getElementById('modalPayBtn');
-    btn.textContent = 'Initiating payment…';
-    btn.disabled = true;
-
-    try {
-      const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/subscribe`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          plan_id: selectedPlan.id,
-          email,
-          callback_url: window.location.origin + '/dashboard/whatsapp-ai'
-        })
-      });
-
-      const json = await res.json();
-
-      if (json.success && json.data?.authorization_url) {
-        showToast('Redirecting to payment…', 'info');
-        window.location.href = json.data.authorization_url;
-      } else if (json.is_custom) {
-        closeModal();
-        openEnterpriseModal();
-      } else {
-        showToast(json.message || 'Payment initiation failed. Please try again.', 'error');
-        btn.textContent = 'Pay & Subscribe';
-        btn.disabled = false;
-      }
-    } catch (e) {
-      showToast('Network error. Please try again.', 'error');
+    if (json.success && json.data?.authorization_url) {
+      toast('Redirecting to payment…', 'info');
+      window.location.href = json.data.authorization_url;
+    } else if (json.is_custom) {
+      closeSubModal(); openEntModal();
+    } else {
+      toast(json.message || 'Payment initiation failed. Please try again.', 'error');
       btn.textContent = 'Pay & Subscribe';
-      btn.disabled = false;
+      btn.disabled    = false;
     }
+  } catch (_) {
+    toast('Network error. Please try again.', 'error');
+    btn.textContent = 'Pay & Subscribe';
+    btn.disabled    = false;
   }
+}
 
-  // ── Enterprise modal ──────────────────────────────────────────────
-  function openEnterpriseModal() {
-    document.getElementById('enterpriseModal').classList.add('open');
-  }
-  function closeEnterpriseModal() {
-    document.getElementById('enterpriseModal').classList.remove('open');
-  }
+// ── Enterprise modal ──────────────────────────────────────────────────────────
+function openEntModal()  { document.getElementById('entModal').classList.add('open'); }
+function closeEntModal() { document.getElementById('entModal').classList.remove('open'); }
 
-  // close modals on overlay click
-  document.getElementById('subscribeModal').addEventListener('click', e => {
-    if (e.target === document.getElementById('subscribeModal')) closeModal();
+// close overlays on backdrop click
+['subModal','entModal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', e => {
+    if (e.target.id === id) { id === 'subModal' ? closeSubModal() : closeEntModal(); }
   });
-  document.getElementById('enterpriseModal').addEventListener('click', e => {
-    if (e.target === document.getElementById('enterpriseModal')) closeEnterpriseModal();
-  });
+});
 
-  // ── FAQ ───────────────────────────────────────────────────────────
-  function toggleFaq(btn) {
-    const answer = btn.nextElementSibling;
-    const isOpen = answer.classList.contains('open');
-    document.querySelectorAll('.faq-answer.open').forEach(a => a.classList.remove('open'));
-    document.querySelectorAll('.faq-question.open').forEach(b => b.classList.remove('open'));
-    if (!isOpen) {
-      answer.classList.add('open');
-      btn.classList.add('open');
-    }
-  }
+// ── FAQ ───────────────────────────────────────────────────────────────────────
+function faq(btn) {
+  const ans    = btn.nextElementSibling;
+  const isOpen = ans.classList.contains('open');
+  document.querySelectorAll('.faq-a.open').forEach(a => a.classList.remove('open'));
+  document.querySelectorAll('.faq-q.open').forEach(b => b.classList.remove('open'));
+  if (!isOpen) { ans.classList.add('open'); btn.classList.add('open'); }
+}
 
-  // ── Toasts ────────────────────────────────────────────────────────
-  function showToast(message, type = 'info') {
-    const container = document.getElementById('toastContainer');
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    container.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
-  }
-  function showError(msg) {
-    document.getElementById('plansGrid').innerHTML =
-      `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-secondary)">${msg}</div>`;
-  }
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const c = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = `toast t-${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
 
-  // ── Utils ─────────────────────────────────────────────────────────
-  function escHtml(str) {
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
+// ── Payment return ────────────────────────────────────────────────────────────
+function checkPaymentReturn() {
+  const p = new URLSearchParams(window.location.search).get('payment');
+  if (p === 'active')  toast('🎉 Payment successful! Your WhatsApp AI is now active.', 'success');
+  if (p === 'pending') toast('Payment received — activating your plan shortly.', 'info');
+}
 
-  // Handle payment callback redirect (e.g. user returns from Paystack)
-  (function checkPaymentReturn() {
-    const params = new URLSearchParams(window.location.search);
-    const payment = params.get('payment');
-    if (payment === 'active') {
-      showToast('🎉 Payment successful! Your WhatsApp AI is now active.', 'success');
-      fetchSubscription().then(renderPlans);
-    } else if (payment === 'pending') {
-      showToast('Payment received — activating your plan. This may take a moment.', 'info');
-    }
-  })();
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 </script>
 </body>
 </html>

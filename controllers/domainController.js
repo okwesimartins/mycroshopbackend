@@ -42,12 +42,37 @@ async function getUSDToNGNExchangeRate() {
 }
 
 /**
+ * Attach NGN pricing fields to a pricing object returned by namecheapService.
+ * Always returns both the original USD values and the converted NGN values.
+ */
+async function attachNgnPricing(pricing) {
+  const exchangeRate = await getUSDToNGNExchangeRate();
+  const buffer       = parseFloat(process.env.DOMAIN_NGN_BUFFER || '2000');
+
+  const pricePerYearNgn = Math.ceil(pricing.pricePerYear * exchangeRate + buffer);
+  const totalPriceNgn   = Math.ceil(pricing.totalPrice   * exchangeRate + buffer * pricing.years);
+
+  return {
+    ...pricing,
+    pricePerYearUsd: pricing.pricePerYear,
+    totalPriceUsd:   pricing.totalPrice,
+    pricePerYearNgn,
+    totalPriceNgn,
+    displayCurrency:  'NGN',
+    exchangeRate,
+    bufferPerYear: buffer
+  };
+}
+
+/**
  * Check domain availability
- * GET /api/v1/domains/check?domain=example.com
+ * GET /api/v1/domains/check?domain=example.com&years=1
+ *
+ * Returns availability + NGN pricing when the domain is available.
  */
 async function checkDomainAvailability(req, res) {
   try {
-    const { domain } = req.query;
+    const { domain, years = 1 } = req.query;
 
     if (!domain) {
       return res.status(400).json({
@@ -56,18 +81,41 @@ async function checkDomainAvailability(req, res) {
       });
     }
 
-    const result = await namecheapService.checkDomainAvailability(domain);
+    // Surface credential errors clearly instead of a generic 500
+    if (!process.env.NAMECHEAP_API_USER || !process.env.NAMECHEAP_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        message: 'Domain search is not configured yet. Please contact support.',
+        error: 'namecheap_credentials_missing'
+      });
+    }
+
+    const result  = await namecheapService.checkDomainAvailability(domain);
+
+    // Fetch pricing and convert to NGN whenever domain is available
+    let pricing = null;
+    if (result.available) {
+      try {
+        const rawPricing = await namecheapService.getDomainPricing(domain, parseInt(years));
+        pricing = await attachNgnPricing(rawPricing);
+      } catch (pricingErr) {
+        console.warn('Could not fetch pricing for available domain:', pricingErr.message);
+      }
+    }
 
     res.json({
       success: true,
-      data: result
+      data: {
+        ...result,
+        pricing: pricing || null
+      }
     });
   } catch (error) {
     console.error('Error checking domain availability:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to check domain availability',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: error.message
     });
   }
 }
@@ -75,6 +123,8 @@ async function checkDomainAvailability(req, res) {
 /**
  * Get domain pricing
  * GET /api/v1/domains/pricing?domain=example.com&years=1
+ *
+ * Always returns both USD (from Namecheap) and NGN (converted) prices.
  */
 async function getDomainPricing(req, res) {
   try {
@@ -87,7 +137,16 @@ async function getDomainPricing(req, res) {
       });
     }
 
-    const pricing = await namecheapService.getDomainPricing(domain, parseInt(years));
+    if (!process.env.NAMECHEAP_API_USER || !process.env.NAMECHEAP_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        message: 'Domain pricing is not configured yet. Please contact support.',
+        error: 'namecheap_credentials_missing'
+      });
+    }
+
+    const rawPricing = await namecheapService.getDomainPricing(domain, parseInt(years));
+    const pricing    = await attachNgnPricing(rawPricing);
 
     res.json({
       success: true,
@@ -98,7 +157,7 @@ async function getDomainPricing(req, res) {
     res.status(500).json({
       success: false,
       message: 'Failed to get domain pricing',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: error.message
     });
   }
 }
