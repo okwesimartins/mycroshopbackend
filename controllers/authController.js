@@ -1,10 +1,43 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { User, Tenant, getTenantByUserEmail, createTenant, getTenantById, getTenantBySubdomain } = require('../config/tenant');
-const { migrateFreeUserToEnterprise, createTenantDatabase } = require('../config/database');
+const { migrateFreeUserToEnterprise, createTenantDatabase, mainSequelize } = require('../config/database');
 const { validationResult } = require('express-validator');
+
+// ── Token helpers ─────────────────────────────────────────────────────────────
+
+function signAccessToken(payload) {
+  return jwt.sign(payload, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m'
+  });
+}
+
+async function createRefreshToken(userId) {
+  const raw       = crypto.randomBytes(40).toString('hex');
+  const hash      = crypto.createHash('sha256').update(raw).digest('hex');
+  const days      = parseInt(process.env.JWT_REFRESH_EXPIRES_DAYS || '30', 10);
+  const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+
+  await mainSequelize.query(
+    `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)`,
+    { replacements: [userId, hash, expiresAt] }
+  );
+
+  return raw; // return raw token to send to client; only the hash is stored
+}
+
+async function rotateRefreshToken(oldRaw, userId) {
+  const oldHash = crypto.createHash('sha256').update(oldRaw).digest('hex');
+  // Delete the old token (rotation — one-time use)
+  await mainSequelize.query(
+    `DELETE FROM refresh_tokens WHERE token_hash = ? AND user_id = ?`,
+    { replacements: [oldHash, userId] }
+  );
+  return createRefreshToken(userId);
+}
 
 /**
  * Register a new tenant
@@ -138,29 +171,17 @@ async function login(req, res) {
 
     // Check if platform admin (no tenant required)
     if (user.is_platform_admin || user.role === 'platform_admin') {
-      // Generate JWT token for platform admin
-      const token = jwt.sign(
-        {
-          userId: user.id,
-          email: user.email,
-          role: 'platform_admin',
-          is_platform_admin: true
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-      );
+      const accessToken   = signAccessToken({ userId: user.id, email: user.email, role: 'platform_admin', is_platform_admin: true });
+      const refreshToken  = await createRefreshToken(user.id);
 
       return res.json({
         success: true,
         message: 'Login successful',
         data: {
-          token,
-          user: {
-            id: user.id,
-            email: user.email,
-            role: 'platform_admin',
-            is_platform_admin: true
-          }
+          token: accessToken,
+          refresh_token: refreshToken,
+          expires_in: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
+          user: { id: user.id, email: user.email, role: 'platform_admin', is_platform_admin: true }
         }
       });
     }
@@ -168,112 +189,154 @@ async function login(req, res) {
     // Regular tenant user - get tenant
     const tenant = await getTenantByUserEmail(email);
     if (!tenant || tenant.status !== 'active') {
-      return res.status(403).json({
-        success: false,
-        message: 'Account is inactive'
-      });
+      return res.status(403).json({ success: false, message: 'Account is inactive' });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-        tenantId: tenant.id
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
+    const accessToken  = signAccessToken({ userId: user.id, email: user.email, role: user.role, tenantId: tenant.id });
+    const refreshToken = await createRefreshToken(user.id);
 
     res.json({
       success: true,
       message: 'Login successful',
       data: {
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          tenantId: tenant.id,
-          tenantName: tenant.name
-        }
+        token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
+        user: { id: user.id, email: user.email, role: user.role, tenantId: tenant.id, tenantName: tenant.name }
       }
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Login failed'
-    });
+    res.status(500).json({ success: false, message: 'Login failed' });
   }
 }
 
 /**
- * Refresh token
+ * Refresh — exchange a refresh token for a new access token + rotated refresh token
+ * POST /api/v1/auth/refresh
+ * Body: { refresh_token: "..." }
  */
 async function refreshToken(req, res) {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        message: 'No token provided'
-      });
+    const { refresh_token } = req.body;
+    if (!refresh_token) {
+      return res.status(401).json({ success: false, message: 'refresh_token is required' });
     }
 
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: true });
+    const hash = crypto.createHash('sha256').update(refresh_token).digest('hex');
 
-    // Verify user still exists
-    const user = await User.findByPk(decoded.userId);
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not found'
-      });
+    const [rows] = await mainSequelize.query(
+      `SELECT rt.*, u.email, u.role, u.is_platform_admin
+       FROM refresh_tokens rt
+       JOIN users u ON u.id = rt.user_id
+       WHERE rt.token_hash = ?
+         AND rt.expires_at > NOW()
+       LIMIT 1`,
+      { replacements: [hash] }
+    );
+
+    if (!rows.length) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
     }
 
-    // Handle platform admin token refresh
-    if (user.is_platform_admin || user.role === 'platform_admin' || decoded.is_platform_admin) {
-      const newToken = jwt.sign(
-        {
-          userId: user.id,
-          email: user.email,
-          role: 'platform_admin',
-          is_platform_admin: true
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    const row    = rows[0];
+    const userId = row.user_id;
+
+    // Rotate: delete old token, issue new one
+    const newRefreshToken = await rotateRefreshToken(refresh_token, userId);
+
+    // Issue new access token
+    let payload;
+    if (row.is_platform_admin || row.role === 'platform_admin') {
+      payload = { userId, email: row.email, role: 'platform_admin', is_platform_admin: true };
+    } else {
+      // Re-fetch tenantId from tenant table
+      const tenant = await getTenantByUserEmail(row.email);
+      payload = { userId, email: row.email, role: row.role, tenantId: tenant?.id };
+    }
+
+    const newAccessToken = signAccessToken(payload);
+
+    res.json({
+      success: true,
+      data: {
+        token: newAccessToken,
+        refresh_token: newRefreshToken,
+        expires_in: process.env.JWT_ACCESS_EXPIRES_IN || '15m'
+      }
+    });
+  } catch (error) {
+    console.error('refreshToken error:', error);
+    res.status(401).json({ success: false, message: 'Token refresh failed' });
+  }
+}
+
+/**
+ * Logout — invalidate the refresh token
+ * POST /api/v1/auth/logout
+ * Body: { refresh_token: "..." }
+ */
+async function logout(req, res) {
+  try {
+    const { refresh_token } = req.body;
+    if (refresh_token) {
+      const hash = crypto.createHash('sha256').update(refresh_token).digest('hex');
+      await mainSequelize.query(
+        `DELETE FROM refresh_tokens WHERE token_hash = ?`,
+        { replacements: [hash] }
       );
+    }
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Logout failed' });
+  }
+}
 
-      return res.json({
-        success: true,
-        data: { token: newToken }
-      });
+/**
+ * GET /api/v1/auth/biometric
+ * Returns whether the authenticated user has biometric login enabled.
+ */
+async function getBiometricStatus(req, res) {
+  try {
+    const user = await User.findByPk(req.user.id, { attributes: ['id', 'biometric_enabled'] });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    res.json({
+      success: true,
+      data: { biometric_enabled: user.biometric_enabled ? 1 : 0 }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to get biometric status' });
+  }
+}
+
+/**
+ * PUT /api/v1/auth/biometric
+ * Enable or disable biometric login for the authenticated user.
+ * Body: { enabled: 1 } or { enabled: 0 }
+ */
+async function setBiometricStatus(req, res) {
+  try {
+    const { enabled } = req.body;
+
+    if (enabled === undefined || enabled === null) {
+      return res.status(400).json({ success: false, message: 'enabled is required (1 or 0)' });
     }
 
-    // Generate new token for regular tenant user
-    const newToken = jwt.sign(
-      {
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-        tenantId: decoded.tenantId
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    const value = enabled == 1 ? 1 : 0;
+
+    await User.update(
+      { biometric_enabled: value },
+      { where: { id: req.user.id } }
     );
 
     res.json({
       success: true,
-      data: { token: newToken }
+      message: value ? 'Biometric login enabled' : 'Biometric login disabled',
+      data: { biometric_enabled: value }
     });
   } catch (error) {
-    res.status(401).json({
-      success: false,
-      message: 'Invalid token'
-    });
+    res.status(500).json({ success: false, message: 'Failed to update biometric status' });
   }
 }
 
@@ -1124,6 +1187,9 @@ module.exports = {
   upsertBankDetails,
   deleteBankDetails,
   getPaymentMethod,
-  updatePaymentMethod
+  updatePaymentMethod,
+  logout,
+  getBiometricStatus,
+  setBiometricStatus
 };
 

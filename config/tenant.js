@@ -165,6 +165,11 @@ const User = mainSequelize.define('User', {
     defaultValue: false,
     comment: 'True for Mycroshop platform owners'
   },
+  biometric_enabled: {
+    type: require('sequelize').DataTypes.TINYINT(1),
+    defaultValue: 0,
+    comment: '1 = user has enabled biometric login on their mobile device'
+  },
   created_at: {
     type: require('sequelize').DataTypes.DATE,
     defaultValue: require('sequelize').DataTypes.NOW

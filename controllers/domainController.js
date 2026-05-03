@@ -79,7 +79,8 @@ async function attachNgnPricing(pricing) {
  */
 async function checkDomainAvailability(req, res) {
   try {
-    const { domain, years = 1 } = req.query;
+    const { domain } = req.query;
+    const years = parseInt(req.query.years || req.query.year || 1, 10);
 
     if (!domain) {
       return res.status(400).json({
@@ -135,7 +136,8 @@ async function checkDomainAvailability(req, res) {
  */
 async function getDomainPricing(req, res) {
   try {
-    const { domain, years = 1 } = req.query;
+    const { domain } = req.query;
+    const years = parseInt(req.query.years || req.query.year || 1, 10);
 
     if (!domain) {
       return res.status(400).json({

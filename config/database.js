@@ -1929,6 +1929,28 @@ async function initializeMainDatabaseTables() {
     `);
     console.log('✅ whatsapp_subscriptions table created/verified in main database');
 
+    // ── biometric_enabled column on users (safe one-time migration) ────────
+    await connection.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS biometric_enabled TINYINT(1) NOT NULL DEFAULT 0
+        COMMENT '1 = user has enabled biometric login on their mobile device'
+    `).catch(() => {}); // ignore if column already exists (MySQL < 8 doesn't support IF NOT EXISTS on ALTER)
+
+    // ── Refresh Tokens ─────────────────────────────────────────────────────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        user_id      INT          NOT NULL,
+        token_hash   VARCHAR(64)  NOT NULL UNIQUE,
+        expires_at   DATETIME     NOT NULL,
+        created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_token_hash (token_hash),
+        INDEX idx_user_id (user_id),
+        INDEX idx_expires_at (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ refresh_tokens table created/verified in main database');
+
     await connection.end();
     return true;
   } catch (error) {

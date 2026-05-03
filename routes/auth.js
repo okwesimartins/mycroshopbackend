@@ -80,7 +80,13 @@ router.post('/login',
 // Refresh token
 router.post('/refresh', authController.refreshToken);
 
+// Logout — invalidates refresh token
+router.post('/logout', authController.logout);
+
 // ==================== PROTECTED ROUTES ====================
+// Biometric preference (requires auth)
+router.get('/biometric', authenticate, authController.getBiometricStatus);
+router.put('/biometric', authenticate, authController.setBiometricStatus);
 
 // Get current user
 router.get('/me', authenticate, authController.getCurrentUser);
