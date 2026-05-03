@@ -53,14 +53,21 @@ async function attachNgnPricing(pricing) {
   const totalPriceNgn   = Math.ceil(pricing.totalPrice   * exchangeRate + buffer * pricing.years);
 
   return {
-    ...pricing,
+    domain:         pricing.domain,
+    tld:            pricing.tld,
+    years:          pricing.years,
+    // Primary display values — NGN
+    pricePerYear:   pricePerYearNgn,
+    totalPrice:     totalPriceNgn,
+    currency:       'NGN',
+    // Original USD values for reference
     pricePerYearUsd: pricing.pricePerYear,
     totalPriceUsd:   pricing.totalPrice,
-    pricePerYearNgn,
-    totalPriceNgn,
-    displayCurrency:  'NGN',
+    // Conversion details
     exchangeRate,
-    bufferPerYear: buffer
+    bufferPerYear:  buffer,
+    isSandbox:      pricing.isSandbox,
+    note:           pricing.note || null
   };
 }
 
