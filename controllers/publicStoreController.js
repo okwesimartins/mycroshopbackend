@@ -2167,8 +2167,8 @@ async function getPublicProducts(req, res) {
         const variantsByProduct = {};
         const variantRows = await sequelize.query(`
           SELECT pv.id as variant_id, pv.product_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
-                 pvo.id as vopt_id, pvopt.option_value, pvopt.option_display_name,
-                 pvar.variation_name, pvar.variation_type
+                 pvo.id as vopt_id, pvo.option_id, pvopt.option_value, pvopt.option_display_name,
+                 pvar.id as variation_id, pvar.variation_name, pvar.variation_type
           FROM product_variants pv
           LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
           LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
@@ -2197,10 +2197,12 @@ async function getPublicProducts(req, res) {
           }
           if (v.vopt_id) {
             variantsByProduct[v.product_id][v.variant_id].options.push({
-              variation_name: v.variation_name,
-              variation_type: v.variation_type,
+              option_id: v.option_id,
               option_value: v.option_value,
-              option_display_name: v.option_display_name
+              display_name: v.option_display_name,
+              variation_id: v.variation_id,
+              variation_name: v.variation_name,
+              variation_type: v.variation_type
             });
           }
         });
@@ -2337,8 +2339,8 @@ async function getPublicProducts(req, res) {
       if (enterpriseProductIds.length > 0) {
         const variantRows = await sequelize.query(`
           SELECT pv.id as variant_id, pv.product_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
-                 pvo.id as vopt_id, pvopt.option_value, pvopt.option_display_name,
-                 pvar.variation_name, pvar.variation_type
+                 pvo.id as vopt_id, pvo.option_id, pvopt.option_value, pvopt.option_display_name,
+                 pvar.id as variation_id, pvar.variation_name, pvar.variation_type
           FROM product_variants pv
           LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
           LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
@@ -2367,10 +2369,12 @@ async function getPublicProducts(req, res) {
           }
           if (v.vopt_id) {
             variantsByProduct[v.product_id][v.variant_id].options.push({
-              variation_name: v.variation_name,
-              variation_type: v.variation_type,
+              option_id: v.option_id,
               option_value: v.option_value,
-              option_display_name: v.option_display_name
+              display_name: v.option_display_name,
+              variation_id: v.variation_id,
+              variation_name: v.variation_name,
+              variation_type: v.variation_type
             });
           }
         });
@@ -2574,8 +2578,8 @@ async function getPublicProduct(req, res) {
       // Fetch variants (specific sellable combinations) for this product
       const variantDetailRows = await sequelize.query(`
         SELECT pv.id as variant_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
-               pvo.id as vopt_id, pvopt.option_value, pvopt.option_display_name,
-               pvar.variation_name, pvar.variation_type
+               pvo.id as vopt_id, pvo.option_id, pvopt.option_value, pvopt.option_display_name,
+               pvar.id as variation_id, pvar.variation_name, pvar.variation_type
         FROM product_variants pv
         LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
         LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
@@ -2604,10 +2608,12 @@ async function getPublicProduct(req, res) {
         }
         if (v.vopt_id) {
           variantsMap[v.variant_id].options.push({
-            variation_name: v.variation_name,
-            variation_type: v.variation_type,
+            option_id: v.option_id,
             option_value: v.option_value,
-            option_display_name: v.option_display_name
+            display_name: v.option_display_name,
+            variation_id: v.variation_id,
+            variation_name: v.variation_name,
+            variation_type: v.variation_type
           });
         }
       });
@@ -2717,8 +2723,8 @@ async function getPublicProduct(req, res) {
       // Fetch variants (specific sellable combinations) for this product
       const variantEnterpriseRows = await sequelize.query(`
         SELECT pv.id as variant_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
-               pvo.id as vopt_id, pvopt.option_value, pvopt.option_display_name,
-               pvar.variation_name, pvar.variation_type
+               pvo.id as vopt_id, pvo.option_id, pvopt.option_value, pvopt.option_display_name,
+               pvar.id as variation_id, pvar.variation_name, pvar.variation_type
         FROM product_variants pv
         LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
         LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
@@ -2746,10 +2752,12 @@ async function getPublicProduct(req, res) {
         }
         if (v.vopt_id) {
           enterpriseVariantsMap[v.variant_id].options.push({
-            variation_name: v.variation_name,
-            variation_type: v.variation_type,
+            option_id: v.option_id,
             option_value: v.option_value,
-            option_display_name: v.option_display_name
+            display_name: v.option_display_name,
+            variation_id: v.variation_id,
+            variation_name: v.variation_name,
+            variation_type: v.variation_type
           });
         }
       });
