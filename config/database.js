@@ -1951,6 +1951,38 @@ async function initializeMainDatabaseTables() {
     `);
     console.log('✅ refresh_tokens table created/verified in main database');
 
+    // ── Device Tokens (FCM push notification tokens per user/tenant) ──────────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS device_tokens (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        tenant_id  INT          NOT NULL,
+        user_id    INT          NOT NULL,
+        token      VARCHAR(255) NOT NULL,
+        platform   ENUM('android','ios','web') NOT NULL DEFAULT 'android',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_token (token),
+        INDEX idx_tenant_id (tenant_id),
+        INDEX idx_user_id (user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ device_tokens table created/verified in main database');
+
+    // ── Notifications Sent (deduplication — prevents sending the same push twice) ─
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS notifications_sent (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        tenant_id    INT          NOT NULL,
+        type         VARCHAR(100) NOT NULL,
+        reference_id VARCHAR(255) NOT NULL,
+        sent_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_notification (tenant_id, type, reference_id),
+        INDEX idx_tenant_id (tenant_id),
+        INDEX idx_sent_at (sent_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ notifications_sent table created/verified in main database');
+
     await connection.end();
     return true;
   } catch (error) {

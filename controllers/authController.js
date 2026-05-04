@@ -1167,6 +1167,68 @@ async function updatePaymentMethod(req, res) {
   }
 }
 
+/**
+ * PUT /auth/device-token
+ * Register or update an FCM device token for push notifications.
+ * Body: { token: string, platform?: 'android' | 'ios' | 'web' }
+ */
+async function registerDeviceToken(req, res) {
+  try {
+    const { token, platform = 'android' } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'token is required' });
+    }
+
+    const validPlatforms = ['android', 'ios', 'web'];
+    if (!validPlatforms.includes(platform)) {
+      return res.status(400).json({ success: false, message: 'platform must be android, ios, or web' });
+    }
+
+    const tenantId = req.user.tenantId;
+    const userId = req.user.id;
+
+    await mainSequelize.query(
+      `INSERT INTO device_tokens (tenant_id, user_id, token, platform)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         tenant_id  = VALUES(tenant_id),
+         user_id    = VALUES(user_id),
+         platform   = VALUES(platform),
+         updated_at = CURRENT_TIMESTAMP`,
+      { replacements: [tenantId, userId, token, platform] }
+    );
+
+    res.json({ success: true, message: 'Device token registered successfully' });
+  } catch (error) {
+    console.error('registerDeviceToken error:', error);
+    res.status(500).json({ success: false, message: 'Failed to register device token' });
+  }
+}
+
+/**
+ * DELETE /auth/device-token
+ * Remove an FCM device token (call on logout to stop receiving notifications).
+ * Body: { token: string }
+ */
+async function removeDeviceToken(req, res) {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'token is required' });
+    }
+
+    await mainSequelize.query(
+      'DELETE FROM device_tokens WHERE token = ? AND user_id = ?',
+      { replacements: [token, req.user.id] }
+    );
+
+    res.json({ success: true, message: 'Device token removed successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to remove device token' });
+  }
+}
+
 // Export with authenticate middleware attached
 const { authenticate } = require('../middleware/auth');
 getCurrentUser.authenticate = authenticate;
@@ -1190,6 +1252,8 @@ module.exports = {
   updatePaymentMethod,
   logout,
   getBiometricStatus,
-  setBiometricStatus
+  setBiometricStatus,
+  registerDeviceToken,
+  removeDeviceToken
 };
 

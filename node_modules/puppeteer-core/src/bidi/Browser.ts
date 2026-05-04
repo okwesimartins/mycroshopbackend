@@ -8,7 +8,7 @@ import type {ChildProcess} from 'node:child_process';
 
 import * as Bidi from 'webdriver-bidi-protocol';
 
-import type {BrowserEvents} from '../api/Browser.js';
+import type {BrowserEvents, CreatePageOptions} from '../api/Browser.js';
 import {
   Browser,
   BrowserEvent,
@@ -25,8 +25,7 @@ import type {Page} from '../api/Page.js';
 import type {Target} from '../api/Target.js';
 import type {Connection as CdpConnection} from '../cdp/Connection.js';
 import type {SupportedWebDriverCapabilities} from '../common/ConnectOptions.js';
-import {ProtocolError} from '../common/Errors.js';
-import {UnsupportedOperation} from '../common/Errors.js';
+import {ProtocolError, UnsupportedOperation} from '../common/Errors.js';
 import {EventEmitter} from '../common/EventEmitter.js';
 import {debugError} from '../common/util.js';
 import type {Viewport} from '../common/Viewport.js';
@@ -282,8 +281,8 @@ export class BidiBrowser extends Browser {
     return this.#browserContexts.get(this.#browserCore.defaultUserContext)!;
   }
 
-  override newPage(): Promise<Page> {
-    return this.defaultBrowserContext().newPage();
+  override newPage(options?: CreatePageOptions): Promise<Page> {
+    return this.defaultBrowserContext().newPage(options);
   }
 
   override installExtension(path: string): Promise<string> {
@@ -306,15 +305,41 @@ export class BidiBrowser extends Browser {
     throw new UnsupportedOperation();
   }
 
-  override getWindowBounds(_windowId: WindowId): Promise<WindowBounds> {
-    throw new UnsupportedOperation();
+  override async getWindowBounds(windowId: WindowId): Promise<WindowBounds> {
+    const clientWindowInfo =
+      await this.#browserCore.getClientWindowInfo(windowId);
+    return {
+      left: clientWindowInfo.x,
+      top: clientWindowInfo.y,
+      width: clientWindowInfo.width,
+      height: clientWindowInfo.height,
+      windowState: clientWindowInfo.state,
+    };
   }
 
-  override setWindowBounds(
-    _windowId: WindowId,
-    _windowBounds: WindowBounds,
+  override async setWindowBounds(
+    windowId: WindowId,
+    windowBounds: WindowBounds,
   ): Promise<void> {
-    throw new UnsupportedOperation();
+    let params: Bidi.Browser.SetClientWindowStateParameters | undefined;
+    const windowState = windowBounds.windowState ?? 'normal';
+    if (windowState === 'normal') {
+      params = {
+        clientWindow: windowId,
+        state: 'normal',
+        x: windowBounds.left,
+        y: windowBounds.top,
+        width: windowBounds.width,
+        height: windowBounds.height,
+      };
+    } else {
+      params = {
+        clientWindow: windowId,
+        state: windowState,
+      };
+    }
+
+    await this.#browserCore.setClientWindowState(params);
   }
 
   override targets(): Target[] {

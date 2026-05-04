@@ -1344,6 +1344,44 @@ async function verifyPayment(req, res) {
               transaction: dbTransaction
             });
 
+            // Deduct stock atomically — WHERE stock >= qty prevents going negative.
+            // If affectedRows = 0, stock was insufficient (oversell scenario).
+            if (order) {
+              for (const item of (order.OnlineStoreOrderItems || [])) {
+                const qty = Number(item.quantity || 1);
+                const productId = item.product_id;
+                const variantId = item.variant_id;
+                if (!productId) continue;
+                try {
+                  let affectedRows = 0;
+                  if (variantId) {
+                    const [, meta] = await sequelize.query(
+                      'UPDATE product_variants SET stock = stock - ? WHERE id = ? AND stock >= ?',
+                      { replacements: [qty, variantId, qty], transaction: dbTransaction }
+                    );
+                    affectedRows = meta?.affectedRows ?? 0;
+                  } else {
+                    const w = (isFreePlan && currentTransaction.tenant_id)
+                      ? 'id = ? AND tenant_id = ? AND stock >= ?'
+                      : 'id = ? AND stock >= ?';
+                    const r = (isFreePlan && currentTransaction.tenant_id)
+                      ? [qty, productId, currentTransaction.tenant_id, qty]
+                      : [qty, productId, qty];
+                    const [, meta] = await sequelize.query(
+                      `UPDATE products SET stock = stock - ? WHERE ${w}`,
+                      { replacements: r, transaction: dbTransaction }
+                    );
+                    affectedRows = meta?.affectedRows ?? 0;
+                  }
+                  if (affectedRows === 0) {
+                    console.warn(`⚠️  Oversell: product ${productId} insufficient stock for order ${order.id}`);
+                  }
+                } catch (stockErr) {
+                  console.error('Stock deduction error for product', productId, ':', stockErr.message);
+                }
+              }
+            }
+
             if (order && currentTransaction.customer_email) {
               // Use tenant_id from transaction or from query parameter
               const transactionTenantId = currentTransaction.tenant_id || parsedTenantId;
@@ -1353,11 +1391,11 @@ async function verifyPayment(req, res) {
                 const orderJson = order.toJSON();
                 // Access items from JSON (Sequelize pluralizes association names in JSON)
                 const items = orderJson.OnlineStoreOrderItems || order.OnlineStoreOrderItems || [];
-                
+
                 // Commit transaction before sending email (email service doesn't need DB transaction)
                 await dbTransaction.commit();
                 emailSent = true;
-                
+
                 // Send email outside transaction
                 await sendOrderConfirmationEmail({
                   tenant: tenantForEmail,
@@ -1367,6 +1405,17 @@ async function verifyPayment(req, res) {
                   items: items
                 });
               }
+            }
+
+            // Fire-and-forget: notify store owner of confirmed payment — real order, money received
+            if (order) {
+              try {
+                const { notifyNewOrder } = require('../services/notificationService');
+                const notifTenantId = currentTransaction.tenant_id || parsedTenantId;
+                if (notifTenantId) {
+                  notifyNewOrder(notifTenantId, order).catch(() => {});
+                }
+              } catch (_) {}
             }
           } catch (emailError) {
             console.error('Error sending order confirmation email:', emailError);
@@ -2334,6 +2383,44 @@ async function handlePaymentWebhook(req, res) {
             ]
           });
 
+          // Deduct stock atomically — WHERE stock >= qty prevents going negative.
+          // If affectedRows = 0, stock was insufficient (oversell scenario).
+          if (order) {
+            for (const item of (order.OnlineStoreOrderItems || [])) {
+              const qty = Number(item.quantity || 1);
+              const productId = item.product_id;
+              const variantId = item.variant_id;
+              if (!productId) continue;
+              try {
+                let affectedRows = 0;
+                if (variantId) {
+                  const [, meta] = await sequelize.query(
+                    'UPDATE product_variants SET stock = stock - ? WHERE id = ? AND stock >= ?',
+                    { replacements: [qty, variantId, qty] }
+                  );
+                  affectedRows = meta?.affectedRows ?? 0;
+                } else {
+                  const w = (isFreePlan && transaction.tenant_id)
+                    ? 'id = ? AND tenant_id = ? AND stock >= ?'
+                    : 'id = ? AND stock >= ?';
+                  const r = (isFreePlan && transaction.tenant_id)
+                    ? [qty, productId, transaction.tenant_id, qty]
+                    : [qty, productId, qty];
+                  const [, meta] = await sequelize.query(
+                    `UPDATE products SET stock = stock - ? WHERE ${w}`,
+                    { replacements: r }
+                  );
+                  affectedRows = meta?.affectedRows ?? 0;
+                }
+                if (affectedRows === 0) {
+                  console.warn(`⚠️  Oversell: product ${productId} insufficient stock for order ${order.id}`);
+                }
+              } catch (stockErr) {
+                console.error('Stock deduction error for product', productId, ':', stockErr.message);
+              }
+            }
+          }
+
           if (order) {
             // Send order confirmation email after successful payment
             try {
@@ -2352,6 +2439,15 @@ async function handlePaymentWebhook(req, res) {
               console.error('Error sending order confirmation email:', emailError);
               // Don't fail webhook processing if email fails
             }
+
+            // Fire-and-forget: notify store owner of confirmed payment — real order, money received
+            try {
+              const { notifyNewOrder } = require('../services/notificationService');
+              const notifTenantId = transaction.tenant_id || parsedTenantId;
+              if (notifTenantId) {
+                notifyNewOrder(notifTenantId, order).catch(() => {});
+              }
+            } catch (_) {}
           }
         }
       }
@@ -2408,6 +2504,42 @@ async function handlePaymentWebhook(req, res) {
               variant_id: it.variant_id || null,
             })));
 
+            // Deduct stock atomically — WHERE stock >= qty prevents going negative.
+            // If affectedRows = 0, stock was insufficient (oversell scenario).
+            for (const it of items) {
+              const qty = Number(it.quantity || 1);
+              const productId = it.product_id ? parseInt(it.product_id, 10) : null;
+              const variantId = it.variant_id ? parseInt(it.variant_id, 10) : null;
+              if (!productId) continue;
+              try {
+                let affectedRows = 0;
+                if (variantId) {
+                  const [, meta] = await sequelize.query(
+                    'UPDATE product_variants SET stock = stock - ? WHERE id = ? AND stock >= ?',
+                    { replacements: [qty, variantId, qty] }
+                  );
+                  affectedRows = meta?.affectedRows ?? 0;
+                } else {
+                  const w = (isFreePlan && parsedTenantId)
+                    ? 'id = ? AND tenant_id = ? AND stock >= ?'
+                    : 'id = ? AND stock >= ?';
+                  const r = (isFreePlan && parsedTenantId)
+                    ? [qty, productId, parsedTenantId, qty]
+                    : [qty, productId, qty];
+                  const [, meta] = await sequelize.query(
+                    `UPDATE products SET stock = stock - ? WHERE ${w}`,
+                    { replacements: r }
+                  );
+                  affectedRows = meta?.affectedRows ?? 0;
+                }
+                if (affectedRows === 0) {
+                  console.warn(`⚠️  Oversell: product ${productId} insufficient stock for WhatsApp order ${waOrder.id}`);
+                }
+              } catch (stockErr) {
+                console.error('Stock deduction error for product', productId, ':', stockErr.message);
+              }
+            }
+
             // Link transaction to the new order
             await transaction.update({ order_id: waOrder.id });
 
@@ -2434,6 +2566,14 @@ async function handlePaymentWebhook(req, res) {
             } catch (emailErr) {
               console.error('Error sending WhatsApp order confirmation email:', emailErr);
             }
+
+            // Fire-and-forget: notify store owner — WhatsApp AI order paid via Paystack link
+            try {
+              const { notifyNewOrder } = require('../services/notificationService');
+              if (parsedTenantId) {
+                notifyNewOrder(parsedTenantId, waOrder).catch(() => {});
+              }
+            } catch (_) {}
           }
         } catch (waOrderErr) {
           console.error('Error creating WhatsApp product order from webhook:', waOrderErr);

@@ -133,6 +133,10 @@ router.put('/email',
   authController.updateEmail
 );
 
+// Device token for push notifications
+router.put('/device-token', authenticate, authController.registerDeviceToken);
+router.delete('/device-token', authenticate, authController.removeDeviceToken);
+
 // Upgrade free user to enterprise (requires license key)
 router.post('/upgrade',
   authenticate,

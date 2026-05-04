@@ -1133,10 +1133,18 @@ async function confirmOrderPayment(req, res) {
         status: 'confirmed',
         updated_at: new Date()
       });
+      const approvedOrder = await order.reload();
+
+      // Fire-and-forget: notify tenant of confirmed WhatsApp AI order
+      try {
+        const { notifyNewOrder } = require('../services/notificationService');
+        notifyNewOrder(tenantId, approvedOrder).catch(() => {});
+      } catch (_) {}
+
       return res.json({
         success: true,
         message: 'Payment confirmed and order approved',
-        data: { order: await order.reload() }
+        data: { order: approvedOrder }
       });
     }
     // decline: leave payment_status and status as-is (or could set a declined note)

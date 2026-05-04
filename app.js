@@ -140,6 +140,10 @@ initializeMainDatabaseTables()
   .then(() => console.log('✅ Main database tables initialized'))
   .catch(err => console.error('⚠️  Main database table initialization error:', err.message));
 
+// Analytics notifications are triggered by Linux cron scripts, not from app.js:
+//   Daily:  scripts/sendDailyAnalytics.js   (cron: 0 20 * * *)
+//   Weekly: scripts/sendWeeklyAnalytics.js  (cron: 0 9 * * 0)
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);

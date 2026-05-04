@@ -2163,11 +2163,56 @@ async function getPublicProducts(req, res) {
           }
         });
 
-        // Attach variations to each product
+        // Batch-fetch variants (specific sellable combinations) for all returned products
+        const variantsByProduct = {};
+        const variantRows = await sequelize.query(`
+          SELECT pv.id as variant_id, pv.product_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
+                 pvo.id as vopt_id, pvopt.option_value, pvopt.option_display_name,
+                 pvar.variation_name, pvar.variation_type
+          FROM product_variants pv
+          LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
+          LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
+          LEFT JOIN product_variations pvar ON pvo.variation_id = pvar.id
+          WHERE pv.product_id IN (:productIds)
+            AND pv.is_active = 1
+            AND pv.tenant_id = :tenantId
+          ORDER BY pv.product_id, pv.id
+        `, {
+          replacements: { tenantId: effectiveTenantId, productIds: productIdList },
+          type: Sequelize.QueryTypes.SELECT
+        });
+
+        variantRows.forEach(v => {
+          if (!variantsByProduct[v.product_id]) variantsByProduct[v.product_id] = {};
+          if (!variantsByProduct[v.product_id][v.variant_id]) {
+            variantsByProduct[v.product_id][v.variant_id] = {
+              id: v.variant_id,
+              sku: v.sku,
+              price: v.price,
+              stock: v.stock,
+              image_url: v.image_url ? getFullUrl(v.image_url) : null,
+              is_active: !!v.is_active,
+              options: []
+            };
+          }
+          if (v.vopt_id) {
+            variantsByProduct[v.product_id][v.variant_id].options.push({
+              variation_name: v.variation_name,
+              variation_type: v.variation_type,
+              option_value: v.option_value,
+              option_display_name: v.option_display_name
+            });
+          }
+        });
+
+        // Attach variations and variants to each product
         products = products.map(p => ({
           ...p,
           variations: variationsByProduct[p.id]
             ? Object.values(variationsByProduct[p.id])
+            : [],
+          variants: variantsByProduct[p.id]
+            ? Object.values(variantsByProduct[p.id])
             : []
         }));
       }
@@ -2286,11 +2331,60 @@ async function getPublicProducts(req, res) {
         delete productData.StoreCollectionProducts;
         return productData;
       });
+
+      // Batch-fetch variants for all enterprise products
+      const enterpriseProductIds = products.map(p => p.id).filter(Boolean);
+      if (enterpriseProductIds.length > 0) {
+        const variantRows = await sequelize.query(`
+          SELECT pv.id as variant_id, pv.product_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
+                 pvo.id as vopt_id, pvopt.option_value, pvopt.option_display_name,
+                 pvar.variation_name, pvar.variation_type
+          FROM product_variants pv
+          LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
+          LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
+          LEFT JOIN product_variations pvar ON pvo.variation_id = pvar.id
+          WHERE pv.product_id IN (:productIds)
+            AND pv.is_active = 1
+          ORDER BY pv.product_id, pv.id
+        `, {
+          replacements: { productIds: enterpriseProductIds },
+          type: Sequelize.QueryTypes.SELECT
+        });
+
+        const variantsByProduct = {};
+        variantRows.forEach(v => {
+          if (!variantsByProduct[v.product_id]) variantsByProduct[v.product_id] = {};
+          if (!variantsByProduct[v.product_id][v.variant_id]) {
+            variantsByProduct[v.product_id][v.variant_id] = {
+              id: v.variant_id,
+              sku: v.sku,
+              price: v.price,
+              stock: v.stock,
+              image_url: v.image_url ? getFullUrl(v.image_url) : null,
+              is_active: !!v.is_active,
+              options: []
+            };
+          }
+          if (v.vopt_id) {
+            variantsByProduct[v.product_id][v.variant_id].options.push({
+              variation_name: v.variation_name,
+              variation_type: v.variation_type,
+              option_value: v.option_value,
+              option_display_name: v.option_display_name
+            });
+          }
+        });
+
+        products = products.map(p => ({
+          ...p,
+          variants: variantsByProduct[p.id] ? Object.values(variantsByProduct[p.id]) : []
+        }));
+      }
     }
 
     res.json({
       success: true,
-      data: { 
+      data: {
         products,
         pagination: {
           page: pageNum,
@@ -2477,6 +2571,47 @@ async function getPublicProduct(req, res) {
         }
       });
 
+      // Fetch variants (specific sellable combinations) for this product
+      const variantDetailRows = await sequelize.query(`
+        SELECT pv.id as variant_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
+               pvo.id as vopt_id, pvopt.option_value, pvopt.option_display_name,
+               pvar.variation_name, pvar.variation_type
+        FROM product_variants pv
+        LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
+        LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
+        LEFT JOIN product_variations pvar ON pvo.variation_id = pvar.id
+        WHERE pv.product_id = :productId
+          AND pv.is_active = 1
+          AND pv.tenant_id = :tenantId
+        ORDER BY pv.id
+      `, {
+        replacements: { productId: product_id, tenantId: effectiveTenantId },
+        type: Sequelize.QueryTypes.SELECT
+      });
+
+      const variantsMap = {};
+      variantDetailRows.forEach(v => {
+        if (!variantsMap[v.variant_id]) {
+          variantsMap[v.variant_id] = {
+            id: v.variant_id,
+            sku: v.sku,
+            price: v.price,
+            stock: v.stock,
+            image_url: v.image_url ? getFullUrl(v.image_url) : null,
+            is_active: !!v.is_active,
+            options: []
+          };
+        }
+        if (v.vopt_id) {
+          variantsMap[v.variant_id].options.push({
+            variation_name: v.variation_name,
+            variation_type: v.variation_type,
+            option_value: v.option_value,
+            option_display_name: v.option_display_name
+          });
+        }
+      });
+
       product = {
         id: row.id,
         tenant_id: row.tenant_id,
@@ -2493,7 +2628,8 @@ async function getPublicProduct(req, res) {
         is_active: row.is_active,
         created_at: row.created_at,
         updated_at: row.updated_at,
-        variations: Object.values(variationsMap)
+        variations: Object.values(variationsMap),
+        variants: Object.values(variantsMap)
       };
     } else {
       // Enterprise users: use Sequelize
@@ -2578,6 +2714,47 @@ async function getPublicProduct(req, res) {
         delete productData.ProductVariations;
       }
 
+      // Fetch variants (specific sellable combinations) for this product
+      const variantEnterpriseRows = await sequelize.query(`
+        SELECT pv.id as variant_id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
+               pvo.id as vopt_id, pvopt.option_value, pvopt.option_display_name,
+               pvar.variation_name, pvar.variation_type
+        FROM product_variants pv
+        LEFT JOIN product_variant_options pvo ON pv.id = pvo.variant_id
+        LEFT JOIN product_variation_options pvopt ON pvo.option_id = pvopt.id
+        LEFT JOIN product_variations pvar ON pvo.variation_id = pvar.id
+        WHERE pv.product_id = :productId
+          AND pv.is_active = 1
+        ORDER BY pv.id
+      `, {
+        replacements: { productId: product_id },
+        type: Sequelize.QueryTypes.SELECT
+      });
+
+      const enterpriseVariantsMap = {};
+      variantEnterpriseRows.forEach(v => {
+        if (!enterpriseVariantsMap[v.variant_id]) {
+          enterpriseVariantsMap[v.variant_id] = {
+            id: v.variant_id,
+            sku: v.sku,
+            price: v.price,
+            stock: v.stock,
+            image_url: v.image_url ? getFullUrl(v.image_url) : null,
+            is_active: !!v.is_active,
+            options: []
+          };
+        }
+        if (v.vopt_id) {
+          enterpriseVariantsMap[v.variant_id].options.push({
+            variation_name: v.variation_name,
+            variation_type: v.variation_type,
+            option_value: v.option_value,
+            option_display_name: v.option_display_name
+          });
+        }
+      });
+
+      productData.variants = Object.values(enterpriseVariantsMap);
       product = productData;
     }
 

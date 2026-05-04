@@ -909,6 +909,7 @@ async function createPublicOrder(req, res) {
           order: completeOrder
         }
       });
+
     } catch (error) {
       await transaction.rollback();
       
