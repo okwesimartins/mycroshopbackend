@@ -2020,6 +2020,34 @@ async function createOnlineStoreProduct(req, res) {
 
     // Handle product variations if provided (support multiple variation types, e.g., Color + Size)
     if (hasVariationOptions && Array.isArray(parsedVariations) && parsedVariations.length > 0) {
+      // Pre-validate: at least one variation type must have images on all its options
+      // (could be Color OR Size — not necessarily the first type). Always required.
+      {
+        const anyVariationFullyImaged = parsedVariations.some((variationData, i) => {
+          if (!variationData.options || !Array.isArray(variationData.options)) return false;
+          const validOptions = variationData.options.filter(o => o && o.value);
+          if (validOptions.length === 0) return false;
+          return variationData.options.some((optionData, j) => {
+            if (!optionData || !optionData.value) return false;
+            if (optionData.image_url) return true;
+            const fieldName = `variation_option_image_${i}_${j}`;
+            if (req.file && (req.file.fieldname === fieldName || req.file.fieldname.startsWith(fieldName))) return true;
+            if (req.files) {
+              const files = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
+              return files.some(f => f.fieldname === fieldName || f.fieldname.startsWith(fieldName));
+            }
+            return false;
+          });
+        });
+        if (!anyVariationFullyImaged) {
+          cleanupFiles();
+          return res.status(400).json({
+            success: false,
+            message: 'At least one variation type must have at least one option with an image (the same image will be used for all options in that type).'
+          });
+        }
+      }
+
       for (let i = 0; i < parsedVariations.length; i++) {
         const variationData = parsedVariations[i];
         if (!variationData.variation_name || !variationData.variation_type) {
@@ -2077,6 +2105,35 @@ async function createOnlineStoreProduct(req, res) {
           });
         }
 
+        // Count images provided for this variation type and determine fallback behaviour:
+        // 0 images → no fallback (another type covers it)
+        // 1 image  → propagate it to all options in this type
+        // 2+ images but not all → error (must be consistent — either 1 shared or all individual)
+        // all have images → no fallback needed
+        const resolvedTypeImages = variationData.options.map((opt, k) => {
+          if (!opt || !opt.value) return null;
+          if (opt.image_url) return opt.image_url;
+          const fn = `variation_option_image_${i}_${k}`;
+          if (req.file && (req.file.fieldname === fn || req.file.fieldname.startsWith(fn)))
+            return `/uploads/product-variations/${req.file.filename}`;
+          if (req.files) {
+            const flist = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
+            const found = flist.find(f => f.fieldname === fn || f.fieldname.startsWith(fn));
+            if (found) return `/uploads/product-variations/${found.filename}`;
+          }
+          return null;
+        });
+        const validOptionCount = resolvedTypeImages.filter((_, k) => variationData.options[k] && variationData.options[k].value).length;
+        const imagedCount = resolvedTypeImages.filter(url => url !== null).length;
+        if (imagedCount > 1 && imagedCount < validOptionCount) {
+          cleanupFiles();
+          return res.status(400).json({
+            success: false,
+            message: `Variation "${variationData.variation_name}": if more than one option has an image, all options must have images. Either upload one image (shared across all) or upload one per option.`
+          });
+        }
+        const fallbackImageForType = imagedCount === 1 ? resolvedTypeImages.find(url => url !== null) : null;
+
         // Create variation options
         for (let j = 0; j < variationData.options.length; j++) {
           const optionData = variationData.options[j];
@@ -2084,7 +2141,7 @@ async function createOnlineStoreProduct(req, res) {
             continue; // Skip invalid options
           }
 
-          // Handle image: uploaded file OR image_url (either is enough)
+          // Handle image: uploaded file OR image_url, falling back to first image in this variation type
           let variationImageUrl = optionData.image_url || null;
           const variationImageFieldName = `variation_option_image_${i}_${j}`;
 
@@ -2106,82 +2163,61 @@ async function createOnlineStoreProduct(req, res) {
             }
           }
 
-          // When explicit variants are provided, variation-option images are optional
-          if (!hasExplicitVariants && !variationImageUrl) {
-            // Clean up product and variation created so far using raw queries
-            await req.db.query(`DELETE FROM product_variation_options WHERE variation_id = :variationId`, {
-              replacements: { variationId: variationId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM product_variations WHERE id = :variationId`, {
-              replacements: { variationId: variationId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM store_products WHERE product_id = :productId`, {
-              replacements: { productId: productId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM products WHERE id = :productId`, {
-              replacements: { productId: productId },
-              type: QueryTypes.DELETE
-            });
-            cleanupFiles();
-            return res.status(400).json({
-              success: false,
-              message: `Variation option "${optionData.value}" (position ${j}) is missing an image. Each variation option must have an image when not using explicit variants.`,
-              suggestion: `Either provide "image_url" in options[${j}], upload a file using field name "variation_option_image_${i}_${j}", or pass a "variants" array for combination-level images.`
-            });
-          }
+          if (!variationImageUrl && fallbackImageForType) variationImageUrl = fallbackImageForType;
 
-          // Validate required fields for variation options
-          if (optionData.price === undefined || optionData.price === null || optionData.price === '') {
-            await req.db.query(`DELETE FROM product_variation_options WHERE variation_id = :variationId`, {
-              replacements: { variationId: variationId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM product_variations WHERE id = :variationId`, {
-              replacements: { variationId: variationId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM store_products WHERE product_id = :productId`, {
-              replacements: { productId: productId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM products WHERE id = :productId`, {
-              replacements: { productId: productId },
-              type: QueryTypes.DELETE
-            });
-            cleanupFiles();
-            return res.status(400).json({
-              success: false,
-              message: `Variation option "${optionData.value}" (position ${j}) is missing price. Each variation option must have a price.`,
-              suggestion: `Provide "price" in options[${j}].`
-            });
-          }
 
-          if (optionData.stock === undefined || optionData.stock === null || optionData.stock === '') {
-            await req.db.query(`DELETE FROM product_variation_options WHERE variation_id = :variationId`, {
-              replacements: { variationId: variationId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM product_variations WHERE id = :variationId`, {
-              replacements: { variationId: variationId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM store_products WHERE product_id = :productId`, {
-              replacements: { productId: productId },
-              type: QueryTypes.DELETE
-            });
-            await req.db.query(`DELETE FROM products WHERE id = :productId`, {
-              replacements: { productId: productId },
-              type: QueryTypes.DELETE
-            });
-            cleanupFiles();
-            return res.status(400).json({
-              success: false,
-              message: `Variation option "${optionData.value}" (position ${j}) is missing stock. Each variation option must have stock quantity.`,
-              suggestion: `Provide "stock" in options[${j}].`
-            });
+          // Price and stock are only required when NOT using explicit variants.
+          // With variants, price and stock live on the variant row, not on the option.
+          if (!hasExplicitVariants) {
+            if (optionData.price === undefined || optionData.price === null || optionData.price === '') {
+              await req.db.query(`DELETE FROM product_variation_options WHERE variation_id = :variationId`, {
+                replacements: { variationId: variationId },
+                type: QueryTypes.DELETE
+              });
+              await req.db.query(`DELETE FROM product_variations WHERE id = :variationId`, {
+                replacements: { variationId: variationId },
+                type: QueryTypes.DELETE
+              });
+              await req.db.query(`DELETE FROM store_products WHERE product_id = :productId`, {
+                replacements: { productId: productId },
+                type: QueryTypes.DELETE
+              });
+              await req.db.query(`DELETE FROM products WHERE id = :productId`, {
+                replacements: { productId: productId },
+                type: QueryTypes.DELETE
+              });
+              cleanupFiles();
+              return res.status(400).json({
+                success: false,
+                message: `Variation option "${optionData.value}" (position ${j}) is missing price. Each variation option must have a price.`,
+                suggestion: `Provide "price" in options[${j}], or pass a "variants" array to set price per combination.`
+              });
+            }
+
+            if (optionData.stock === undefined || optionData.stock === null || optionData.stock === '') {
+              await req.db.query(`DELETE FROM product_variation_options WHERE variation_id = :variationId`, {
+                replacements: { variationId: variationId },
+                type: QueryTypes.DELETE
+              });
+              await req.db.query(`DELETE FROM product_variations WHERE id = :variationId`, {
+                replacements: { variationId: variationId },
+                type: QueryTypes.DELETE
+              });
+              await req.db.query(`DELETE FROM store_products WHERE product_id = :productId`, {
+                replacements: { productId: productId },
+                type: QueryTypes.DELETE
+              });
+              await req.db.query(`DELETE FROM products WHERE id = :productId`, {
+                replacements: { productId: productId },
+                type: QueryTypes.DELETE
+              });
+              cleanupFiles();
+              return res.status(400).json({
+                success: false,
+                message: `Variation option "${optionData.value}" (position ${j}) is missing stock. Each variation option must have stock quantity.`,
+                suggestion: `Provide "stock" in options[${j}], or pass a "variants" array to set stock per combination.`
+              });
+            }
           }
 
           // Calculate price adjustment from base (which is null, so use 0 as base)
@@ -2751,6 +2787,34 @@ async function updateOnlineStoreProduct(req, res) {
 
       // Create new variations if provided
       if (hasVariationOptions && Array.isArray(parsedVariations) && parsedVariations.length > 0) {
+        // Pre-validate: at least one variation type must have at least one option with an image.
+        // The same image is propagated to options that don't have one within that type.
+        {
+          const anyVariationHasImage = parsedVariations.some((variationData, i) => {
+            if (!variationData.options || !Array.isArray(variationData.options)) return false;
+            const validOptions = variationData.options.filter(o => o && o.value);
+            if (validOptions.length === 0) return false;
+            return variationData.options.some((optionData, j) => {
+              if (!optionData || !optionData.value) return false;
+              if (optionData.image_url) return true;
+              const fieldName = `variation_option_image_${i}_${j}`;
+              if (req.file && (req.file.fieldname === fieldName || req.file.fieldname.startsWith(fieldName))) return true;
+              if (req.files) {
+                const files = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
+                return files.some(f => f.fieldname === fieldName || f.fieldname.startsWith(fieldName));
+              }
+              return false;
+            });
+          });
+          if (!anyVariationHasImage) {
+            cleanupFiles();
+            return res.status(400).json({
+              success: false,
+              message: 'At least one variation type must have at least one option with an image (the same image will be used for all options in that type).'
+            });
+          }
+        }
+
         for (let i = 0; i < parsedVariations.length; i++) {
           const variationData = parsedVariations[i];
           if (!variationData.variation_name || !variationData.variation_type) {
@@ -2792,6 +2856,35 @@ async function updateOnlineStoreProduct(req, res) {
             });
           }
 
+          // Count images for this variation type and determine fallback behaviour:
+          // 0 images → no fallback (another type covers it)
+          // 1 image  → propagate it to all options in this type
+          // 2+ images but not all → error (must be consistent)
+          // all have images → no fallback needed
+          const resolvedTypeImages = variationData.options.map((opt, k) => {
+            if (!opt || !opt.value) return null;
+            if (opt.image_url) return opt.image_url;
+            const fn = `variation_option_image_${i}_${k}`;
+            if (req.file && (req.file.fieldname === fn || req.file.fieldname.startsWith(fn)))
+              return `/uploads/product-variations/${req.file.filename}`;
+            if (req.files) {
+              const flist = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
+              const found = flist.find(f => f.fieldname === fn || f.fieldname.startsWith(fn));
+              if (found) return `/uploads/product-variations/${found.filename}`;
+            }
+            return null;
+          });
+          const validOptionCount = resolvedTypeImages.filter((_, k) => variationData.options[k] && variationData.options[k].value).length;
+          const imagedCount = resolvedTypeImages.filter(url => url !== null).length;
+          if (imagedCount > 1 && imagedCount < validOptionCount) {
+            cleanupFiles();
+            return res.status(400).json({
+              success: false,
+              message: `Variation "${variationData.variation_name}": if more than one option has an image, all options must have images. Either upload one image (shared across all) or upload one per option.`
+            });
+          }
+          const fallbackImageForType = imagedCount === 1 ? resolvedTypeImages.find(url => url !== null) : null;
+
           // Create variation options
           for (let j = 0; j < variationData.options.length; j++) {
             const optionData = variationData.options[j];
@@ -2799,7 +2892,7 @@ async function updateOnlineStoreProduct(req, res) {
               continue;
             }
 
-            // Handle image: prioritize uploaded file over image_url (either is enough)
+            // Handle image: prioritize uploaded file over image_url, falling back to first image in this type
             let variationImageUrl = optionData.image_url || null;
             const variationImageFieldName = `variation_option_image_${i}_${j}`;
 
@@ -2821,30 +2914,26 @@ async function updateOnlineStoreProduct(req, res) {
               }
             }
 
-            // When explicit variants are provided, variation-option images are optional
-            if (!hasExplicitVariantsUpdate && !variationImageUrl) {
-              cleanupFiles();
-              return res.status(400).json({
-                success: false,
-                message: `Variation option "${optionData.value}" is missing an image. Provide image_url or upload a file with field name "${variationImageFieldName}", or pass a "variants" array for combination-level images.`
-              });
-            }
+            if (!variationImageUrl && fallbackImageForType) variationImageUrl = fallbackImageForType;
 
-            // Validate required fields
-            if (optionData.price === undefined || optionData.price === null || optionData.price === '') {
-              cleanupFiles();
-              return res.status(400).json({
-                success: false,
-                message: `Variation option "${optionData.value}" is missing price`
-              });
-            }
 
-            if (optionData.stock === undefined || optionData.stock === null || optionData.stock === '') {
-              cleanupFiles();
-              return res.status(400).json({
-                success: false,
-                message: `Variation option "${optionData.value}" is missing stock`
-              });
+            // Price and stock live on variant rows when explicit variants are provided
+            if (!hasExplicitVariantsUpdate) {
+              if (optionData.price === undefined || optionData.price === null || optionData.price === '') {
+                cleanupFiles();
+                return res.status(400).json({
+                  success: false,
+                  message: `Variation option "${optionData.value}" is missing price`
+                });
+              }
+
+              if (optionData.stock === undefined || optionData.stock === null || optionData.stock === '') {
+                cleanupFiles();
+                return res.status(400).json({
+                  success: false,
+                  message: `Variation option "${optionData.value}" is missing stock`
+                });
+              }
             }
 
             const optionPrice = parseFloat(optionData.price) || 0;
