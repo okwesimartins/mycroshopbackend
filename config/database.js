@@ -1951,6 +1951,7 @@ async function initializeMainDatabaseTables() {
     `);
     console.log('✅ refresh_tokens table created/verified in main database');
 
+    
     // ── Device Tokens (FCM push notification tokens per user/tenant) ──────────
     await connection.query(`
       CREATE TABLE IF NOT EXISTS device_tokens (
