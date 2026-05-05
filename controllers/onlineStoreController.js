@@ -2964,6 +2964,54 @@ async function updateOnlineStoreProduct(req, res) {
       }
     }
 
+    // If no `variations` body was sent but variation image files were uploaded,
+    // update only those specific option images by matching the file's i_j position
+    // to the existing variation/option order — no need to resend the full variations JSON.
+    if (variations === undefined) {
+      const allUploadedFiles = req.files && Array.isArray(req.files) ? req.files
+        : req.files && typeof req.files === 'object' ? Object.values(req.files).flat()
+        : req.file ? [req.file] : [];
+
+      const variationImageFiles = allUploadedFiles.filter(
+        f => f.fieldname && f.fieldname.startsWith('variation_option_image_')
+      );
+
+      if (variationImageFiles.length > 0) {
+        const existingVariations = await req.db.query(
+          `SELECT id FROM product_variations WHERE product_id = :productId ORDER BY sort_order ASC, id ASC`,
+          { replacements: { productId: product_id }, type: QueryTypes.SELECT }
+        );
+
+        for (const file of variationImageFiles) {
+          const match = file.fieldname.match(/^variation_option_image_(\d+)_(\d+)/);
+          if (!match) continue;
+          const varIdx = parseInt(match[1]);
+          const optIdx = parseInt(match[2]);
+
+          if (!existingVariations[varIdx]) continue;
+          const variationId = existingVariations[varIdx].id;
+
+          const existingOptions = await req.db.query(
+            `SELECT id FROM product_variation_options WHERE variation_id = :variationId ORDER BY sort_order ASC, id ASC`,
+            { replacements: { variationId }, type: QueryTypes.SELECT }
+          );
+
+          if (!existingOptions[optIdx]) continue;
+
+          await req.db.query(
+            `UPDATE product_variation_options SET image_url = :imageUrl WHERE id = :optionId`,
+            {
+              replacements: {
+                imageUrl: `/uploads/product-variations/${file.filename}`,
+                optionId: existingOptions[optIdx].id
+              },
+              type: QueryTypes.UPDATE
+            }
+          );
+        }
+      }
+    }
+
     // When variants are provided, upsert product_variants and product_variant_options (replace existing)
     if (hasVariationOptions && hasExplicitVariantsUpdate && Array.isArray(parsedVariantsUpdate) && parsedVariantsUpdate.length > 0) {
       try {
