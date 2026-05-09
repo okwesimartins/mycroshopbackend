@@ -551,10 +551,155 @@ async function getDashboardStats(req, res) {
   }
 }
 
+function formatNaira(amount) {
+  if (amount >= 1000000) return `₦${(amount / 1000000).toFixed(1)}m`;
+  if (amount >= 1000) return `₦${(amount / 1000).toFixed(0)}k`;
+  return `₦${amount.toFixed(0)}`;
+}
+
+function buildWeeklySummaryText({ ordersThisWeek, revenueThisWeek, revenueLastWeek, ordersLastWeek, topProduct, topProductQty, storeName }) {
+  const name = storeName || 'there';
+
+  // Percentage change in revenue
+  let pctChange = 0;
+  let comparisonText = '';
+  if (revenueLastWeek > 0) {
+    pctChange = ((revenueThisWeek - revenueLastWeek) / revenueLastWeek) * 100;
+    const sign = pctChange >= 0 ? '+' : '';
+    comparisonText = ` — ${sign}${Math.round(pctChange)}% vs last week`;
+  }
+
+  // Headline
+  let headline;
+  if (ordersThisWeek === 0) {
+    headline = `Let's get some sales going, ${name}! 🚀`;
+  } else if (pctChange >= 20) {
+    headline = `Outstanding week, ${name}! 🔥`;
+  } else if (pctChange >= 5) {
+    headline = `Great week, ${name}! 📈`;
+  } else if (pctChange >= -5) {
+    headline = `Solid week, ${name}! 🙌`;
+  } else if (pctChange >= -20) {
+    headline = `Quiet week, ${name} 💪`;
+  } else {
+    headline = `Slow week — time to push harder, ${name}! 🎯`;
+  }
+
+  // Body
+  let body;
+  if (ordersThisWeek === 0) {
+    body = `No orders yet this week. Share your store link and let the sales come in!`;
+  } else {
+    const itemDesc = topProduct
+      ? `${topProductQty} ${topProduct}${topProductQty !== 1 ? 's' : ''}`
+      : `${ordersThisWeek} order${ordersThisWeek !== 1 ? 's' : ''}`;
+    body = `You sold ${itemDesc} this week, earning ${formatNaira(revenueThisWeek)}${comparisonText}.`;
+  }
+
+  // Motivation
+  let motivation;
+  if (ordersThisWeek === 0) {
+    motivation = 'Every top seller started with zero. This week is your moment.';
+  } else if (pctChange >= 10) {
+    motivation = `You're on a roll! Keep the momentum going and finish the week strong.`;
+  } else if (pctChange >= -5) {
+    motivation = `Consistency builds empires. You're right on track.`;
+  } else if (ordersLastWeek === 0) {
+    motivation = `Any sale is a win. Build on it — your best week is ahead of you.`;
+  } else {
+    motivation = `Every week is a fresh start. A little push today can flip the numbers around.`;
+  }
+
+  return { headline, body, motivation };
+}
+
+async function getWeeklySummary(req, res) {
+  try {
+    const isFreePlan = req.tenant?.subscription_plan === 'free';
+    const tenantId = req.user?.tenantId;
+    const storeName = req.tenant?.business_name || req.user?.name || null;
+
+    // Week boundaries (Monday → Sunday)
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - daysFromMonday);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+    const lastWeekStart = new Date(weekStart);
+    lastWeekStart.setDate(weekStart.getDate() - 7);
+
+    const tf = isFreePlan ? 'AND o.tenant_id = :tenantId' : '';
+    const replacements = isFreePlan ? { tenantId, weekStart, weekEnd, lastWeekStart } : { weekStart, weekEnd, lastWeekStart };
+
+    // This week: order count + revenue
+    const [thisWeekRows] = await req.db.query(
+      `SELECT COUNT(*) as order_count, COALESCE(SUM(o.total), 0) as revenue
+       FROM online_store_orders o
+       WHERE o.payment_status = 'paid'
+         AND o.created_at >= :weekStart AND o.created_at < :weekEnd
+         ${tf}`,
+      { replacements, type: 'SELECT' }
+    );
+
+    // Last week: order count + revenue
+    const [lastWeekRows] = await req.db.query(
+      `SELECT COUNT(*) as order_count, COALESCE(SUM(o.total), 0) as revenue
+       FROM online_store_orders o
+       WHERE o.payment_status = 'paid'
+         AND o.created_at >= :lastWeekStart AND o.created_at < :weekStart
+         ${tf}`,
+      { replacements, type: 'SELECT' }
+    );
+
+    // Top product this week by quantity sold
+    const topProductRows = await req.db.query(
+      `SELECT p.name, SUM(oi.quantity) as total_qty
+       FROM online_store_order_items oi
+       JOIN products p ON oi.product_id = p.id
+       JOIN online_store_orders o ON oi.order_id = o.id
+       WHERE o.payment_status = 'paid'
+         AND o.created_at >= :weekStart AND o.created_at < :weekEnd
+         ${tf}
+       GROUP BY p.name
+       ORDER BY total_qty DESC
+       LIMIT 1`,
+      { replacements, type: 'SELECT' }
+    );
+
+    const ordersThisWeek = Number(thisWeekRows?.order_count || 0);
+    const revenueThisWeek = parseFloat(thisWeekRows?.revenue || 0);
+    const ordersLastWeek = Number(lastWeekRows?.order_count || 0);
+    const revenueLastWeek = parseFloat(lastWeekRows?.revenue || 0);
+    const topProduct = topProductRows?.[0]?.name || null;
+    const topProductQty = Number(topProductRows?.[0]?.total_qty || 0);
+
+    const { headline, body, motivation } = buildWeeklySummaryText({
+      ordersThisWeek, revenueThisWeek, revenueLastWeek, ordersLastWeek,
+      topProduct, topProductQty, storeName
+    });
+
+    res.json({
+      success: true,
+      data: { headline, body, motivation }
+    });
+  } catch (error) {
+    console.error('Error getting weekly summary:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get weekly summary',
+      error: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
+  }
+}
+
 module.exports = {
   getSalesReport,
   getProductPerformanceReport,
   getCustomerAnalytics,
   getDashboardOverview,
-  getDashboardStats
+  getDashboardStats,
+  getWeeklySummary
 };

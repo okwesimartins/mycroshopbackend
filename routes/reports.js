@@ -16,6 +16,9 @@ router.get('/dashboard', reportController.getDashboardOverview);
 // Dashboard stats (total products, revenue, active orders, recent activity)
 router.get('/dashboard/stats', reportController.getDashboardStats);
 
+// Weekly summary card (headline + body + motivation text)
+router.get('/dashboard/weekly-summary', reportController.getWeeklySummary);
+
 // Sales report
 router.get('/sales', reportController.getSalesReport);
 
