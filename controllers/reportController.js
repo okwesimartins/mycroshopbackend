@@ -557,72 +557,23 @@ function formatNaira(amount) {
   return `₦${amount.toFixed(0)}`;
 }
 
-function buildWeeklySummaryText({ ordersThisWeek, revenueThisWeek, revenueLastWeek, ordersLastWeek, topProduct, topProductQty, storeName }) {
-  const name = storeName || 'there';
-
-  // Percentage change in revenue
-  let pctChange = 0;
-  let comparisonText = '';
-  if (revenueLastWeek > 0) {
-    pctChange = ((revenueThisWeek - revenueLastWeek) / revenueLastWeek) * 100;
-    const sign = pctChange >= 0 ? '+' : '';
-    comparisonText = ` — ${sign}${Math.round(pctChange)}% vs last week`;
-  }
-
-  // Headline
-  let headline;
-  if (ordersThisWeek === 0) {
-    headline = `Let's get some sales going, ${name}! 🚀`;
-  } else if (pctChange >= 20) {
-    headline = `Outstanding week, ${name}! 🔥`;
-  } else if (pctChange >= 5) {
-    headline = `Great week, ${name}! 📈`;
-  } else if (pctChange >= -5) {
-    headline = `Solid week, ${name}! 🙌`;
-  } else if (pctChange >= -20) {
-    headline = `Quiet week, ${name} 💪`;
-  } else {
-    headline = `Slow week — time to push harder, ${name}! 🎯`;
-  }
-
-  // Body
-  let body;
-  if (ordersThisWeek === 0) {
-    body = `No orders yet this week. Share your store link and let the sales come in!`;
-  } else {
-    const itemDesc = topProduct
-      ? `${topProductQty} ${topProduct}${topProductQty !== 1 ? 's' : ''}`
-      : `${ordersThisWeek} order${ordersThisWeek !== 1 ? 's' : ''}`;
-    body = `You sold ${itemDesc} this week, earning ${formatNaira(revenueThisWeek)}${comparisonText}.`;
-  }
-
-  // Motivation
-  let motivation;
-  if (ordersThisWeek === 0) {
-    motivation = 'Every top seller started with zero. This week is your moment.';
-  } else if (pctChange >= 10) {
-    motivation = `You're on a roll! Keep the momentum going and finish the week strong.`;
-  } else if (pctChange >= -5) {
-    motivation = `Consistency builds empires. You're right on track.`;
-  } else if (ordersLastWeek === 0) {
-    motivation = `Any sale is a win. Build on it — your best week is ahead of you.`;
-  } else {
-    motivation = `Every week is a fresh start. A little push today can flip the numbers around.`;
-  }
-
-  return { headline, body, motivation };
+function pctTone(pctChange, name) {
+  if (pctChange >= 20) return { headline: `Outstanding week, ${name}! 🔥`, motivation: `You're on a roll! Keep the momentum going and finish the week strong.` };
+  if (pctChange >= 5)  return { headline: `Great week, ${name}! 📈`,        motivation: `Keep the momentum going — you're building something great.` };
+  if (pctChange >= -5) return { headline: `Solid week, ${name}! 🙌`,        motivation: `Consistency builds empires. You're right on track.` };
+  if (pctChange >= -20)return { headline: `Quiet week, ${name} 💪`,         motivation: `A little push today can flip the numbers around.` };
+  return               { headline: `Slow week — let's push harder, ${name}! 🎯`, motivation: `Every week is a fresh start. Your best numbers are still ahead.` };
 }
 
 async function getWeeklySummary(req, res) {
   try {
     const isFreePlan = req.tenant?.subscription_plan === 'free';
     const tenantId = req.user?.tenantId;
-    const storeName = req.tenant?.business_name || req.user?.name || null;
+    const name = req.tenant?.business_name || req.user?.name || 'there';
 
-    // Week boundaries (Monday → Sunday)
+    // Week boundaries: Monday 00:00 → next Monday 00:00
     const now = new Date();
-    const dayOfWeek = now.getDay();
-    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const daysFromMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - daysFromMonday);
     weekStart.setHours(0, 0, 0, 0);
@@ -631,60 +582,138 @@ async function getWeeklySummary(req, res) {
     const lastWeekStart = new Date(weekStart);
     lastWeekStart.setDate(weekStart.getDate() - 7);
 
-    const tf = isFreePlan ? 'AND o.tenant_id = :tenantId' : '';
-    const replacements = isFreePlan ? { tenantId, weekStart, weekEnd, lastWeekStart } : { weekStart, weekEnd, lastWeekStart };
+    const tenantRp = isFreePlan ? { tenantId } : {};
+    const weekRp   = isFreePlan
+      ? { tenantId, weekStart, weekEnd, lastWeekStart }
+      : { weekStart, weekEnd, lastWeekStart };
+    const otf = isFreePlan ? 'AND tenant_id = :tenantId' : '';   // plain table filter
+    const jtf = isFreePlan ? 'AND o.tenant_id = :tenantId' : ''; // join query filter
 
-    // This week: order count + revenue
-    const [thisWeekRows] = await req.db.query(
-      `SELECT COUNT(*) as order_count, COALESCE(SUM(o.total), 0) as revenue
-       FROM online_store_orders o
-       WHERE o.payment_status = 'paid'
-         AND o.created_at >= :weekStart AND o.created_at < :weekEnd
-         ${tf}`,
-      { replacements, type: 'SELECT' }
+    // ── 1. Does this user have an online store, and is it published? ──
+    const storeRows = await req.db.query(
+      `SELECT id, is_published FROM online_stores WHERE 1=1 ${otf} LIMIT 1`,
+      { replacements: tenantRp, type: 'SELECT' }
+    );
+    const hasStore      = storeRows.length > 0;
+    const storePublished = hasStore && !!storeRows[0].is_published;
+
+    // ── 2. Online store orders this week + last week ──
+    const [ordRow]  = await req.db.query(
+      `SELECT COUNT(*) as cnt, COALESCE(SUM(total),0) as rev
+       FROM online_store_orders
+       WHERE payment_status = 'paid' AND created_at >= :weekStart AND created_at < :weekEnd ${otf}`,
+      { replacements: weekRp, type: 'SELECT' }
+    );
+    const [ordRowLW] = await req.db.query(
+      `SELECT COUNT(*) as cnt, COALESCE(SUM(total),0) as rev
+       FROM online_store_orders
+       WHERE payment_status = 'paid' AND created_at >= :lastWeekStart AND created_at < :weekStart ${otf}`,
+      { replacements: weekRp, type: 'SELECT' }
     );
 
-    // Last week: order count + revenue
-    const [lastWeekRows] = await req.db.query(
-      `SELECT COUNT(*) as order_count, COALESCE(SUM(o.total), 0) as revenue
-       FROM online_store_orders o
-       WHERE o.payment_status = 'paid'
-         AND o.created_at >= :lastWeekStart AND o.created_at < :weekStart
-         ${tf}`,
-      { replacements, type: 'SELECT' }
-    );
-
-    // Top product this week by quantity sold
-    const topProductRows = await req.db.query(
+    // ── 3. Top product this week ──
+    const topRows = await req.db.query(
       `SELECT p.name, SUM(oi.quantity) as total_qty
        FROM online_store_order_items oi
        JOIN products p ON oi.product_id = p.id
        JOIN online_store_orders o ON oi.order_id = o.id
        WHERE o.payment_status = 'paid'
-         AND o.created_at >= :weekStart AND o.created_at < :weekEnd
-         ${tf}
-       GROUP BY p.name
-       ORDER BY total_qty DESC
-       LIMIT 1`,
-      { replacements, type: 'SELECT' }
+         AND o.created_at >= :weekStart AND o.created_at < :weekEnd ${jtf}
+       GROUP BY p.name ORDER BY total_qty DESC LIMIT 1`,
+      { replacements: weekRp, type: 'SELECT' }
     );
 
-    const ordersThisWeek = Number(thisWeekRows?.order_count || 0);
-    const revenueThisWeek = parseFloat(thisWeekRows?.revenue || 0);
-    const ordersLastWeek = Number(lastWeekRows?.order_count || 0);
-    const revenueLastWeek = parseFloat(lastWeekRows?.revenue || 0);
-    const topProduct = topProductRows?.[0]?.name || null;
-    const topProductQty = Number(topProductRows?.[0]?.total_qty || 0);
+    // ── 4. Invoices this week (free plan + enterprise both have Invoice model) ──
+    let invRevTW = 0, invRevLW = 0, invCntTW = 0;
+    if (req.db.models?.Invoice) {
+      const invWhere  = { ...(isFreePlan ? { tenant_id: tenantId } : {}), status: 'paid', created_at: { [Sequelize.Op.gte]: weekStart,      [Sequelize.Op.lt]: weekEnd   } };
+      const invWhereLW= { ...(isFreePlan ? { tenant_id: tenantId } : {}), status: 'paid', created_at: { [Sequelize.Op.gte]: lastWeekStart, [Sequelize.Op.lt]: weekStart } };
+      invRevTW  = parseFloat(await req.db.models.Invoice.sum('total', { where: invWhere   }) || 0);
+      invRevLW  = parseFloat(await req.db.models.Invoice.sum('total', { where: invWhereLW }) || 0);
+      invCntTW  = await req.db.models.Invoice.count({ where: invWhere });
+    }
 
-    const { headline, body, motivation } = buildWeeklySummaryText({
-      ordersThisWeek, revenueThisWeek, revenueLastWeek, ordersLastWeek,
-      topProduct, topProductQty, storeName
-    });
+    // ── 5. POS this week (enterprise only) ──
+    let posRevTW = 0, posRevLW = 0, posCntTW = 0;
+    if (!isFreePlan && req.db.models?.POSTransaction) {
+      const posWhere  = { created_at: { [Sequelize.Op.gte]: weekStart,      [Sequelize.Op.lt]: weekEnd   } };
+      const posWhereLW= { created_at: { [Sequelize.Op.gte]: lastWeekStart,  [Sequelize.Op.lt]: weekStart } };
+      posRevTW  = parseFloat(await req.db.models.POSTransaction.sum('total', { where: posWhere   }) || 0);
+      posRevLW  = parseFloat(await req.db.models.POSTransaction.sum('total', { where: posWhereLW }) || 0);
+      posCntTW  = await req.db.models.POSTransaction.count({ where: posWhere });
+    }
 
-    res.json({
-      success: true,
-      data: { headline, body, motivation }
-    });
+    // ── Aggregate ──
+    const ordersCntTW  = Number(ordRow?.cnt   || 0);
+    const ordersRevTW  = parseFloat(ordRow?.rev  || 0);
+    const ordersCntLW  = Number(ordRowLW?.cnt  || 0);
+    const ordersRevLW  = parseFloat(ordRowLW?.rev || 0);
+    const topProduct   = topRows?.[0]?.name || null;
+    const topQty       = Number(topRows?.[0]?.total_qty || 0);
+
+    const totalRevTW = ordersRevTW + invRevTW + posRevTW;
+    const totalRevLW = ordersRevLW + invRevLW + posRevLW;
+
+    const hasOnlineOrders = ordersCntTW > 0;
+    const hasInvoices     = invCntTW > 0;
+    const hasPOS          = posCntTW > 0;
+    const hasAnyActivity  = hasOnlineOrders || hasInvoices || hasPOS;
+
+    // ── Determine mode and build text ──
+    let headline, body, motivation;
+
+    // Mode A: store exists but not published AND no activity anywhere
+    if (hasStore && !storePublished && !hasAnyActivity) {
+      headline   = `Your store isn't live yet, ${name} 🏗️`;
+      body       = `Publish your online store to start receiving orders — it only takes a minute!`;
+      motivation = `Thousands of customers are out there waiting to discover your products. Go live today.`;
+
+    // Mode B: no store at all and no invoice/POS activity
+    } else if (!hasStore && !hasAnyActivity) {
+      headline   = `Ready to make your first sale, ${name}? 🚀`;
+      body       = `Create an invoice, record a sale, or set up your online store to start tracking your business.`;
+      motivation = `Every great business started with a single sale. Yours is just around the corner.`;
+
+    // Mode C: invoice/POS user (no online store orders)
+    } else if (!hasOnlineOrders && (hasInvoices || hasPOS)) {
+      const pctChange = totalRevLW > 0 ? ((totalRevTW - totalRevLW) / totalRevLW) * 100 : 0;
+      const tone = pctTone(pctChange, name);
+      headline = tone.headline;
+
+      const parts = [];
+      if (invCntTW > 0) parts.push(`${invCntTW} invoice${invCntTW !== 1 ? 's' : ''}`);
+      if (posCntTW > 0) parts.push(`${posCntTW} POS sale${posCntTW !== 1 ? 's' : ''}`);
+      const cmpText = totalRevLW > 0 ? ` — ${pctChange >= 0 ? '+' : ''}${Math.round(pctChange)}% vs last week` : '';
+      body       = `You processed ${parts.join(' and ')} this week, earning ${formatNaira(totalRevTW)}${cmpText}.`;
+      motivation = tone.motivation;
+
+    // Mode D: online store user (with or without invoices/POS on top)
+    } else {
+      const pctChange = totalRevLW > 0 ? ((totalRevTW - totalRevLW) / totalRevLW) * 100 : 0;
+
+      if (ordersCntTW === 0 && storePublished) {
+        headline   = `No orders yet this week, ${name} 💡`;
+        body       = `Your store is live — share your store link and get those sales coming in!`;
+        motivation = `Every top seller started with zero. This week is your moment.`;
+      } else if (ordersCntTW === 0) {
+        headline   = `Let's get some sales going, ${name}! 🚀`;
+        body       = `No orders yet this week. Share your store link and let the sales come in!`;
+        motivation = `Every top seller started with zero. This week is your moment.`;
+      } else {
+        const tone = pctTone(pctChange, name);
+        headline = tone.headline;
+        const itemDesc = topProduct
+          ? `${topQty} ${topProduct}${topQty !== 1 ? 's' : ''}`
+          : `${ordersCntTW} order${ordersCntTW !== 1 ? 's' : ''}`;
+        const cmpText = totalRevLW > 0 ? ` — ${pctChange >= 0 ? '+' : ''}${Math.round(pctChange)}% vs last week` : '';
+        body       = `You sold ${itemDesc} this week, earning ${formatNaira(totalRevTW)}${cmpText}.`;
+        motivation = ordersCntLW === 0
+          ? `Any sale is a win. Build on it — your best week is still ahead.`
+          : tone.motivation;
+      }
+    }
+
+    res.json({ success: true, data: { headline, body, motivation } });
   } catch (error) {
     console.error('Error getting weekly summary:', error);
     res.status(500).json({
