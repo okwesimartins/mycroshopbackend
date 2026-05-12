@@ -2037,7 +2037,7 @@ async function getProductStockSummary(req, res) {
 
     // ── 1. Product base ──────────────────────────────────────────────────────
     const [productRows] = await req.db.query(
-      `SELECT id, name, sku, description, price, cost, stock, category, image_url,
+      `SELECT id, name, sku, description, price, stock, category, image_url,
               is_active, low_stock_threshold, created_at, updated_at
        FROM products WHERE id = :productId ${tf}`,
       { replacements: rp, type: 'SELECT' }
