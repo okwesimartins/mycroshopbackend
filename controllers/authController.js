@@ -1229,6 +1229,76 @@ async function removeDeviceToken(req, res) {
   }
 }
 
+/**
+ * DELETE /auth/account
+ * Disable or permanently delete the merchant's account.
+ * Body: { password: string, action: 'disable' | 'delete' }
+ *
+ * disable → status = 'inactive'  (can be reactivated by platform admin)
+ * delete  → status = 'terminated' (soft delete, data retained, irreversible via app)
+ */
+async function deleteAccount(req, res) {
+  try {
+    const { password, action } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ success: false, message: 'Password is required to confirm this action' });
+    }
+
+    if (!['disable', 'delete'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'action must be either "disable" or "delete"' });
+    }
+
+    const userId   = req.user.id;
+    const tenantId = req.user.tenantId;
+
+    // Verify password
+    const [userRows] = await mainSequelize.query(
+      'SELECT password_hash FROM users WHERE id = ?',
+      { replacements: [userId] }
+    );
+    if (!userRows || userRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const isValid = await bcrypt.compare(password, userRows[0].password_hash);
+    if (!isValid) {
+      return res.status(401).json({ success: false, message: 'Incorrect password' });
+    }
+
+    const newStatus = action === 'delete' ? 'terminated' : 'inactive';
+
+    // Update tenant status
+    await mainSequelize.query(
+      'UPDATE tenants SET status = ?, updated_at = NOW() WHERE id = ?',
+      { replacements: [newStatus, tenantId] }
+    );
+
+    // Revoke all refresh tokens for this tenant's users
+    await mainSequelize.query(
+      `DELETE rt FROM refresh_tokens rt
+       JOIN users u ON rt.user_id = u.id
+       WHERE u.tenant_id = ?`,
+      { replacements: [tenantId] }
+    );
+
+    // Remove all device tokens so push notifications stop
+    await mainSequelize.query(
+      'DELETE FROM device_tokens WHERE tenant_id = ?',
+      { replacements: [tenantId] }
+    );
+
+    const message = action === 'delete'
+      ? 'Account permanently deleted. Your data will be retained for 30 days then removed.'
+      : 'Account disabled. Contact support to reactivate.';
+
+    res.json({ success: true, message });
+  } catch (error) {
+    console.error('deleteAccount error:', error);
+    res.status(500).json({ success: false, message: 'Failed to process account request', error: error.message });
+  }
+}
+
 // Export with authenticate middleware attached
 const { authenticate } = require('../middleware/auth');
 getCurrentUser.authenticate = authenticate;
@@ -1254,6 +1324,7 @@ module.exports = {
   getBiometricStatus,
   setBiometricStatus,
   registerDeviceToken,
-  removeDeviceToken
+  removeDeviceToken,
+  deleteAccount
 };
 

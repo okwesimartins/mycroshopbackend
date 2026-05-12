@@ -137,6 +137,16 @@ router.put('/email',
 router.put('/device-token', authenticate, authController.registerDeviceToken);
 router.delete('/device-token', authenticate, authController.removeDeviceToken);
 
+// Disable or permanently delete account
+router.delete('/account',
+  authenticate,
+  [
+    body('password').notEmpty().withMessage('Password is required'),
+    body('action').isIn(['disable', 'delete']).withMessage('action must be disable or delete')
+  ],
+  authController.deleteAccount
+);
+
 // Upgrade free user to enterprise (requires license key)
 router.post('/upgrade',
   authenticate,
