@@ -1252,27 +1252,21 @@ async function deleteAccount(req, res) {
     const userId   = req.user.id;
     const tenantId = req.user.tenantId;
 
-    // Verify password
-    const [userRows] = await mainSequelize.query(
-      'SELECT password_hash FROM users WHERE id = ?',
-      { replacements: [userId] }
-    );
-    if (!userRows || userRows.length === 0) {
+    // Verify password using User model (same as other auth functions)
+    const user = await User.findOne({ where: { id: userId } });
+    if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const isValid = await bcrypt.compare(password, userRows[0].password_hash);
+    const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
       return res.status(401).json({ success: false, message: 'Incorrect password' });
     }
 
     const newStatus = action === 'delete' ? 'terminated' : 'inactive';
 
-    // Update tenant status
-    await mainSequelize.query(
-      'UPDATE tenants SET status = ?, updated_at = NOW() WHERE id = ?',
-      { replacements: [newStatus, tenantId] }
-    );
+    // Update tenant status using Tenant model (same as other auth functions)
+    await Tenant.update({ status: newStatus }, { where: { id: tenantId } });
 
     // Revoke all refresh tokens for this tenant's users
     await mainSequelize.query(
