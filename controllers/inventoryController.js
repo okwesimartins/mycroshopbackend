@@ -2037,8 +2037,8 @@ async function getProductStockSummary(req, res) {
 
     // ── 1. Product base ──────────────────────────────────────────────────────
     const [productRows] = await req.db.query(
-      `SELECT id, name, sku, description, price, stock, category, image_url,
-              is_active, track_stock, low_stock_threshold, created_at, updated_at
+      `SELECT id, name, sku, description, price, cost, stock, category, image_url,
+              is_active, low_stock_threshold, created_at, updated_at
        FROM products WHERE id = :productId ${tf}`,
       { replacements: rp, type: 'SELECT' }
     );
@@ -2182,7 +2182,6 @@ async function getProductStockSummary(req, res) {
         category:            product.category || null,
         image_url:           imageUrl,
         is_active:           !!product.is_active,
-        track_stock:         !!product.track_stock,
         low_stock_threshold: product.low_stock_threshold || null,
         stock_type:          stockType,       // 'simple' | 'variation' | 'variant'
         total_stock:         totalStock,
