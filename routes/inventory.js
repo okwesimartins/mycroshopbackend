@@ -149,6 +149,9 @@ router.get('/lookup/barcode', requireEnterprise, inventoryController.lookupProdu
 router.put('/stock/by-barcode', requireEnterprise, inventoryController.updateStockByBarcode);
 router.post('/stock/bulk-update', requireEnterprise, inventoryController.bulkUpdateStock);
 
+// Get product stock summary (MUST come before /:id to avoid route conflicts)
+router.get('/:id/stock-summary', inventoryController.getProductStockSummary);
+
 // Get product by ID (parameterized routes should come last)
 router.get('/:id', inventoryController.getProductById);
 

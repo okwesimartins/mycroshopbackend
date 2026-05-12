@@ -2123,15 +2123,7 @@ async function createOnlineStoreProduct(req, res) {
           }
           return null;
         });
-        const validOptionCount = resolvedTypeImages.filter((_, k) => variationData.options[k] && variationData.options[k].value).length;
         const imagedCount = resolvedTypeImages.filter(url => url !== null).length;
-        if (imagedCount > 1 && imagedCount < validOptionCount) {
-          cleanupFiles();
-          return res.status(400).json({
-            success: false,
-            message: `Variation "${variationData.variation_name}": if more than one option has an image, all options must have images. Either upload one image (shared across all) or upload one per option.`
-          });
-        }
         const fallbackImageForType = imagedCount === 1 ? resolvedTypeImages.find(url => url !== null) : null;
 
         // Create variation options
@@ -2874,15 +2866,7 @@ async function updateOnlineStoreProduct(req, res) {
             }
             return null;
           });
-          const validOptionCount = resolvedTypeImages.filter((_, k) => variationData.options[k] && variationData.options[k].value).length;
           const imagedCount = resolvedTypeImages.filter(url => url !== null).length;
-          if (imagedCount > 1 && imagedCount < validOptionCount) {
-            cleanupFiles();
-            return res.status(400).json({
-              success: false,
-              message: `Variation "${variationData.variation_name}": if more than one option has an image, all options must have images. Either upload one image (shared across all) or upload one per option.`
-            });
-          }
           const fallbackImageForType = imagedCount === 1 ? resolvedTypeImages.find(url => url !== null) : null;
 
           // Create variation options

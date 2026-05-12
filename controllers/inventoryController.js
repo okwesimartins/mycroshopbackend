@@ -2022,6 +2022,186 @@ async function getProductCategories(req, res) {
   }
 }
 
+/**
+ * GET /inventory/:id/stock-summary
+ * Returns full stock + purchase breakdown for a single product.
+ * Handles all three product types: simple, variation-based, variant-based.
+ */
+async function getProductStockSummary(req, res) {
+  try {
+    const productId  = req.params.id;
+    const isFreePlan = req.tenant?.subscription_plan === 'free';
+    const tenantId   = req.user?.tenantId;
+    const tf         = isFreePlan ? 'AND tenant_id = :tenantId' : '';
+    const rp         = isFreePlan ? { productId, tenantId } : { productId };
+
+    // ── 1. Product base ──────────────────────────────────────────────────────
+    const [productRows] = await req.db.query(
+      `SELECT id, name, sku, description, price, stock, category, image_url,
+              is_active, track_stock, low_stock_threshold, created_at, updated_at
+       FROM products WHERE id = :productId ${tf}`,
+      { replacements: rp, type: 'SELECT' }
+    );
+    if (!productRows) return res.status(404).json({ success: false, message: 'Product not found' });
+    const product = productRows;
+
+    // ── 2. Variation options ─────────────────────────────────────────────────
+    const variationOptions = await req.db.query(
+      `SELECT pvo.id, pvo.variation_id, pvo.option_value, pvo.option_display_name,
+              pvo.price_adjustment, pvo.stock, pvo.sku, pvo.image_url,
+              pvo.is_default, pvo.is_available, pvo.sort_order,
+              pv.variation_name, pv.variation_type
+       FROM product_variation_options pvo
+       JOIN product_variations pv ON pvo.variation_id = pv.id
+       WHERE pv.product_id = :productId
+       ORDER BY pv.sort_order ASC, pvo.sort_order ASC`,
+      { replacements: { productId }, type: 'SELECT' }
+    );
+
+    // ── 3. Variants ──────────────────────────────────────────────────────────
+    const variants = await req.db.query(
+      `SELECT pv.id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
+              GROUP_CONCAT(pvo.option_display_name ORDER BY pvr.variation_id SEPARATOR ' / ') as combination_label
+       FROM product_variants pv
+       LEFT JOIN product_variant_options pvopt ON pv.id = pvopt.variant_id
+       LEFT JOIN product_variation_options pvo  ON pvopt.option_id = pvo.id
+       LEFT JOIN product_variations pvr          ON pvopt.variation_id = pvr.id
+       WHERE pv.product_id = :productId AND pv.is_active = 1
+       GROUP BY pv.id
+       ORDER BY pv.id ASC`,
+      { replacements: { productId }, type: 'SELECT' }
+    );
+
+    // ── 4. Purchase counts per variation option ──────────────────────────────
+    const optionPurchases = await req.db.query(
+      `SELECT variation_option_id, SUM(quantity) as total_qty
+       FROM online_store_order_items
+       WHERE product_id = :productId AND variation_option_id IS NOT NULL
+       GROUP BY variation_option_id`,
+      { replacements: { productId }, type: 'SELECT' }
+    );
+    const optionPurchaseMap = {};
+    for (const row of optionPurchases) {
+      optionPurchaseMap[row.variation_option_id] = Number(row.total_qty || 0);
+    }
+
+    // ── 5. Purchase counts per variant ───────────────────────────────────────
+    const variantPurchases = await req.db.query(
+      `SELECT variant_id, SUM(quantity) as total_qty
+       FROM online_store_order_items
+       WHERE product_id = :productId AND variant_id IS NOT NULL
+       GROUP BY variant_id`,
+      { replacements: { productId }, type: 'SELECT' }
+    );
+    const variantPurchaseMap = {};
+    for (const row of variantPurchases) {
+      variantPurchaseMap[row.variant_id] = Number(row.total_qty || 0);
+    }
+
+    // ── 6. Total purchases (all order items for this product) ────────────────
+    const [purchaseTotRow] = await req.db.query(
+      `SELECT COALESCE(SUM(quantity), 0) as total
+       FROM online_store_order_items WHERE product_id = :productId`,
+      { replacements: { productId }, type: 'SELECT' }
+    );
+    const totalPurchases = Number(purchaseTotRow?.total || 0);
+
+    // ── 7. Determine stock type and compute total stock ──────────────────────
+    const hasVariants = variants.length > 0;
+    const hasOptions  = variationOptions.length > 0;
+
+    let stockType  = 'simple';
+    let totalStock = Number(product.stock || 0);
+
+    let formattedVariations = [];
+    let formattedVariants   = [];
+
+    if (hasVariants) {
+      stockType  = 'variant';
+      totalStock = variants.reduce((sum, v) => sum + Number(v.stock || 0), 0);
+
+      formattedVariants = variants.map(v => ({
+        id:                v.id,
+        sku:               v.sku || null,
+        price:             parseFloat(v.price) || 0,
+        stock:             Number(v.stock || 0),
+        in_stock:          Number(v.stock || 0) > 0,
+        combination_label: v.combination_label || null,
+        image_url:         v.image_url
+          ? (v.image_url.startsWith('/uploads/') ? getFullUrl(req, v.image_url) : v.image_url)
+          : null,
+        total_purchases: variantPurchaseMap[v.id] || 0
+      }));
+
+    } else if (hasOptions) {
+      stockType  = 'variation';
+      totalStock = variationOptions.reduce((sum, o) => sum + Number(o.stock || 0), 0);
+
+      // Group options by variation type
+      const variationMap = {};
+      for (const opt of variationOptions) {
+        if (!variationMap[opt.variation_id]) {
+          variationMap[opt.variation_id] = {
+            variation_id:   opt.variation_id,
+            variation_name: opt.variation_name,
+            variation_type: opt.variation_type,
+            options: []
+          };
+        }
+        variationMap[opt.variation_id].options.push({
+          id:              opt.id,
+          value:           opt.option_value,
+          display_name:    opt.option_display_name || opt.option_value,
+          sku:             opt.sku || null,
+          price:           parseFloat(opt.price_adjustment) || 0,
+          stock:           Number(opt.stock || 0),
+          in_stock:        Number(opt.stock || 0) > 0,
+          is_default:      !!opt.is_default,
+          is_available:    opt.is_available !== false,
+          image_url:       opt.image_url
+            ? (opt.image_url.startsWith('/uploads/') ? getFullUrl(req, opt.image_url) : opt.image_url)
+            : null,
+          total_purchases: optionPurchaseMap[opt.id] || 0
+        });
+      }
+      formattedVariations = Object.values(variationMap);
+    }
+
+    // ── 8. Product image ─────────────────────────────────────────────────────
+    const imageUrl = product.image_url
+      ? (product.image_url.startsWith('/uploads/') ? getFullUrl(req, product.image_url) : product.image_url)
+      : null;
+
+    res.json({
+      success: true,
+      data: {
+        id:                  product.id,
+        name:                product.name,
+        sku:                 product.sku || null,
+        description:         product.description || null,
+        category:            product.category || null,
+        image_url:           imageUrl,
+        is_active:           !!product.is_active,
+        track_stock:         !!product.track_stock,
+        low_stock_threshold: product.low_stock_threshold || null,
+        stock_type:          stockType,       // 'simple' | 'variation' | 'variant'
+        total_stock:         totalStock,
+        in_stock:            totalStock > 0,
+        total_purchases:     totalPurchases,
+        variations:          formattedVariations,  // populated when stock_type = 'variation'
+        variants:            formattedVariants      // populated when stock_type = 'variant'
+      }
+    });
+  } catch (error) {
+    console.error('Error getting product stock summary:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get product stock summary',
+      error: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
+  }
+}
+
 module.exports = {
   getAllProducts,
   getBasicInventoryForFreeUsers,
@@ -2035,6 +2215,7 @@ module.exports = {
   lookupProductByBarcode,
   updateStockByBarcode,
   bulkUpdateStock,
-  getProductCategories
+  getProductCategories,
+  getProductStockSummary
 };
 

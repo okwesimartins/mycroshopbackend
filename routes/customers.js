@@ -14,6 +14,18 @@ router.use(initializeTenantModels);
 // Get all customers
 router.get('/', customerController.getAllCustomers);
 
+// ── Purchase history routes (MUST come before /:id) ─────────────────────────
+
+// Unified customer list from invoices, receipts, and online store orders
+// Query: ?source=invoice|receipt|online_store  &page=1 &limit=50 &search=
+router.get('/purchase-history', customerController.getPurchaseCustomers);
+
+// All orders for a specific customer across all channels
+// Query: ?email=xxx  OR  ?phone=xxx
+router.get('/purchase-history/orders', customerController.getCustomerOrderHistory);
+
+// ── Standard CRUD ────────────────────────────────────────────────────────────
+
 // Get customer by ID
 router.get('/:id', customerController.getCustomerById);
 
