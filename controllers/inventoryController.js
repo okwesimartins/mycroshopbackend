@@ -2060,13 +2060,14 @@ async function getProductStockSummary(req, res) {
 
     // ── 3. Variants ──────────────────────────────────────────────────────────
     const variants = await req.db.query(
-      `SELECT pv.id, pv.sku, pv.price, pv.stock, pv.image_url, pv.is_active,
-              GROUP_CONCAT(pvo.option_display_name ORDER BY pvopt.variation_id SEPARATOR ' / ') as combination_label
+      `SELECT pv.id, pv.sku, pv.price, pv.stock, pv.is_active,
+              COALESCE(pv.image_url, MAX(pvo.image_url)) AS image_url,
+              GROUP_CONCAT(pvo.option_display_name ORDER BY pvopt.variation_id SEPARATOR ' / ') AS combination_label
        FROM product_variants pv
        LEFT JOIN product_variant_options pvopt ON pv.id = pvopt.variant_id
        LEFT JOIN product_variation_options pvo  ON pvopt.option_id = pvo.id
        WHERE pv.product_id = :productId AND pv.is_active = 1
-       GROUP BY pv.id
+       GROUP BY pv.id, pv.sku, pv.price, pv.stock, pv.is_active, pv.image_url
        ORDER BY pv.id ASC`,
       { replacements: { productId }, type: 'SELECT' }
     );
