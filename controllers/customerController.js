@@ -373,29 +373,32 @@ async function getPurchaseCustomers(req, res) {
       `);
     }
 
-    // ── Receipt customers ───────────────────────────────────────────────────
+    // ── Receipt customers (customer info lives in receipt_data JSON) ───────
     if (!source || source === 'receipt') {
-      const where = ['(customer_email IS NOT NULL OR customer_name IS NOT NULL)'];
+      const where = [
+        "receipt_data IS NOT NULL",
+        "(receipt_data->>'$.customer_email' IS NOT NULL OR receipt_data->>'$.customer_name' IS NOT NULL)"
+      ];
       if (isFreePlan) where.push('tenant_id = :tenantId');
-      if (search)     where.push('(customer_name LIKE :search OR customer_email LIKE :search OR customer_phone LIKE :search)');
+      if (search)     where.push("(receipt_data->>'$.customer_name' LIKE :search OR receipt_data->>'$.customer_email' LIKE :search OR receipt_data->>'$.customer_phone' LIKE :search)");
 
       parts.push(`
         SELECT
-          NULL                          AS customer_id,
-          customer_name                 AS name,
-          customer_email                AS email,
-          customer_phone                AS phone,
-          NULL                          AS address,
-          NULL                          AS city,
-          NULL                          AS state,
-          NULL                          AS country,
-          MIN(created_at)               AS created_at,
-          'receipt'                     AS source,
-          COUNT(*)                      AS order_count,
-          COALESCE(SUM(total), 0)       AS total_spent
+          NULL                                                              AS customer_id,
+          receipt_data->>'$.customer_name'                                  AS name,
+          receipt_data->>'$.customer_email'                                 AS email,
+          receipt_data->>'$.customer_phone'                                 AS phone,
+          NULL                                                              AS address,
+          NULL                                                              AS city,
+          NULL                                                              AS state,
+          NULL                                                              AS country,
+          MIN(created_at)                                                   AS created_at,
+          'receipt'                                                         AS source,
+          COUNT(*)                                                          AS order_count,
+          COALESCE(SUM(CAST(receipt_data->>'$.total' AS DECIMAL(10,2))), 0) AS total_spent
         FROM receipts
         WHERE ${where.join(' AND ')}
-        GROUP BY customer_email, customer_name, customer_phone
+        GROUP BY receipt_data->>'$.customer_email', receipt_data->>'$.customer_name', receipt_data->>'$.customer_phone'
       `);
     }
 
@@ -513,15 +516,27 @@ async function getCustomerOrderHistory(req, res) {
       }
     }
 
-    // ── Receipts ────────────────────────────────────────────────────────────
+    // ── Receipts (customer info lives in receipt_data JSON) ────────────────
     {
-      const idWhere   = email ? 'customer_email = :email' : 'customer_phone = :phone';
+      const idWhere   = email
+        ? "receipt_data->>'$.customer_email' = :email"
+        : "receipt_data->>'$.customer_phone' = :phone";
       const tenFilter = isFreePlan ? 'AND tenant_id = :tenantId' : '';
 
       receipts = await req.db.query(
-        `SELECT id, receipt_number, customer_name, customer_email, customer_phone,
-                subtotal, tax_amount, discount_amount, total,
-                payment_method, notes, created_at
+        `SELECT
+           id,
+           receipt_number,
+           receipt_data->>'$.customer_name'                       AS customer_name,
+           receipt_data->>'$.customer_email'                      AS customer_email,
+           receipt_data->>'$.customer_phone'                      AS customer_phone,
+           CAST(receipt_data->>'$.subtotal'       AS DECIMAL(10,2)) AS subtotal,
+           CAST(receipt_data->>'$.tax_amount'     AS DECIMAL(10,2)) AS tax_amount,
+           CAST(receipt_data->>'$.discount_amount' AS DECIMAL(10,2)) AS discount_amount,
+           CAST(receipt_data->>'$.total'          AS DECIMAL(10,2)) AS total,
+           receipt_data->>'$.payment_method'                      AS payment_method,
+           receipt_data->>'$.notes'                               AS notes,
+           created_at
          FROM receipts
          WHERE ${idWhere} ${tenFilter}
          ORDER BY created_at DESC`,
