@@ -442,6 +442,25 @@ async function getTenantProfile(req, res) {
       });
     }
 
+    // Get WhatsApp connection status from tenant DB
+    const aiConfig = await models.AIAgentConfig.findOne({
+      where: isFreeUser ? { tenant_id: req.user.tenantId } : {},
+      attributes: ['whatsapp_enabled', 'whatsapp_phone_number', 'whatsapp_phone_number_id'],
+      order: [['created_at', 'DESC']]
+    }).catch(() => null);
+
+    // Get WhatsApp subscription from main DB
+    const [[waSub]] = await mainSequelize.query(
+      `SELECT ws.status, ws.current_period_end, ws.follow_ups_used,
+              wp.name AS plan_name, wp.slug AS plan_slug,
+              wp.price_kobo, wp.max_customers, wp.follow_up_limit
+       FROM whatsapp_subscriptions ws
+       JOIN whatsapp_plans wp ON ws.plan_id = wp.id
+       WHERE ws.tenant_id = ?
+       LIMIT 1`,
+      { replacements: [req.user.tenantId] }
+    ).catch(() => [[]]);
+
     // Format response
     const response = {
       success: true,
@@ -476,7 +495,22 @@ async function getTenantProfile(req, res) {
           custom_domain: store.custom_domain,
           is_published: store.is_published,
           setup_completed: store.setup_completed
-        }))
+        })),
+        whatsapp: {
+          connected: !!(aiConfig?.whatsapp_enabled && aiConfig?.whatsapp_phone_number_id),
+          phone_number: aiConfig?.whatsapp_phone_number || null,
+          phone_number_id: aiConfig?.whatsapp_phone_number_id || null,
+          subscription: waSub ? {
+            status: waSub.status,
+            plan_name: waSub.plan_name,
+            plan_slug: waSub.plan_slug,
+            price_kobo: waSub.price_kobo,
+            max_customers: waSub.max_customers,
+            follow_up_limit: waSub.follow_up_limit,
+            follow_ups_used: waSub.follow_ups_used,
+            current_period_end: waSub.current_period_end
+          } : null
+        }
       }
     };
 

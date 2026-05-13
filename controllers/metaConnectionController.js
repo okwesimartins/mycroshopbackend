@@ -1632,6 +1632,177 @@ async function refreshExpiringTokens(daysBeforeExpiration = 7) {
   }
 }
 
+/**
+ * Complete WhatsApp Embedded Signup (JWT-authenticated POST)
+ * Called by the web/mobile frontend after the FB JS SDK popup finishes.
+ * Body: { code, waba_id, phone_number_id }
+ * Tenant is identified from req.user.tenantId — no state param needed.
+ */
+async function completeEmbeddedSignup(req, res) {
+  try {
+    const { code, waba_id, phone_number_id } = req.body;
+
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: 'Authorization code is required',
+        error: 'missing_code'
+      });
+    }
+    if (!phone_number_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'phone_number_id is required',
+        error: 'missing_phone_number_id'
+      });
+    }
+
+    if (!process.env.META_APP_ID || !process.env.META_APP_SECRET) {
+      return res.status(500).json({
+        success: false,
+        message: 'Meta app credentials are not configured',
+        error: 'meta_credentials_missing'
+      });
+    }
+
+    const tenantId = req.user.tenantId;
+    const { getTenantById } = require('../config/tenant');
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found', error: 'tenant_not_found' });
+    }
+
+    // Exchange code for short-lived token
+    const redirectUri = process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
+    let tokenResponse;
+    try {
+      tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+        params: {
+          client_id: process.env.META_APP_ID,
+          client_secret: process.env.META_APP_SECRET,
+          redirect_uri: redirectUri,
+          code
+        }
+      });
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to exchange code for access token',
+        error: 'token_exchange_failed',
+        details: err.response?.data || err.message
+      });
+    }
+
+    let accessToken = tokenResponse.data.access_token;
+    let expiresIn   = tokenResponse.data.expires_in;
+
+    if (!accessToken) {
+      return res.status(400).json({ success: false, message: 'No access token received from Meta', error: 'no_access_token' });
+    }
+
+    // Exchange for long-lived token (60 days)
+    try {
+      const longLived = await exchangeForLongLivedToken(accessToken);
+      accessToken = longLived.access_token;
+      expiresIn   = longLived.expires_in;
+    } catch (e) {
+      console.warn('Could not exchange for long-lived token, using short-lived:', e.message);
+    }
+
+    const expiresAt = calculateExpirationDate(expiresIn);
+
+    // Fetch display phone number
+    let phoneNumber = null;
+    try {
+      const pnRes = await axios.get(`https://graph.facebook.com/v18.0/${phone_number_id}`, {
+        params: { access_token: accessToken, fields: 'display_phone_number,verified_name' }
+      });
+      phoneNumber = pnRes.data;
+    } catch (_) {}
+
+    // Encrypt token before storing
+    let encryptedToken = accessToken;
+    try {
+      const { encrypt } = require('../utils/encryption');
+      if (encrypt) encryptedToken = encrypt(accessToken);
+    } catch (_) {}
+
+    // Save to tenant DB
+    const subscriptionPlan = tenant.subscription_plan || 'enterprise';
+    const { getTenantConnection } = require('../config/database');
+    const sequelize = await getTenantConnection(tenantId, subscriptionPlan);
+    const initializeModels = require('../models');
+    const models = initializeModels(sequelize);
+
+    const configWhere = subscriptionPlan === 'free' ? { tenant_id: tenantId } : {};
+    let config = await models.AIAgentConfig.findOne({ where: configWhere, order: [['created_at', 'DESC']] });
+
+    const fields = {
+      whatsapp_enabled:         true,
+      whatsapp_phone_number_id: phone_number_id,
+      whatsapp_phone_number:    phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
+      whatsapp_access_token:    encryptedToken,
+      whatsapp_token_expires_at: expiresAt
+    };
+
+    if (config) {
+      await config.update(fields);
+    } else {
+      await models.AIAgentConfig.create(
+        subscriptionPlan === 'free' ? { ...fields, tenant_id: tenantId } : fields
+      );
+    }
+
+    // Also upsert into main DB whatsapp_connections
+    const { mainSequelize } = require('../config/database');
+    await mainSequelize.query(
+      `INSERT INTO whatsapp_connections
+         (tenant_id, phone_number_id, waba_id, access_token, token_expires_at, connected_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+       ON DUPLICATE KEY UPDATE
+         phone_number_id = VALUES(phone_number_id),
+         waba_id         = VALUES(waba_id),
+         access_token    = VALUES(access_token),
+         token_expires_at = VALUES(token_expires_at),
+         updated_at      = NOW()`,
+      { replacements: [tenantId, phone_number_id, waba_id || null, encryptedToken, expiresAt] }
+    ).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: 'WhatsApp connected successfully via Embedded Signup',
+      data: {
+        connected: true,
+        phone_number: phoneNumber?.display_phone_number || phoneNumber?.verified_name || null,
+        phone_number_id,
+        waba_id: waba_id || null,
+        method: 'embedded_signup'
+      }
+    });
+  } catch (error) {
+    console.error('completeEmbeddedSignup error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to complete WhatsApp Embedded Signup',
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Return public Meta config values needed by the frontend to initialise the FB JS SDK.
+ * No auth required — APP_ID and CONFIG_ID are public values.
+ */
+function getPublicMetaConfig(req, res) {
+  res.json({
+    success: true,
+    data: {
+      app_id:    process.env.META_APP_ID    || null,
+      config_id: process.env.META_CONFIG_ID || null
+    }
+  });
+}
+
 module.exports = {
   getConnectionStatus,
   initiateWhatsAppConnection,
@@ -1645,7 +1816,9 @@ module.exports = {
   manuallyConnectWhatsApp,
   verifyOAuthToken,
   refreshExpiringTokens,
-  refreshExpiringTokensHandler
+  refreshExpiringTokensHandler,
+  completeEmbeddedSignup,
+  getPublicMetaConfig
 };
 
 

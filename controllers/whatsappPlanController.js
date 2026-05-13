@@ -1,7 +1,6 @@
 const axios = require('axios');
 const crypto = require('crypto');
-const { WhatsAppPlan, WhatsAppSubscription, getTenantById } = require('../config/tenant');
-const { mainSequelize } = require('../config/database');
+const { WhatsAppPlan, WhatsAppSubscription } = require('../config/tenant');
 const { getPlatformSettingValue } = require('./platformSettingsController');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -31,7 +30,7 @@ function generateRef(tenantId, planSlug) {
  * GET /api/v1/whatsapp-plans
  * List all active WhatsApp AI Sales Agent plans (public — no auth required).
  */
-async function getPlans(req, res) {
+async function getPlans(_req, res) {
   try {
     const plans = await WhatsAppPlan.findAll({
       where: { is_active: true },
@@ -123,33 +122,27 @@ async function getMySubscription(req, res) {
 
 /**
  * POST /api/v1/whatsapp-plans/subscribe
- * Initiate a Paystack payment to subscribe to a WhatsApp AI plan.
+ * Initiate a Paystack payment to subscribe to or upgrade a WhatsApp AI plan.
  *
  * Body: { plan_id, email, callback_url? }
  *
- * For Enterprise (is_custom = true) returns a contact prompt instead of a payment URL.
+ * Behaviour:
+ *   - No active sub   → charge full plan price, create new subscription
+ *   - Active + same plan  → 400 "already on this plan"
+ *   - Active + lower plan → 400 "downgrade not allowed mid-cycle"
+ *   - Active + higher plan → pro-rated charge (remaining days × price diff), preserve period end
  */
 async function subscribeToPlan(req, res) {
   try {
     const tenantId = req.user?.tenantId;
     const { plan_id, email, callback_url } = req.body;
 
-    if (!tenantId) {
-      return res.status(401).json({ success: false, message: 'Unable to identify tenant from token' });
-    }
-    if (!plan_id) {
-      return res.status(400).json({ success: false, message: 'plan_id is required' });
-    }
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'email is required' });
-    }
+    if (!tenantId) return res.status(401).json({ success: false, message: 'Unable to identify tenant from token' });
+    if (!plan_id)  return res.status(400).json({ success: false, message: 'plan_id is required' });
+    if (!email)    return res.status(400).json({ success: false, message: 'email is required' });
 
-    const plan = await WhatsAppPlan.findOne({
-      where: { id: plan_id, is_active: true }
-    });
-    if (!plan) {
-      return res.status(404).json({ success: false, message: 'Plan not found' });
-    }
+    const plan = await WhatsAppPlan.findOne({ where: { id: plan_id, is_active: true } });
+    if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
     // Enterprise — no self-serve payment
     if (plan.is_custom) {
@@ -161,26 +154,115 @@ async function subscribeToPlan(req, res) {
       });
     }
 
-    const secretKey = await getPlatformSettingValue('paystack_secret_key');
-    if (!secretKey) {
-      return res.status(500).json({
-        success: false,
-        message: 'Payment is not configured yet. Please contact support.'
-      });
+    // ── Check for existing active subscription ────────────────────────────────
+    const existingSub = await WhatsAppSubscription.findOne({
+      where: { tenant_id: tenantId },
+      include: [{ model: WhatsAppPlan, as: 'Plan' }]
+    });
+
+    const now = new Date();
+    const subIsActive = existingSub &&
+      existingSub.status === 'active' &&
+      existingSub.current_period_end &&
+      new Date(existingSub.current_period_end) > now;
+
+    let amountToCharge = plan.price_kobo;
+    let isUpgrade      = false;
+    let proration      = null;
+
+    if (subIsActive) {
+      const currentPlan      = existingSub.Plan;
+      const currentPlanPrice = currentPlan?.price_kobo ?? 0;
+      const newPlanPrice     = plan.price_kobo;
+
+      // Same plan
+      if (existingSub.plan_id === plan.id) {
+        return res.status(400).json({
+          success: false,
+          error: 'already_on_plan',
+          message: `You are already on the ${currentPlan?.name || 'current'} plan.`,
+          data: {
+            current_plan: currentPlan?.name,
+            current_period_end: existingSub.current_period_end
+          }
+        });
+      }
+
+      // Downgrade — not allowed mid-cycle
+      if (newPlanPrice < currentPlanPrice) {
+        const periodEnd = new Date(existingSub.current_period_end);
+        return res.status(400).json({
+          success: false,
+          error: 'downgrade_not_allowed',
+          message: `Downgrading mid-cycle is not available. Your ${currentPlan?.name} plan is active until ${periodEnd.toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' })}. You can switch to a lower plan after that date.`,
+          data: {
+            current_plan: currentPlan?.name,
+            current_period_end: existingSub.current_period_end
+          }
+        });
+      }
+
+      // ── Upgrade — pro-rate the charge ─────────────────────────────────────
+      const periodEnd   = new Date(existingSub.current_period_end);
+      const periodStart = existingSub.current_period_start
+        ? new Date(existingSub.current_period_start)
+        : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const totalDays     = Math.max(1, Math.round((periodEnd - periodStart) / 86400000));
+      const remainingDays = Math.max(0, Math.ceil((periodEnd - now)           / 86400000));
+
+      // Credit for unused days on current plan, cost for remaining days on new plan
+      const unusedCredit = Math.round((remainingDays / totalDays) * currentPlanPrice);
+      const newPlanCost  = Math.round((remainingDays / totalDays) * newPlanPrice);
+      amountToCharge     = Math.max(0, newPlanCost - unusedCredit);
+
+      isUpgrade = true;
+      proration = {
+        current_plan:              currentPlan?.name,
+        new_plan:                  plan.name,
+        billing_cycle_days:        totalDays,
+        remaining_days:            remainingDays,
+        current_plan_price_ngn:    currentPlanPrice / 100,
+        new_plan_price_ngn:        newPlanPrice     / 100,
+        unused_credit_ngn:         unusedCredit     / 100,
+        new_plan_cost_ngn:         newPlanCost      / 100,
+        upgrade_charge_ngn:        amountToCharge   / 100,
+        current_period_end:        existingSub.current_period_end
+      };
+
+      // Edge case: 0 kobo charge (< 1 remaining day) — activate immediately
+      if (amountToCharge === 0) {
+        await existingSub.update({ plan_id: plan.id, updated_at: now });
+        return res.json({
+          success: true,
+          upgraded: true,
+          no_charge: true,
+          message: `Upgraded to ${plan.name} — no charge needed as your current billing period ends today.`,
+          data: { plan: { id: plan.id, name: plan.name, slug: plan.slug }, proration }
+        });
+      }
     }
 
-    const reference = generateRef(tenantId, plan.slug);
-    const callbackUrl = callback_url || process.env.WHATSAPP_PLAN_CALLBACK_URL || `${process.env.BASE_URL || 'https://backend.mycroshop.com'}/api/v1/whatsapp-plans/payment-callback`;
+    const secretKey = await getPlatformSettingValue('paystack_secret_key');
+    if (!secretKey) {
+      return res.status(500).json({ success: false, message: 'Payment is not configured yet. Please contact support.' });
+    }
 
-    // Upsert a pending subscription record so we can track on webhook
+    const reference  = generateRef(tenantId, plan.slug);
+    const callbackUrl = callback_url ||
+      process.env.WHATSAPP_PLAN_CALLBACK_URL ||
+      `${process.env.BASE_URL || 'https://backend.mycroshop.com'}/api/v1/whatsapp-plans/payment-callback`;
+
+    // ── Upsert subscription record ────────────────────────────────────────────
+    // For upgrades: only update the reference — keep plan_id/status unchanged until payment confirmed.
+    // For new subs: set plan_id + status pending.
     let sub = await WhatsAppSubscription.findOne({ where: { tenant_id: tenantId } });
     if (sub) {
-      await sub.update({
-        plan_id: plan.id,
-        status: 'pending',
-        paystack_reference: reference,
-        updated_at: new Date()
-      });
+      if (isUpgrade) {
+        await sub.update({ paystack_reference: reference, updated_at: now });
+      } else {
+        await sub.update({ plan_id: plan.id, status: 'pending', paystack_reference: reference, updated_at: now });
+      }
     } else {
       sub = await WhatsAppSubscription.create({
         tenant_id: tenantId,
@@ -190,50 +272,48 @@ async function subscribeToPlan(req, res) {
       });
     }
 
-    // Initialize Paystack transaction
+    // ── Initialize Paystack transaction ───────────────────────────────────────
     const paystackRes = await axios.post(
       'https://api.paystack.co/transaction/initialize',
       {
         email,
-        amount: plan.price_kobo,
+        amount: amountToCharge,
         currency: 'NGN',
         reference,
         callback_url: callbackUrl,
         metadata: {
           custom_fields: [
-            { display_name: 'Plan', variable_name: 'plan_name', value: plan.name },
-            { display_name: 'Tenant ID', variable_name: 'tenant_id', value: String(tenantId) }
+            { display_name: 'Plan',    variable_name: 'plan_name',     value: plan.name },
+            { display_name: 'Type',    variable_name: 'payment_type',  value: isUpgrade ? 'Upgrade' : 'New subscription' },
+            { display_name: 'Tenant',  variable_name: 'tenant_id',     value: String(tenantId) }
           ],
-          tenant_id: tenantId,
-          plan_id: plan.id,
-          plan_slug: plan.slug,
-          payment_type: 'whatsapp_plan'
+          tenant_id:    tenantId,
+          plan_id:      plan.id,
+          plan_slug:    plan.slug,
+          payment_type: isUpgrade ? 'whatsapp_plan_upgrade' : 'whatsapp_plan',
+          is_upgrade:   isUpgrade
         }
       },
       {
-        headers: {
-          Authorization: `Bearer ${secretKey}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { Authorization: `Bearer ${secretKey}`, 'Content-Type': 'application/json' },
         timeout: 15000
       }
     );
 
     const { authorization_url, access_code } = paystackRes.data.data;
 
+    const responseData = {
+      reference,
+      authorization_url,
+      access_code,
+      plan: { id: plan.id, name: plan.name, slug: plan.slug, price_ngn: plan.price_kobo / 100 }
+    };
+    if (isUpgrade) responseData.proration = proration;
+
     return res.json({
       success: true,
-      data: {
-        reference,
-        authorization_url,
-        access_code,
-        plan: {
-          id: plan.id,
-          name: plan.name,
-          slug: plan.slug,
-          price_ngn: plan.price_kobo / 100
-        }
-      }
+      is_upgrade: isUpgrade,
+      data: responseData
     });
   } catch (err) {
     const detail = err.response?.data || err.message || String(err);
@@ -336,23 +416,37 @@ async function handleWebhook(req, res) {
       return;
     }
 
-    const now = new Date();
+    const now      = new Date();
     const periodEnd = new Date(now);
     periodEnd.setDate(periodEnd.getDate() + 30); // 30-day billing cycle
 
+    const isUpgrade = metadata.is_upgrade === true || metadata.payment_type === 'whatsapp_plan_upgrade';
+
     if (sub) {
-      await sub.update({
-        plan_id: planId,
-        status: 'active',
-        paystack_reference: reference,
-        paystack_customer_code: data.customer?.customer_code || sub.paystack_customer_code,
-        current_period_start: now,
-        current_period_end: periodEnd,
-        follow_ups_used: 0, // Reset on new payment
-        follow_up_reset_at: now,
-        cancelled_at: null,
-        updated_at: now
-      });
+      if (isUpgrade) {
+        // Upgrade mid-cycle: switch plan immediately, preserve current period end and follow-up counter
+        await sub.update({
+          plan_id: planId,
+          status: 'active',
+          paystack_reference: reference,
+          paystack_customer_code: data.customer?.customer_code || sub.paystack_customer_code,
+          updated_at: now
+        });
+      } else {
+        // New subscription or renewal: full reset
+        await sub.update({
+          plan_id: planId,
+          status: 'active',
+          paystack_reference: reference,
+          paystack_customer_code: data.customer?.customer_code || sub.paystack_customer_code,
+          current_period_start: now,
+          current_period_end: periodEnd,
+          follow_ups_used: 0,
+          follow_up_reset_at: now,
+          cancelled_at: null,
+          updated_at: now
+        });
+      }
     } else {
       await WhatsAppSubscription.create({
         tenant_id: tenantId,
@@ -367,7 +461,7 @@ async function handleWebhook(req, res) {
       });
     }
 
-    console.log(`✅ WhatsApp plan activated: tenant ${tenantId} → ${plan.name} (ref: ${reference})`);
+    console.log(`✅ WhatsApp plan ${isUpgrade ? 'upgraded' : 'activated'}: tenant ${tenantId} → ${plan.name} (ref: ${reference})`);
   } catch (err) {
     console.error('WhatsApp plan webhook error:', err);
     // Already sent 200 above; just log
