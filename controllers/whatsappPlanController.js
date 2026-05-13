@@ -87,6 +87,9 @@ async function getMySubscription(req, res) {
     const isExpired = sub.current_period_end && new Date(sub.current_period_end) < now;
     const status = isExpired && sub.status === 'active' ? 'expired' : sub.status;
 
+    // Keep monthly window accurate for multi-month subscribers
+    if (status === 'active') await autoResetFollowUpsIfNeeded(sub, now);
+
     return res.json({
       success: true,
       data: {
@@ -141,6 +144,11 @@ async function subscribeToPlan(req, res) {
     if (!plan_id)  return res.status(400).json({ success: false, message: 'plan_id is required' });
     if (!email)    return res.status(400).json({ success: false, message: 'email is required' });
 
+    // Months: 1–12. Discount tiers: 3-5 = 5%, 6-8 = 10%, 9-11 = 15%, 12 = 20%
+    const months = Math.min(12, Math.max(1, parseInt(req.body.months || 1, 10)));
+    const DISCOUNT_RATES = { 1:0, 2:0, 3:0.05, 4:0.05, 5:0.05, 6:0.10, 7:0.10, 8:0.10, 9:0.15, 10:0.15, 11:0.15, 12:0.20 };
+    const discountRate  = DISCOUNT_RATES[months] ?? 0;
+
     const plan = await WhatsAppPlan.findOne({ where: { id: plan_id, is_active: true } });
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
@@ -166,9 +174,12 @@ async function subscribeToPlan(req, res) {
       existingSub.current_period_end &&
       new Date(existingSub.current_period_end) > now;
 
-    let amountToCharge = plan.price_kobo;
-    let isUpgrade      = false;
-    let proration      = null;
+    // Base multi-month charge (only applies to new subs; upgrades use pro-rated daily rate)
+    const baseKobo      = plan.price_kobo * months;
+    const discountKobo  = Math.round(baseKobo * discountRate);
+    let amountToCharge  = baseKobo - discountKobo;
+    let isUpgrade       = false;
+    let proration       = null;
 
     if (subIsActive) {
       const currentPlan      = existingSub.Plan;
@@ -283,15 +294,18 @@ async function subscribeToPlan(req, res) {
         callback_url: callbackUrl,
         metadata: {
           custom_fields: [
-            { display_name: 'Plan',    variable_name: 'plan_name',     value: plan.name },
-            { display_name: 'Type',    variable_name: 'payment_type',  value: isUpgrade ? 'Upgrade' : 'New subscription' },
-            { display_name: 'Tenant',  variable_name: 'tenant_id',     value: String(tenantId) }
+            { display_name: 'Plan',    variable_name: 'plan_name',    value: plan.name },
+            { display_name: 'Months',  variable_name: 'months',       value: String(months) },
+            { display_name: 'Type',    variable_name: 'payment_type', value: isUpgrade ? 'Upgrade' : 'New subscription' },
+            { display_name: 'Tenant',  variable_name: 'tenant_id',    value: String(tenantId) }
           ],
-          tenant_id:    tenantId,
-          plan_id:      plan.id,
-          plan_slug:    plan.slug,
-          payment_type: isUpgrade ? 'whatsapp_plan_upgrade' : 'whatsapp_plan',
-          is_upgrade:   isUpgrade
+          tenant_id:     tenantId,
+          plan_id:       plan.id,
+          plan_slug:     plan.slug,
+          months:        isUpgrade ? 1 : months,
+          discount_rate: isUpgrade ? 0 : discountRate,
+          payment_type:  isUpgrade ? 'whatsapp_plan_upgrade' : 'whatsapp_plan',
+          is_upgrade:    isUpgrade
         }
       },
       {
@@ -306,7 +320,14 @@ async function subscribeToPlan(req, res) {
       reference,
       authorization_url,
       access_code,
-      plan: { id: plan.id, name: plan.name, slug: plan.slug, price_ngn: plan.price_kobo / 100 }
+      plan: { id: plan.id, name: plan.name, slug: plan.slug, price_ngn: plan.price_kobo / 100 },
+      billing: isUpgrade ? null : {
+        months,
+        discount_pct:        Math.round(discountRate * 100),
+        base_total_ngn:      baseKobo    / 100,
+        discount_saving_ngn: discountKobo / 100,
+        charge_ngn:          amountToCharge / 100
+      }
     };
     if (isUpgrade) responseData.proration = proration;
 
@@ -416,9 +437,10 @@ async function handleWebhook(req, res) {
       return;
     }
 
-    const now      = new Date();
+    const now       = new Date();
+    const months    = Math.min(12, Math.max(1, parseInt(metadata.months || 1, 10)));
     const periodEnd = new Date(now);
-    periodEnd.setDate(periodEnd.getDate() + 30); // 30-day billing cycle
+    periodEnd.setDate(periodEnd.getDate() + months * 30);
 
     const isUpgrade = metadata.is_upgrade === true || metadata.payment_type === 'whatsapp_plan_upgrade';
 
@@ -494,6 +516,36 @@ async function paymentCallback(req, res) {
 // ─── Follow-up Usage Tracking ─────────────────────────────────────────────────
 
 /**
+ * For multi-month subscribers, reset follow_ups_used to 0 every 30 days
+ * as long as the subscription is still within its paid period.
+ *
+ * A subscriber who pays for 6 months gets their monthly cap refreshed each month —
+ * they never lose unused follow-ups and are never blocked mid-period.
+ *
+ * Mutates `sub` in-place so callers immediately see the reset values.
+ * Returns true if a reset was performed.
+ */
+async function autoResetFollowUpsIfNeeded(sub, now) {
+  if (!sub || sub.status !== 'active') return false;
+
+  // Must still be within the paid period
+  if (!sub.current_period_end || new Date(sub.current_period_end) <= now) return false;
+
+  // Need a reset anchor to calculate the next window
+  const resetAt = sub.follow_up_reset_at ? new Date(sub.follow_up_reset_at) : null;
+  if (!resetAt) return false;
+
+  const nextResetDue = new Date(resetAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+  if (now < nextResetDue) return false; // Not yet time
+
+  // A new 30-day window has started within the multi-month period — reset counter
+  await sub.update({ follow_ups_used: 0, follow_up_reset_at: now, updated_at: now });
+  sub.follow_ups_used    = 0;
+  sub.follow_up_reset_at = now;
+  return true;
+}
+
+/**
  * Check whether a tenant's WhatsApp AI subscription allows another follow-up message,
  * and if so increment the counter.
  *
@@ -525,6 +577,9 @@ async function checkAndIncrementFollowUpUsage(tenantId) {
       await sub.update({ status: 'expired', updated_at: now });
       return { allowed: false, reason: 'subscription_expired' };
     }
+
+    // Auto-reset monthly window for multi-month subscribers
+    await autoResetFollowUpsIfNeeded(sub, now);
 
     const plan = sub.Plan;
     const limit = plan?.follow_up_limit ?? null;
@@ -597,6 +652,10 @@ async function getAgentSubscriptionStatus(req, res) {
     const now = new Date();
     const isExpired = sub.current_period_end && new Date(sub.current_period_end) < now;
     const effectiveStatus = isExpired && sub.status === 'active' ? 'expired' : sub.status;
+
+    // Auto-reset monthly window for multi-month subscribers
+    if (effectiveStatus === 'active') await autoResetFollowUpsIfNeeded(sub, now);
+
     const plan = sub.Plan;
     const limit = plan?.follow_up_limit ?? null;
     const used = sub.follow_ups_used || 0;
