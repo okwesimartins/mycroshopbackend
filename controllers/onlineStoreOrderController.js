@@ -106,8 +106,8 @@ async function getAllOrders(req, res) {
       if (searchLike) {
         const term = '%' + searchTerm.toLowerCase().replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
         productOrderWhere[Sequelize.Op.or] = [
-          Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('customer_name')), { [Sequelize.Op.like]: term }),
-          Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('order_number')), { [Sequelize.Op.like]: term })
+          Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('OnlineStoreOrder.customer_name')), { [Sequelize.Op.like]: term }),
+          Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('OnlineStoreOrder.order_number')), { [Sequelize.Op.like]: term })
         ];
       }
 

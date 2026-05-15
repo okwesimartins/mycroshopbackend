@@ -917,25 +917,22 @@ async function getAllDomains(req, res) {
     const offset = (page - 1) * limit;
 
     const tenantId = req.user?.tenantId;
-    const isFreePlan = req.user?.tenant?.subscription_plan === 'free';
+    if (!tenantId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
 
-    const where = {};
-    if (isFreePlan && tenantId) {
-      where.tenant_id = tenantId;
-    }
-    if (status) {
-      where.status = status;
-    }
-    if (online_store_id) {
-      where.online_store_id = online_store_id;
-    }
+    // Always scope to this tenant — domain records always carry tenant_id (set during checkout)
+    const where = { tenant_id: tenantId };
+    if (status)          where.status          = status;
+    if (online_store_id) where.online_store_id = online_store_id;
 
     const { count, rows } = await req.db.models.Domain.findAndCountAll({
       where,
       include: [
         {
           model: req.db.models.OnlineStore,
-          attributes: ['id', 'username', 'store_name', 'custom_domain']
+          attributes: ['id', 'username', 'store_name', 'custom_domain'],
+          required: false
         }
       ],
       limit: parseInt(limit),
@@ -943,10 +940,26 @@ async function getAllDomains(req, res) {
       order: [['created_at', 'DESC']]
     });
 
+    // Convert stored USD price → NGN (same logic as checkDomainAvailability)
+    const buffer = parseFloat(process.env.DOMAIN_NGN_BUFFER || '2000');
+    const needsConversion = rows.some(d => d.price && d.currency === 'USD');
+    const exchangeRate    = needsConversion ? await getUSDToNGNExchangeRate() : null;
+
+    const domains = rows.map(domain => {
+      const d = domain.toJSON();
+      if (d.price && d.currency === 'USD' && exchangeRate) {
+        const years   = d.years || 1;
+        d.price_ngn   = Math.ceil(d.price * exchangeRate + buffer * years);
+        d.price_usd   = d.price;
+        d.exchange_rate = exchangeRate;
+      }
+      return d;
+    });
+
     res.json({
       success: true,
       data: {
-        domains: rows,
+        domains,
         pagination: {
           total: count,
           page: parseInt(page),
@@ -1539,9 +1552,32 @@ async function provisionSSL(req, res) {
       });
     }
 
+    // SSL_MODE=test — return a mock success without running certbot
+    if (process.env.SSL_MODE === 'test') {
+      await domain.update({ ssl_enabled: true });
+      const mockExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+      return res.json({
+        success: true,
+        message: '[TEST MODE] SSL certificate provisioned successfully (sandbox mock)',
+        data: {
+          domain: domain.domain_name,
+          ssl_result: {
+            success:     true,
+            domain:      domain.domain_name,
+            provider:    'letsencrypt',
+            message:     'Certificate issued (test mode — no real certbot run)',
+            certificate: `/etc/letsencrypt/live/${domain.domain_name}/fullchain.pem`,
+            privateKey:  `/etc/letsencrypt/live/${domain.domain_name}/privkey.pem`,
+            expiresAt:   mockExpiry,
+            sandbox:     true
+          }
+        }
+      });
+    }
+
     // Provision SSL certificate
     const sslResult = await sslService.provisionSSL(
-      domain.domain_name, 
+      domain.domain_name,
       domain.OnlineStore?.username || null
     );
 
@@ -1591,6 +1627,28 @@ async function checkSSLStatus(req, res) {
       return res.status(403).json({
         success: false,
         message: 'Access denied. You can only check SSL status for domains that you own.'
+      });
+    }
+
+    // SSL_MODE=test — return a mock status without querying the real certificate
+    if (process.env.SSL_MODE === 'test') {
+      const mockExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+      return res.json({
+        success: true,
+        data: {
+          domain: domain.domain_name,
+          ssl_status: {
+            domain:      domain.domain_name,
+            enabled:     domain.ssl_enabled || false,
+            provider:    'letsencrypt',
+            status:      domain.ssl_enabled ? 'active' : 'not_provisioned',
+            expiresAt:   domain.ssl_enabled ? mockExpiry : null,
+            daysLeft:    domain.ssl_enabled ? 90 : null,
+            autoRenew:   true,
+            sandbox:     true,
+            message:     '[TEST MODE] SSL status (sandbox mock)'
+          }
+        }
       });
     }
 

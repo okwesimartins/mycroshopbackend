@@ -3,1145 +3,1185 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Sales Agent — Choose a Plan | Mycroshop</title>
+  <title>AI Sales Agent — End-to-End Screen Guide | Mycroshop</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --mc-blue:       #0057FF;
-      --mc-dark:       #0044CC;
-      --mc-darker:     #002FA3;
-      --mc-light:      #D6E5FF;
-      --mc-bg-tint:    #EBF1FF;
-      --text-primary:  #111827;
-      --text-secondary:#6B7280;
-      --text-muted:    #9CA3AF;
-      --bg-page:       #F0F4FA;
-      --bg-card:       #FFFFFF;
-      --border:        #E5E7EB;
-      --shadow-sm:     0 1px 3px rgba(0,0,0,.08);
-      --shadow-md:     0 4px 16px rgba(0,0,0,.10);
-      --shadow-pop:    0 12px 40px rgba(0,87,255,.18);
-      --radius:        16px;
-      --radius-sm:     10px;
+      --mc-blue:    #0057FF;
+      --mc-dark:    #0044CC;
+      --mc-darker:  #002FA3;
+      --mc-light:   #D6E5FF;
+      --mc-tint:    #EBF1FF;
+      --text-1:     #111827;
+      --text-2:     #6B7280;
+      --text-3:     #9CA3AF;
+      --bg:         #F0F4FA;
+      --border:     #E5E7EB;
+      --r:          14px;
+      --r-sm:       9px;
     }
 
-    body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--bg-page);
-      color: var(--text-primary);
-      min-height: 100vh;
+    body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; background: #0B0D14; color: var(--text-1); }
+
+    /* ── Guide shell ──────────────────────────────────────────── */
+    .g-topbar {
+      background: #12151F; border-bottom: 1px solid rgba(255,255,255,.07);
+      padding: 16px 40px; display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 200;
+    }
+    .g-brand { display: flex; align-items: center; gap: 9px; }
+    .g-mark  { width: 30px; height: 30px; background: var(--mc-blue); border-radius: 7px; display: grid; place-items: center; font-size: 15px; font-weight: 900; color: #fff; }
+    .g-name  { font-size: 14px; font-weight: 800; color: #fff; }
+    .g-name span { color: #5B8FFF; }
+    .g-pill  { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #5B8FFF; background: rgba(0,87,255,.12); border: 1px solid rgba(0,87,255,.25); padding: 4px 12px; border-radius: 20px; }
+    .g-count { font-size: 12px; color: rgba(255,255,255,.3); }
+
+    .g-body { max-width: 1440px; margin: 0 auto; padding: 52px 36px 100px; }
+
+    /* ── Flow label ───────────────────────────────────────────── */
+    .flow-label {
+      display: flex; align-items: center; gap: 14px; margin-bottom: 16px; margin-top: 8px;
+    }
+    .flow-label-line { flex: 1; height: 1px; background: rgba(255,255,255,.07); }
+    .flow-label-text { font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: rgba(255,255,255,.2); white-space: nowrap; }
+
+    /* ── Section ──────────────────────────────────────────────── */
+    .g-section { margin-bottom: 72px; }
+    .g-sec-hdr { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+    .g-num {
+      width: 34px; height: 34px; border-radius: 50%; background: var(--mc-blue);
+      color: #fff; font-size: 13px; font-weight: 900; display: grid; place-items: center; flex-shrink: 0;
+    }
+    .g-sec-title { font-size: 18px; font-weight: 800; color: #fff; }
+    .g-sec-sub   { font-size: 12px; color: rgba(255,255,255,.35); margin-top: 2px; }
+    .g-line { flex: 1; height: 1px; background: rgba(255,255,255,.06); margin-left: 6px; }
+
+    /* ── Frames layout ────────────────────────────────────────── */
+    .frames { display: grid; grid-template-columns: 1fr 330px; gap: 24px; align-items: start; }
+    .frames.center { grid-template-columns: 1fr 330px; }
+    @media (max-width: 1080px) { .frames { grid-template-columns: 1fr; } }
+
+    .dw { display: flex; flex-direction: column; gap: 9px; }
+    .dlbl {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+      color: rgba(255,255,255,.28);
+    }
+    .dlbl-dot { width: 5px; height: 5px; border-radius: 50%; background: #5B8FFF; }
+
+    /* Browser frame */
+    .browser {
+      background: #1A1E2B; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.07);
+      overflow: hidden; box-shadow: 0 16px 48px rgba(0,0,0,.5);
+    }
+    .b-chrome {
+      background: #21263A; padding: 9px 14px;
+      display: flex; align-items: center; gap: 9px;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .b-dots { display: flex; gap: 5px; }
+    .bd { width: 9px; height: 9px; border-radius: 50%; }
+    .bd-r { background: #FF5F57; } .bd-y { background: #FFBD2E; } .bd-g { background: #28C840; }
+    .b-url { flex: 1; background: #161A27; border-radius: 5px; padding: 4px 10px; font-size: 11px; color: rgba(255,255,255,.3); font-family: monospace; }
+    .b-body { overflow: hidden; }
+
+    /* Phone frame */
+    .phone-out {
+      background: #1C1C1E; border-radius: 42px;
+      padding: 11px; width: 100%; max-width: 330px;
+      box-shadow: 0 16px 48px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.09);
+    }
+    .phone-in {
+      background: var(--bg); border-radius: 33px;
+      overflow: hidden; position: relative; min-height: 660px;
+    }
+    .notch {
+      position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 110px; height: 26px; background: #1C1C1E;
+      border-radius: 0 0 16px 16px; z-index: 20;
     }
 
-    /* ── Header ─────────────────────────────────────────────── */
-    .header {
+    /* ── Shared UI components ─────────────────────────────────── */
+    /* Header */
+    .ui-hdr {
       background: linear-gradient(135deg, var(--mc-darker) 0%, var(--mc-dark) 55%, var(--mc-blue) 100%);
-      padding: 48px 24px 88px;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
+      padding: 44px 24px 76px; text-align: center; position: relative; overflow: hidden;
     }
-    .header::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background-image: radial-gradient(circle at 20% 80%, rgba(255,255,255,.07) 0%, transparent 50%),
-                        radial-gradient(circle at 80% 20%, rgba(255,255,255,.07) 0%, transparent 50%);
+    .ui-hdr::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(circle at 20% 80%,rgba(255,255,255,.07) 0%,transparent 50%),
+                  radial-gradient(circle at 80% 20%,rgba(255,255,255,.07) 0%,transparent 50%);
     }
-    .header-inner { position: relative; z-index: 1; }
+    .ui-hi { position: relative; z-index: 1; }
+    .ui-logo { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+    .ui-logo-mk {
+      width: 32px; height: 32px; background: rgba(255,255,255,.18);
+      border: 1.5px solid rgba(255,255,255,.3); border-radius: 8px;
+      display: grid; place-items: center; font-size: 16px; font-weight: 900; color: #fff;
+    }
+    .ui-logo-tx { font-size: 16px; font-weight: 800; color: #fff; }
+    .ui-logo-tx span { color: var(--mc-light); }
+    .ui-badge-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.24);
+      color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+      padding: 5px 12px; border-radius: 20px; margin-bottom: 16px;
+    }
+    .ui-h1 { font-size: clamp(20px, 3.5vw, 36px); font-weight: 900; color: #fff; line-height: 1.2; margin-bottom: 10px; }
+    .ui-h1 em { font-style: normal; color: var(--mc-light); }
+    .ui-p { font-size: 13px; color: rgba(255,255,255,.78); max-width: 460px; margin: 0 auto; line-height: 1.6; }
 
-    /* Mycroshop logo lockup */
-    .mc-logo {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 28px;
-      text-decoration: none;
-    }
-    .mc-logo-mark {
-      width: 40px; height: 40px;
-      background: rgba(255,255,255,.18);
-      border: 1.5px solid rgba(255,255,255,.35);
-      border-radius: 10px;
-      display: grid; place-items: center;
-      font-size: 20px; font-weight: 900;
-      color: #fff; letter-spacing: -1px;
-    }
-    .mc-logo-text {
-      font-size: 20px; font-weight: 800;
-      color: #fff; letter-spacing: -.3px;
-    }
-    .mc-logo-text span { color: var(--mc-light); }
-
-    .agent-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      background: rgba(255,255,255,.14);
-      border: 1px solid rgba(255,255,255,.25);
-      color: #fff;
-      font-size: 12px; font-weight: 700;
-      letter-spacing: .7px; text-transform: uppercase;
-      padding: 7px 16px; border-radius: 20px;
-      margin-bottom: 22px;
-    }
-    .agent-badge svg { width: 15px; height: 15px; flex-shrink: 0; }
-
-    .header h1 {
-      font-size: clamp(28px, 5vw, 44px);
-      font-weight: 900; color: #fff;
-      line-height: 1.15; margin-bottom: 16px;
-    }
-    .header h1 em { font-style: normal; color: var(--mc-light); }
-    .header p {
-      font-size: 16px; color: rgba(255,255,255,.82);
-      max-width: 500px; margin: 0 auto; line-height: 1.65;
-    }
-
-    /* ── Steps bar ──────────────────────────────────────────── */
-    .steps-wrap {
-      max-width: 640px;
-      margin: -26px auto 0;
-      padding: 0 24px;
-      position: relative; z-index: 10;
-    }
+    /* Steps */
+    .steps-wrap { max-width: 600px; margin: -20px auto 0; padding: 0 20px; position: relative; z-index: 10; }
     .steps-bar {
-      background: #fff;
-      border-radius: var(--radius);
-      box-shadow: var(--shadow-md);
-      padding: 18px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0;
+      background: #fff; border-radius: var(--r); box-shadow: 0 4px 16px rgba(0,0,0,.1);
+      padding: 14px 20px; display: flex; align-items: center;
     }
-    .step {
-      display: flex; align-items: center; gap: 10px;
-      flex: 1; min-width: 0;
+    .stp { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; }
+    .stp-n {
+      width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+      font-size: 11px; font-weight: 800; flex-shrink: 0;
+      background: var(--mc-tint); color: var(--mc-dark); border: 2px solid var(--mc-light);
     }
-    .step-num {
-      width: 30px; height: 30px; flex-shrink: 0;
-      border-radius: 50%;
-      display: grid; place-items: center;
-      font-size: 13px; font-weight: 800;
-      background: var(--mc-bg-tint);
-      color: var(--mc-dark);
-      border: 2px solid var(--mc-light);
-      transition: all .3s;
-    }
-    .step.done .step-num  { background: var(--mc-blue); color: #fff; border-color: var(--mc-blue); }
-    .step.active .step-num { background: var(--mc-blue); color: #fff; border-color: var(--mc-blue); box-shadow: 0 0 0 4px rgba(0,87,255,.15); }
-    .step-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); line-height: 1.3; min-width: 0; }
-    .step.active .step-label { color: var(--mc-dark); }
-    .step.done  .step-label  { color: var(--mc-dark); }
-    .step-sep { width: 28px; height: 2px; background: var(--border); flex-shrink: 0; margin: 0 4px; border-radius: 2px; }
-    .step-sep.done { background: var(--mc-blue); }
-    @media (max-width: 480px) { .step-label { display: none; } .steps-bar { gap: 0; padding: 14px 16px; } }
+    .stp.done .stp-n, .stp.active .stp-n { background: var(--mc-blue); color: #fff; border-color: var(--mc-blue); }
+    .stp.active .stp-n { box-shadow: 0 0 0 4px rgba(0,87,255,.14); }
+    .stp-l { font-size: 11px; font-weight: 600; color: var(--text-2); }
+    .stp.done .stp-l, .stp.active .stp-l { color: var(--mc-dark); }
+    .stp-sep { width: 22px; height: 2px; background: var(--border); border-radius: 2px; margin: 0 4px; flex-shrink: 0; }
+    .stp-sep.done { background: var(--mc-blue); }
 
-    /* ── Subscription banner ────────────────────────────────── */
-    .sub-wrap {
-      max-width: 960px;
-      margin: 16px auto 0;
-      padding: 0 24px;
+    /* Billing card */
+    .bill-card {
+      background: #fff; border-radius: var(--r); border: 1px solid var(--border);
+      box-shadow: 0 1px 4px rgba(0,0,0,.06); padding: 16px 18px 14px; margin-bottom: 20px;
     }
-    .sub-banner {
-      display: none;
-      background: #fff;
-      border-radius: var(--radius);
-      box-shadow: var(--shadow-md);
-      padding: 18px 22px;
-      align-items: center;
-      gap: 16px; flex-wrap: wrap;
+    .bill-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+    .bill-hdr-l { display: flex; align-items: center; gap: 8px; }
+    .bill-ico { width: 28px; height: 28px; background: var(--mc-tint); border-radius: 7px; display: grid; place-items: center; font-size: 13px; }
+    .bill-title { font-size: 13px; font-weight: 800; }
+    .bill-sub   { font-size: 11px; color: var(--text-2); }
+    .disc-pill  { display: flex; align-items: center; gap: 5px; background: #DCFCE7; color: #15803D; font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 20px; border: 1px solid #BBF7D0; }
+    .seg-outer  { overflow-x: auto; scrollbar-width: none; margin-bottom: 10px; }
+    .seg-outer::-webkit-scrollbar { display: none; }
+    .seg { display: flex; background: var(--bg); border-radius: 8px; padding: 3px; width: max-content; min-width: 100%; }
+    .bs {
+      flex: 1; min-width: 42px; display: flex; flex-direction: column; align-items: center;
+      padding: 6px 7px; border-radius: 6px; border: none; background: transparent; font-family: inherit;
     }
-    .sub-banner.show { display: flex; }
-    .sub-icon {
-      width: 46px; height: 46px;
-      background: var(--mc-bg-tint);
-      border-radius: 50%;
-      display: grid; place-items: center;
-      flex-shrink: 0; color: var(--mc-dark);
+    .bs.on { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.10), 0 0 0 1.5px var(--mc-blue); }
+    .bs-n { font-size: 13px; font-weight: 900; color: var(--text-3); line-height: 1.1; }
+    .bs.on .bs-n { color: var(--mc-blue); }
+    .bs-l { font-size: 9px; font-weight: 600; color: var(--text-3); }
+    .bs.on .bs-l { color: var(--mc-dark); }
+    .bs-d { font-size: 8px; font-weight: 800; color: #15803D; margin-top: 2px; white-space: nowrap; }
+    .sum-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--bg); border-radius: 7px; padding: 8px 11px; font-size: 11px;
     }
-    .sub-info { flex: 1; min-width: 180px; }
-    .sub-info strong { display: block; font-size: 14px; font-weight: 700; }
-    .sub-info span   { font-size: 13px; color: var(--text-secondary); }
-    .sub-usage { margin-top: 6px; }
-    .sub-usage-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 3px; }
-    .sub-bar { height: 5px; background: #E5E7EB; border-radius: 4px; overflow: hidden; }
-    .sub-fill { height: 100%; background: var(--mc-blue); border-radius: 4px; transition: width .5s; }
-    .sub-fill.warn   { background: #F59E0B; }
-    .sub-fill.danger { background: #EF4444; }
-    .status-pill {
-      font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .5px; padding: 4px 12px; border-radius: 20px;
-    }
-    .s-active    { background: var(--mc-bg-tint); color: var(--mc-darker); }
-    .s-expired   { background: #FEF2F2; color: #991B1B; }
-    .s-pending   { background: #FFFBEB; color: #92400E; }
-    .s-cancelled { background: #F3F4F6; color: #374151; }
+    .sum-l { color: var(--text-2); }
+    .sum-l strong { color: var(--text-1); }
+    .sum-r { color: #15803D; font-weight: 800; }
 
-    /* ── Connect WhatsApp section ───────────────────────────── */
-    .connect-wrap {
-      display: none;
-      max-width: 720px;
-      margin: 24px auto 0;
-      padding: 0 24px;
+    /* Plan card */
+    .plans-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
+    .plans-grid.two { grid-template-columns: repeat(2,1fr); }
+    .pc {
+      background: #fff; border-radius: var(--r); border: 2px solid var(--border);
+      padding: 20px 16px 18px; display: flex; flex-direction: column; position: relative;
     }
-    .connect-wrap.show { display: block; }
-    .connect-card {
-      background: #fff;
-      border-radius: var(--radius);
-      border: 2px solid var(--mc-blue);
-      box-shadow: var(--shadow-pop);
-      padding: 32px 28px;
-      display: flex;
-      gap: 28px;
-      align-items: flex-start;
-    }
-    @media (max-width: 560px) { .connect-card { flex-direction: column; gap: 20px; } }
-    .connect-icon-wrap {
-      width: 64px; height: 64px; flex-shrink: 0;
-      background: var(--mc-bg-tint);
-      border-radius: 18px;
-      display: grid; place-items: center;
-      font-size: 30px;
-    }
-    .connect-body { flex: 1; min-width: 0; }
-    .connect-step-label {
-      font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .8px; color: var(--mc-blue); margin-bottom: 6px;
-    }
-    .connect-body h3 { font-size: 20px; font-weight: 800; margin-bottom: 8px; }
-    .connect-body p  { font-size: 14px; color: var(--text-secondary); line-height: 1.65; margin-bottom: 20px; }
-    .connect-actions { display: flex; gap: 12px; flex-wrap: wrap; }
-    .connect-btn {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 12px 22px; border-radius: var(--radius-sm);
-      font-size: 14px; font-weight: 700; cursor: pointer;
-      border: 2px solid transparent; transition: all .2s;
-    }
-    .connect-btn-primary {
-      background: var(--mc-blue); color: #fff;
-      box-shadow: 0 4px 14px rgba(0,87,255,.28);
-    }
-    .connect-btn-primary:hover { background: var(--mc-dark); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,87,255,.38); }
-    .connect-btn-outline { background: transparent; color: var(--mc-dark); border-color: var(--mc-blue); }
-    .connect-btn-outline:hover { background: var(--mc-bg-tint); }
-    .connect-num-badge {
-      display: inline-flex; align-items: center; gap: 8px;
-      background: #ECFDF5; color: #065F46;
-      padding: 8px 14px; border-radius: var(--radius-sm);
-      font-size: 13px; font-weight: 700;
-      border: 1px solid #A7F3D0;
-    }
-    .wa-dot { width: 8px; height: 8px; background: #22C55E; border-radius: 50%; flex-shrink: 0; }
-
-    /* ── Billing period selector ────────────────────────────── */
-    .billing-wrap {
-      max-width: 860px; margin: 0 auto 36px; text-align: center;
-    }
-    .billing-top-label {
-      font-size: 12px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .7px; color: var(--text-secondary); margin-bottom: 14px;
-    }
-    .billing-chips {
-      display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 14px;
-    }
-    .b-chip {
-      position: relative; display: flex; flex-direction: column;
-      align-items: center; gap: 2px; padding: 9px 13px; border-radius: 10px;
-      font-size: 13px; font-weight: 700; cursor: pointer;
-      border: 2px solid var(--border); background: #fff; color: var(--text-secondary);
-      transition: all .15s; min-width: 52px;
-    }
-    .b-chip:hover  { border-color: var(--mc-blue); color: var(--mc-dark); }
-    .b-chip.active { border-color: var(--mc-blue); background: var(--mc-bg-tint); color: var(--mc-dark); }
-    .b-chip.yearly { border-color: var(--mc-blue); }
-    .b-num  { font-size: 15px; font-weight: 900; line-height: 1; }
-    .b-unit { font-size: 10px; font-weight: 600; color: var(--text-muted); line-height: 1; }
-    .b-save {
-      display: none; font-size: 9px; font-weight: 800; letter-spacing: .3px;
-      text-transform: uppercase; color: #16A34A; background: #DCFCE7;
-      padding: 2px 5px; border-radius: 4px; margin-top: 2px; white-space: nowrap;
-    }
-    .b-chip.has-disc .b-save,
-    .b-chip.active   .b-save { display: block; }
-    .billing-summary { font-size: 13px; color: var(--text-secondary); min-height: 18px; }
-    .billing-summary .s-green { color: #16A34A; font-weight: 700; }
-
-    /* ── Plans section ──────────────────────────────────────── */
-    .plans-section {
-      max-width: 1100px; margin: 0 auto;
-      padding: 40px 24px 64px;
-    }
-    .section-label {
-      font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .8px; color: var(--mc-blue); text-align: center; margin-bottom: 8px;
-    }
-    .section-title { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 24px; }
-    .plans-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 20px; align-items: start;
-    }
-    @media (max-width: 900px) { .plans-grid { grid-template-columns: repeat(2, 1fr); } }
-    @media (max-width: 540px) { .plans-grid { grid-template-columns: 1fr; } }
-
-    /* ── Plan card ──────────────────────────────────────────── */
-    .plan-card {
-      background: #fff; border-radius: var(--radius);
-      border: 2px solid var(--border);
-      padding: 28px 22px 24px;
-      display: flex; flex-direction: column;
-      position: relative; transition: transform .2s, box-shadow .2s;
-    }
-    .plan-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
-    .plan-card.popular { border-color: var(--mc-blue); box-shadow: var(--shadow-pop); transform: translateY(-8px); }
-    .plan-card.popular:hover { transform: translateY(-12px); }
-    .plan-card.is-current { border-color: var(--mc-dark); background: linear-gradient(160deg, var(--mc-bg-tint) 0%, #fff 70%); }
-
-    .pop-badge {
-      position: absolute; top: -14px; left: 50%;
-      transform: translateX(-50%);
+    .pc.pop  { border-color: var(--mc-blue); box-shadow: 0 10px 36px rgba(0,87,255,.16); transform: translateY(-5px); }
+    .pc.curr { border-color: var(--mc-dark); background: linear-gradient(160deg, var(--mc-tint) 0%, #fff 70%); }
+    .pop-b {
+      position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
       background: linear-gradient(90deg, var(--mc-darker), var(--mc-blue));
-      color: #fff; font-size: 11px; font-weight: 700;
-      letter-spacing: .7px; text-transform: uppercase;
-      padding: 5px 16px; border-radius: 20px; white-space: nowrap;
-      box-shadow: 0 4px 12px rgba(0,87,255,.3);
+      color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+      padding: 3px 13px; border-radius: 20px; white-space: nowrap;
     }
-    .curr-badge {
-      position: absolute; top: 12px; right: 12px;
-      background: var(--mc-bg-tint); color: var(--mc-darker);
-      font-size: 11px; font-weight: 700;
-      padding: 3px 10px; border-radius: 20px;
-      border: 1px solid var(--mc-light);
+    .curr-b {
+      position: absolute; top: 9px; right: 9px;
+      background: var(--mc-tint); color: var(--mc-darker);
+      font-size: 9px; font-weight: 700; padding: 3px 9px; border-radius: 20px; border: 1px solid var(--mc-light);
     }
-
-    .plan-icon {
-      width: 46px; height: 46px; border-radius: 12px;
-      display: grid; place-items: center;
-      font-size: 22px; margin-bottom: 14px;
+    .pi { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; margin-bottom: 10px; }
+    .ic1 { background: #EFF6FF; } .ic2 { background: var(--mc-tint); } .ic3 { background: #FDF4FF; } .ic4 { background: #FFF7ED; }
+    .pn { font-size: 15px; font-weight: 800; margin-bottom: 2px; }
+    .pf { font-size: 11px; color: var(--text-2); margin-bottom: 12px; min-height: 28px; line-height: 1.5; }
+    .pp { display: flex; align-items: baseline; gap: 2px; margin-bottom: 2px; }
+    .pp-s { font-size: 14px; font-weight: 700; }
+    .pp-a { font-size: 28px; font-weight: 900; line-height: 1; }
+    .pp-c { font-size: 22px; font-weight: 900; }
+    .pp-per { font-size: 10px; color: var(--text-3); margin-bottom: 8px; }
+    .save-l { font-size: 9px; color: #16A34A; font-weight: 700; margin-bottom: 2px; }
+    .dv { height: 1px; background: var(--border); margin: 12px 0; }
+    .lims { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+    .lr { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .lic { width: 22px; height: 22px; background: #F9FAFB; border-radius: 6px; display: grid; place-items: center; font-size: 11px; flex-shrink: 0; }
+    .ll { color: var(--text-2); flex: 1; }
+    .lv { font-weight: 700; }
+    .lv.ul { color: var(--mc-dark); }
+    .feats { list-style: none; display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; flex: 1; }
+    .feats li { display: flex; align-items: flex-start; gap: 6px; font-size: 11px; color: var(--text-2); line-height: 1.4; }
+    .chk { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; background: var(--mc-tint); border-radius: 50%; display: grid; place-items: center; font-size: 8px; color: var(--mc-dark); }
+    .pb {
+      display: block; width: 100%; padding: 10px; border-radius: var(--r-sm);
+      font-size: 12px; font-weight: 700; text-align: center; border: 2px solid transparent; margin-top: auto;
     }
-    .ic-starter    { background: #EFF6FF; }
-    .ic-growth     { background: var(--mc-bg-tint); }
-    .ic-scale      { background: #FDF4FF; }
-    .ic-enterprise { background: #FFF7ED; }
+    .pb-primary  { background: linear-gradient(135deg, var(--mc-dark), var(--mc-blue)); color: #fff; box-shadow: 0 4px 12px rgba(0,87,255,.25); }
+    .pb-outline  { background: transparent; color: var(--mc-dark); border-color: var(--mc-blue); }
+    .pb-dark     { background: linear-gradient(135deg, #1E293B, #374151); color: #fff; }
+    .pb-disabled { background: #F3F4F6; color: var(--text-3); border-color: transparent; cursor: default; }
+    .pb-upgrade  { background: linear-gradient(135deg, #7C3AED, #6D28D9); color: #fff; box-shadow: 0 4px 12px rgba(124,58,237,.25); }
+    .pb-down     { background: #F3F4F6; color: var(--text-3); border-color: var(--border); font-size: 10px; }
 
-    .plan-name { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
-    .plan-for  { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px; min-height: 36px; }
-
-    .plan-price { display: flex; align-items: baseline; gap: 3px; margin-bottom: 4px; }
-    .p-symbol  { font-size: 18px; font-weight: 700; }
-    .p-amount  { font-size: 38px; font-weight: 900; line-height: 1; }
-    .p-custom  { font-size: 28px; font-weight: 900; line-height: 1; }
-    .p-period  { font-size: 12px; color: var(--text-muted); margin-bottom: 2px; }
-    .divider { height: 1px; background: var(--border); margin: 18px 0; }
-
-    .limits { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
-    .limit-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-    .lico { width: 28px; height: 28px; background: #F9FAFB; border-radius: 8px; display: grid; place-items: center; font-size: 13px; flex-shrink: 0; }
-    .l-label { color: var(--text-secondary); flex: 1; }
-    .l-val   { font-weight: 700; }
-    .l-unlimited { color: var(--mc-dark); }
-
-    .feat-list { list-style: none; display: flex; flex-direction: column; gap: 9px; margin-bottom: 22px; flex: 1; }
-    .feat-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--text-secondary); line-height: 1.4; }
-    .chk { width: 17px; height: 17px; flex-shrink: 0; margin-top: 1px; background: var(--mc-bg-tint); border-radius: 50%; display: grid; place-items: center; }
-    .chk svg { color: var(--mc-dark); }
-
-    .plan-btn {
-      display: block; width: 100%; padding: 13px;
-      border-radius: var(--radius-sm); font-size: 14px; font-weight: 700;
-      text-align: center; cursor: pointer; border: 2px solid transparent;
-      transition: all .2s; margin-top: auto;
+    /* Sub banner */
+    .sub-banner {
+      background: #fff; border-radius: var(--r); box-shadow: 0 4px 16px rgba(0,0,0,.08);
+      padding: 14px 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     }
-    .btn-primary {
-      background: linear-gradient(135deg, var(--mc-dark), var(--mc-blue));
-      color: #fff; box-shadow: 0 4px 14px rgba(0,87,255,.28);
+    .sb-icon { width: 40px; height: 40px; background: var(--mc-tint); border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; color: var(--mc-dark); }
+    .sb-info { flex: 1; min-width: 130px; }
+    .sb-info strong { display: block; font-size: 13px; font-weight: 700; }
+    .sb-info span   { font-size: 11px; color: var(--text-2); }
+    .sb-bar-wrap { margin-top: 5px; }
+    .sb-bar-label { font-size: 10px; color: var(--text-2); margin-bottom: 3px; }
+    .sb-bar { height: 4px; background: #E5E7EB; border-radius: 4px; overflow: hidden; }
+    .sb-fill { height: 100%; background: var(--mc-blue); border-radius: 4px; }
+    .sb-fill.warn { background: #F59E0B; }
+    .status-p { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 4px 11px; border-radius: 20px; }
+    .sp-active  { background: var(--mc-tint); color: var(--mc-darker); }
+    .sp-expired { background: #FEF2F2; color: #991B1B; }
+
+    /* Connect card */
+    .conn-card {
+      background: #fff; border-radius: var(--r); border: 2px solid var(--mc-blue);
+      box-shadow: 0 10px 36px rgba(0,87,255,.15); padding: 24px 20px;
+      display: flex; gap: 20px; align-items: flex-start;
     }
-    .btn-primary:hover { background: linear-gradient(135deg, var(--mc-darker), var(--mc-dark)); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,87,255,.38); }
-    .btn-outline { background: transparent; color: var(--mc-dark); border-color: var(--mc-blue); }
-    .btn-outline:hover { background: var(--mc-bg-tint); }
-    .btn-dark { background: linear-gradient(135deg, #1E293B, #374151); color: #fff; }
-    .btn-dark:hover { background: linear-gradient(135deg, #0F172A, #1E293B); }
-    .btn-disabled { background: #F3F4F6; color: var(--text-muted); cursor: default; border-color: transparent; }
-    .btn-disabled:hover { transform: none; box-shadow: none; }
+    .conn-card.green { border-color: #22C55E; box-shadow: 0 10px 36px rgba(34,197,94,.12); }
+    .conn-card.stacked { flex-direction: column; gap: 14px; }
+    .conn-ico { width: 52px; height: 52px; flex-shrink: 0; background: var(--mc-tint); border-radius: 14px; display: grid; place-items: center; font-size: 26px; }
+    .conn-ico.green-bg { background: #ECFDF5; }
+    .conn-body { flex: 1; }
+    .conn-step { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; color: var(--mc-blue); margin-bottom: 5px; }
+    .conn-step.green { color: #15803D; }
+    .conn-title { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+    .conn-desc  { font-size: 13px; color: var(--text-2); line-height: 1.6; margin-bottom: 16px; }
+    .conn-acts  { display: flex; gap: 9px; flex-wrap: wrap; }
+    .cbt {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 10px 16px; border-radius: var(--r-sm);
+      font-size: 12px; font-weight: 700; border: 2px solid transparent;
+    }
+    .cbt-p { background: var(--mc-blue); color: #fff; box-shadow: 0 4px 12px rgba(0,87,255,.25); }
+    .cbt-o { background: transparent; color: var(--mc-dark); border-color: var(--mc-blue); }
+    .num-badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      background: #ECFDF5; color: #065F46;
+      padding: 8px 13px; border-radius: var(--r-sm);
+      font-size: 12px; font-weight: 700; border: 1px solid #A7F3D0;
+    }
+    .wa-dot { width: 7px; height: 7px; background: #22C55E; border-radius: 50%; flex-shrink: 0; }
 
-    /* ── Modal ──────────────────────────────────────────────── */
-    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.48); backdrop-filter: blur(4px); z-index: 1000; place-items: center; padding: 20px; }
-    .overlay.open { display: grid; }
-    .modal { background: #fff; border-radius: var(--radius); padding: 32px; max-width: 440px; width: 100%; box-shadow: 0 24px 64px rgba(0,0,0,.18); animation: slideUp .22s ease; }
-    @keyframes slideUp { from { opacity:0; transform:translateY(18px); } }
-    .modal-icon { width: 52px; height: 52px; background: var(--mc-bg-tint); border-radius: 14px; display: grid; place-items: center; font-size: 24px; margin-bottom: 18px; }
-    .modal h2  { font-size: 20px; font-weight: 800; margin-bottom: 8px; }
-    .modal p   { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 18px; }
-    .m-input { width: 100%; padding: 12px 14px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); font-size: 14px; margin-bottom: 16px; outline: none; transition: border-color .2s; font-family: inherit; }
-    .m-input:focus { border-color: var(--mc-blue); }
-    .m-row { display: flex; gap: 12px; }
-    .m-row .plan-btn { flex: 1; }
-    .btn-ghost { background: #F3F4F6; color: var(--text-secondary); border: none; }
-    .btn-ghost:hover { background: #E5E7EB; transform: none; box-shadow: none; }
+    /* Modal */
+    .modal-bg { background: rgba(0,0,0,.5); display: grid; place-items: center; padding: 20px; }
+    .modal-bg.bottom { align-items: flex-end; padding: 0; }
+    .modal {
+      background: #fff; border-radius: var(--r); padding: 26px; max-width: 400px; width: 100%;
+      box-shadow: 0 24px 64px rgba(0,0,0,.18);
+    }
+    .modal.sheet { border-radius: 18px 18px 0 0; max-width: 100%; }
+    .m-ico { width: 46px; height: 46px; background: var(--mc-tint); border-radius: 12px; display: grid; place-items: center; font-size: 22px; margin-bottom: 14px; }
+    .m-h2 { font-size: 17px; font-weight: 800; margin-bottom: 6px; }
+    .m-p  { font-size: 12px; color: var(--text-2); line-height: 1.6; margin-bottom: 14px; }
+    .bk { background: #F8FAFC; border: 1px solid var(--border); border-radius: var(--r-sm); padding: 11px 13px; margin-bottom: 13px; font-size: 12px; }
+    .bk-row { display: flex; justify-content: space-between; margin-bottom: 4px; color: var(--text-2); }
+    .bk-row.grn { color: #16A34A; font-weight: 700; }
+    .bk-total { display: flex; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 7px; margin-top: 3px; font-weight: 800; }
+    .bk-total span:last-child { color: var(--mc-dark); }
+    .m-input {
+      width: 100%; padding: 10px 12px; border: 1.5px solid var(--mc-blue);
+      border-radius: var(--r-sm); font-size: 12px; margin-bottom: 13px;
+      font-family: inherit; color: var(--text-1); outline: none;
+    }
+    .m-row { display: flex; gap: 9px; }
+    .m-row .pb { flex: 1; }
+    .pb-ghost { background: #F3F4F6; color: var(--text-2); border-color: transparent; }
 
-    .contact-block { background: #F8FAFC; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 14px; }
-    .contact-block .c-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
-    .contact-block a { font-size: 14px; font-weight: 700; color: var(--mc-dark); text-decoration: none; }
-    .contact-block a:hover { text-decoration: underline; }
+    /* Contact block */
+    .contact-b { background: #F8FAFC; border: 1px solid var(--border); border-radius: var(--r-sm); padding: 11px 13px; margin-bottom: 10px; }
+    .contact-b .cl { font-size: 10px; color: var(--text-3); margin-bottom: 3px; }
+    .contact-b a { font-size: 13px; font-weight: 700; color: var(--mc-dark); text-decoration: none; }
 
-    /* ── FAQ ────────────────────────────────────────────────── */
-    .faq-section { max-width: 700px; margin: 0 auto 64px; padding: 0 24px; }
-    .faq-h { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 28px; }
-    .faq-item { border-bottom: 1px solid var(--border); }
-    .faq-q { width: 100%; background: none; border: none; text-align: left; padding: 17px 0; font-size: 15px; font-weight: 600; color: var(--text-primary); cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-family: inherit; }
-    .faq-q .arr { transition: transform .2s; flex-shrink: 0; }
-    .faq-q.open .arr { transform: rotate(180deg); }
-    .faq-a { font-size: 14px; color: var(--text-secondary); line-height: 1.7; max-height: 0; overflow: hidden; transition: max-height .3s ease, padding-bottom .3s; }
-    .faq-a.open { max-height: 200px; padding-bottom: 16px; }
+    /* Paystack checkout */
+    .pst-page { background: #fff; min-height: 400px; }
+    .pst-bar { background: #00A651; padding: 12px 20px; display: flex; align-items: center; gap: 10px; }
+    .pst-logo { font-size: 14px; font-weight: 900; color: #fff; letter-spacing: -.3px; }
+    .pst-lock { font-size: 11px; color: rgba(255,255,255,.8); display: flex; align-items: center; gap: 5px; }
+    .pst-body { padding: 28px 24px; max-width: 420px; margin: 0 auto; }
+    .pst-merch { text-align: center; margin-bottom: 24px; }
+    .pst-merch-logo { width: 52px; height: 52px; background: var(--mc-blue); border-radius: 14px; display: grid; place-items: center; font-size: 24px; font-weight: 900; color: #fff; margin: 0 auto 10px; }
+    .pst-merch-name { font-size: 13px; color: var(--text-2); margin-bottom: 4px; }
+    .pst-merch-amt  { font-size: 28px; font-weight: 900; color: var(--text-1); }
+    .pst-merch-desc { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+    .pst-email-disp { background: #F8FAFC; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--text-2); margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+    .pst-tabs { display: flex; border-bottom: 2px solid var(--border); margin-bottom: 18px; }
+    .pst-tab { padding: 9px 16px; font-size: 12px; font-weight: 700; color: var(--text-3); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .pst-tab.on { color: #00A651; border-bottom-color: #00A651; }
+    .pst-field-label { font-size: 11px; font-weight: 700; color: var(--text-2); margin-bottom: 5px; }
+    .pst-field { width: 100%; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: 8px; font-size: 13px; margin-bottom: 13px; font-family: inherit; color: var(--text-1); }
+    .pst-field:focus { outline: none; border-color: #00A651; }
+    .pst-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .pst-pay-btn { width: 100%; padding: 13px; background: #00A651; color: #fff; border: none; border-radius: 9px; font-size: 14px; font-weight: 700; cursor: pointer; }
+    .pst-secure { text-align: center; font-size: 10px; color: var(--text-3); margin-top: 12px; }
 
-    /* ── Toast ──────────────────────────────────────────────── */
-    .toasts { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
-    .toast { padding: 13px 18px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; color: #fff; max-width: 320px; box-shadow: var(--shadow-md); display: flex; align-items: center; gap: 8px; animation: toastIn .25s ease; }
-    @keyframes toastIn { from { opacity:0; transform:translateX(16px); } }
-    .t-success { background: var(--mc-dark); }
-    .t-error   { background: #EF4444; }
-    .t-info    { background: var(--mc-blue); }
+    /* Toast */
+    .toast-wrap { position: relative; }
+    .toast {
+      display: inline-flex; align-items: center; gap: 9px;
+      background: #0F4C1E; border: 1px solid #22C55E; color: #fff;
+      padding: 12px 18px; border-radius: var(--r-sm);
+      font-size: 13px; font-weight: 600; box-shadow: 0 8px 24px rgba(0,0,0,.2);
+      position: absolute; top: 16px; right: 16px; z-index: 50; white-space: nowrap;
+    }
+    .toast-dot { width: 8px; height: 8px; background: #22C55E; border-radius: 50%; flex-shrink: 0; }
+
+    /* Upgrade note */
+    .upgrade-note {
+      background: #FFFBEB; border: 1px solid #FDE68A; border-radius: var(--r-sm);
+      padding: 10px 14px; font-size: 11px; color: #92400E; margin-bottom: 6px; display: flex; gap: 7px; align-items: flex-start;
+    }
   </style>
 </head>
 <body>
 
-<!-- Header -->
-<div class="header">
-  <div class="header-inner">
-    <a class="mc-logo" href="#">
-      <div class="mc-logo-mark">M</div>
-      <div class="mc-logo-text">Mycro<span>shop</span></div>
-    </a>
-
-    <div class="agent-badge">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-      </svg>
-      AI Sales Agent
-    </div>
-
-    <h1>Automate Sales on <em>WhatsApp</em><br>with Mycroshop AI</h1>
-    <p>Your AI-powered assistant handles customer follow-ups, order updates, and conversations 24/7. Pick the plan that fits your volume.</p>
+<!-- Guide Top Bar -->
+<div class="g-topbar">
+  <div class="g-brand">
+    <div class="g-mark">M</div>
+    <div class="g-name">Mycro<span>shop</span></div>
   </div>
+  <div class="g-pill">End-to-End Screen Guide — AI Sales Agent</div>
+  <div class="g-count">9 screens · Web &amp; Mobile</div>
 </div>
 
-<!-- Steps -->
-<div class="steps-wrap">
-  <div class="steps-bar" id="stepsBar">
-    <div class="step active" id="step1">
-      <div class="step-num" id="stepNum1">1</div>
-      <div class="step-label">Choose Plan</div>
+<div class="g-body">
+
+  <!-- ─────────────────────────── FLOW DIVIDER ─────────────────────── -->
+  <div class="flow-label">
+    <div class="flow-label-line"></div>
+    <div class="flow-label-text">Step 1 of 3 — Choose a Plan</div>
+    <div class="flow-label-line"></div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 1 — Plans Page (No Subscription)             -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">1</div>
+      <div><div class="g-sec-title">Plans Page — Default State</div><div class="g-sec-sub">User lands for the first time. No subscription yet.</div></div>
+      <div class="g-line"></div>
     </div>
-    <div class="step-sep" id="stepSep1"></div>
-    <div class="step" id="step2">
-      <div class="step-num" id="stepNum2">2</div>
-      <div class="step-label">Pay Securely</div>
-    </div>
-    <div class="step-sep" id="stepSep2"></div>
-    <div class="step" id="step3">
-      <div class="step-num" id="stepNum3">3</div>
-      <div class="step-label">Connect WhatsApp</div>
-    </div>
-  </div>
-</div>
-
-<!-- Subscription Banner -->
-<div class="sub-wrap">
-  <div class="sub-banner" id="subBanner">
-    <div class="sub-icon">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
-      </svg>
-    </div>
-    <div class="sub-info">
-      <strong id="bannerName">—</strong>
-      <span id="bannerExpiry"></span>
-      <div class="sub-usage" id="bannerUsage" style="display:none">
-        <div class="sub-usage-label" id="bannerUsageLabel"></div>
-        <div class="sub-bar"><div class="sub-fill" id="bannerFill" style="width:0%"></div></div>
-      </div>
-    </div>
-    <span class="status-pill" id="bannerStatus"></span>
-  </div>
-</div>
-
-<!-- Connect WhatsApp CTA (shown when active plan but not connected) -->
-<div class="connect-wrap" id="connectWrap">
-  <div class="connect-card">
-    <div class="connect-icon-wrap">📱</div>
-    <div class="connect-body">
-      <div class="connect-step-label">Step 3 — Action Required</div>
-      <h3 id="connectTitle">Connect Your WhatsApp Number</h3>
-      <p id="connectDesc">Your plan is active. Now link your WhatsApp Business number so Mycroshop AI can start responding to your customers automatically.</p>
-      <div class="connect-actions" id="connectActions">
-        <button class="connect-btn connect-btn-primary" onclick="startWhatsAppConnect()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347zM12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.126 1.534 5.857L0 24l6.27-1.512A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.9 0-3.69-.497-5.24-1.366l-.374-.22-3.724.896.944-3.607-.243-.383A9.936 9.936 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
-          </svg>
-          Connect WhatsApp
-        </button>
-        <button class="connect-btn connect-btn-outline" onclick="openHowItWorksModal()">How it works</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Plans -->
-<section class="plans-section">
-  <div class="section-label">Pricing</div>
-  <div class="section-title">Choose the Plan That Fits Your Business</div>
-
-  <!-- Billing period selector -->
-  <div class="billing-wrap">
-    <div class="billing-top-label">How many months do you want to pay for?</div>
-    <div class="billing-chips" id="billingChips"><!-- rendered by JS --></div>
-    <div class="billing-summary" id="billingSummary"></div>
-  </div>
-
-  <div class="plans-grid" id="plansGrid">
-    <!-- rendered by JS -->
-  </div>
-</section>
-
-<!-- FAQ -->
-<section class="faq-section">
-  <div class="faq-h">Frequently Asked Questions</div>
-
-  <div class="faq-item">
-    <button class="faq-q" onclick="faq(this)">What happens when I reach my follow-up limit?
-      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
-    <div class="faq-a">Your AI agent keeps answering messages within the 24-hour window — only proactive follow-ups outside that window are counted and paused. Upgrade any time to restore them immediately.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-q" onclick="faq(this)">Can I change my plan later?
-      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
-    <div class="faq-a">Yes. Upgrade at any time — takes effect immediately after payment. Downgrading applies at the start of your next billing cycle.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-q" onclick="faq(this)">What counts as a "monthly active customer"?
-      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
-    <div class="faq-a">Any unique WhatsApp contact the AI has had a conversation with during the current 30-day billing period. Contacts who message you but receive no AI response are not counted.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-q" onclick="faq(this)">Is payment secure?
-      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
-    <div class="faq-a">All payments are processed through Paystack, a PCI-DSS Level 1 certified provider. We never store your card details.</div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-q" onclick="faq(this)">Can I cancel anytime?
-      <svg class="arr" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
-    <div class="faq-a">Yes. Cancel from your dashboard anytime. Your subscription stays active until the end of the current 30-day period — no prorated refunds.</div>
-  </div>
-</section>
-
-<!-- Subscribe Modal -->
-<div class="overlay" id="subModal">
-  <div class="modal">
-    <div class="modal-icon">💳</div>
-    <h2 id="mTitle">Subscribe to Plan</h2>
-    <p id="mDesc" style="margin-bottom:12px">You'll be redirected to a secure Paystack checkout.</p>
-
-    <!-- Billing breakdown -->
-    <div id="mBreakdown" style="background:#F8FAFC;border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:16px;font-size:13px;display:none">
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="color:var(--text-secondary)" id="mBreakMonths"></span>
-        <span id="mBreakBase"></span>
-      </div>
-      <div id="mBreakDiscRow" style="display:none;justify-content:space-between;margin-bottom:4px;color:#16A34A;font-weight:700">
-        <span id="mBreakDiscLabel"></span>
-        <span id="mBreakDiscAmt"></span>
-      </div>
-      <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;font-weight:800">
-        <span>Total charge</span>
-        <span id="mBreakTotal" style="color:var(--mc-dark)"></span>
-      </div>
-    </div>
-
-    <input type="email" class="m-input" id="mEmail" placeholder="Your email address" autocomplete="email" />
-    <div class="m-row">
-      <button class="plan-btn btn-ghost" onclick="closeSubModal()">Cancel</button>
-      <button class="plan-btn btn-primary" id="mPayBtn" onclick="doPayment()">Pay &amp; Subscribe</button>
-    </div>
-  </div>
-</div>
-
-<!-- Enterprise Modal -->
-<div class="overlay" id="entModal">
-  <div class="modal">
-    <div class="modal-icon">🏢</div>
-    <h2>Enterprise Plan</h2>
-    <p>This plan is custom-quoted for your business. Reach our sales team and we'll build the right solution for you.</p>
-    <div class="contact-block">
-      <div class="c-label">📧 Email</div>
-      <a href="mailto:sales@mycroshop.com">sales@mycroshop.com</a>
-    </div>
-    <div class="contact-block">
-      <div class="c-label">💬 WhatsApp</div>
-      <a href="https://wa.me/2348000000000" target="_blank" rel="noopener">Chat with Sales →</a>
-    </div>
-    <button class="plan-btn btn-ghost" style="width:100%;margin-top:4px" onclick="closeEntModal()">Close</button>
-  </div>
-</div>
-
-<!-- How it Works Modal -->
-<div class="overlay" id="howModal">
-  <div class="modal">
-    <div class="modal-icon">💡</div>
-    <h2>How Connecting Works</h2>
-    <p>Tapping <strong>Connect WhatsApp</strong> opens the Meta/WhatsApp Business signup flow directly in the app. You'll log in with your Facebook account, select or create a WhatsApp Business Account, and choose the phone number to connect.</p>
-    <p style="margin-top:0">Mycroshop will then act as your AI agent on that number — responding to customers automatically on your behalf.</p>
-    <button class="plan-btn btn-primary" style="margin-top:8px" onclick="closeHowModal(); startWhatsAppConnect();">Get Started →</button>
-    <button class="plan-btn btn-ghost" style="margin-top:8px" onclick="closeHowModal()">Maybe Later</button>
-  </div>
-</div>
-
-<!-- Toasts -->
-<div class="toasts" id="toasts"></div>
-
-<!-- FB JS SDK (async, non-blocking) -->
-<div id="fb-root"></div>
-<script>
-  window.fbAsyncInit = function () {
-    fetch('https://backend.mycroshop.com/api/v1/meta-connection/public-config')
-      .then(r => r.json())
-      .then(({ data }) => {
-        if (!data.app_id) return;
-        window._mcMetaConfigId = data.config_id || null;
-        FB.init({ appId: data.app_id, autoLogAppEvents: true, xfbml: true, version: 'v19.0' });
-      })
-      .catch(() => {});
-  };
-  (function (d, s, id) {
-    var js, fjs = d.getElementsByTagName(s)[0];
-    if (d.getElementById(id)) return;
-    js = d.createElement(s); js.id = id;
-    js.src = 'https://connect.facebook.net/en_US/sdk.js';
-    fjs.parentNode.insertBefore(js, fjs);
-  }(document, 'script', 'facebook-jssdk'));
-</script>
-
-<script>
-// ── Static plan data ───────────────────────────────────────────────────────────
-const STATIC_PLANS = [
-  {
-    id: 1, name: "Starter", slug: "starter",
-    price_ngn: 50000, price_display: "₦50,000/month",
-    max_customers: 300, max_whatsapp_numbers: 1, follow_up_limit: 500,
-    features: ["300 monthly active customers","1 WhatsApp number","Basic AI follow-up messages","Order confirmation & updates","Standard response templates","Email support"],
-    best_for: "Small businesses just getting started with WhatsApp sales", is_custom: false
-  },
-  {
-    id: 2, name: "Growth", slug: "growth",
-    price_ngn: 120000, price_display: "₦120,000/month",
-    max_customers: 1000, max_whatsapp_numbers: 1, follow_up_limit: 2000,
-    features: ["1,000 monthly active customers","1 WhatsApp number","Smarter personalised follow-ups","Abandoned order recovery messages","Multi-product recommendations","Priority support"],
-    best_for: "Growing businesses ready to scale customer engagement", is_custom: false
-  },
-  {
-    id: 3, name: "Scale", slug: "scale",
-    price_ngn: 250000, price_display: "₦250,000/month",
-    max_customers: 3000, max_whatsapp_numbers: 2, follow_up_limit: 5000,
-    features: ["3,000 monthly active customers","2 WhatsApp numbers","Advanced multi-step follow-up flows","Multi-step order assistance","Custom greeting & unavailability messages","Dedicated account support"],
-    best_for: "High-volume sellers and established brands", is_custom: false
-  },
-  {
-    id: 4, name: "Enterprise", slug: "enterprise",
-    price_ngn: null, price_display: "Custom pricing",
-    max_customers: null, max_whatsapp_numbers: null, follow_up_limit: null,
-    features: ["Unlimited monthly active customers","Multiple WhatsApp numbers","Custom AI integrations","Bespoke follow-up workflows","SLA-backed uptime","Dedicated success manager","Custom onboarding"],
-    best_for: "Large businesses with complex or high-volume requirements", is_custom: true
-  }
-];
-
-const BASE_URL  = 'https://backend.mycroshop.com';
-const API_BASE  = `${BASE_URL}/api/v1/whatsapp-plans`;
-const getToken  = () => localStorage.getItem('authToken') || '';
-const POPULAR   = 'growth';
-
-const ICONS = {
-  starter:    { e: '🚀', c: 'ic-starter'    },
-  growth:     { e: '📈', c: 'ic-growth'     },
-  scale:      { e: '⚡', c: 'ic-scale'      },
-  enterprise: { e: '🏢', c: 'ic-enterprise' },
-};
-
-// Discount tiers (must match backend DISCOUNT_RATES)
-const DISC = { 1:0, 2:0, 3:5, 4:5, 5:5, 6:10, 7:10, 8:10, 9:15, 10:15, 11:15, 12:20 };
-
-let plans          = STATIC_PLANS;
-let subscription   = null;
-let waConnected    = false;
-let waPhone        = null;
-let selected       = null;
-let selectedMonths = 1;
-
-initBillingChips();
-renderPlans();
-
-document.addEventListener('DOMContentLoaded', () => {
-  fetchPlans();
-  fetchSubscription();
-  checkPaymentReturn();
-});
-
-// ── Billing period chips ───────────────────────────────────────────────────────
-function initBillingChips() {
-  const container = document.getElementById('billingChips');
-  container.innerHTML = Array.from({ length: 12 }, (_, i) => {
-    const m    = i + 1;
-    const disc = DISC[m] || 0;
-    const isYr = m === 12;
-    const saveLabel = isYr ? 'Save 20% · Yearly' : disc > 0 ? `Save ${disc}%` : '';
-    return `
-      <button class="b-chip ${disc > 0 ? 'has-disc' : ''} ${isYr ? 'yearly' : ''}"
-              onclick="selectMonths(${m})" id="bchip${m}">
-        <span class="b-num">${m}</span>
-        <span class="b-unit">mo.</span>
-        ${saveLabel ? `<span class="b-save">${saveLabel}</span>` : ''}
-      </button>`;
-  }).join('');
-  selectMonths(1);
-}
-
-function selectMonths(m) {
-  selectedMonths = m;
-  for (let i = 1; i <= 12; i++) {
-    document.getElementById(`bchip${i}`)?.classList.toggle('active', i === m);
-  }
-  const disc = DISC[m] || 0;
-  const el   = document.getElementById('billingSummary');
-  if (m === 1) {
-    el.innerHTML = 'Billed <strong>monthly</strong> — change or cancel anytime.';
-  } else if (disc > 0) {
-    const label = m === 12 ? 'yearly (12 months)' : `every ${m} months`;
-    el.innerHTML = `Billed <strong>${label}</strong> &nbsp;·&nbsp; <span class="s-green">You save ${disc}% on the total</span>`;
-  } else {
-    el.innerHTML = `Billed every <strong>${m} months</strong>.`;
-  }
-  renderPlans();
-}
-
-function calcPrice(priceNgn) {
-  const disc  = DISC[selectedMonths] || 0;
-  const total = priceNgn * selectedMonths * (1 - disc / 100);
-  return Math.round(total);
-}
-
-function fmtNgn(n) {
-  return '₦' + Number(n).toLocaleString('en-NG');
-}
-
-// ── Data fetching ──────────────────────────────────────────────────────────────
-async function fetchPlans() {
-  try {
-    const res  = await fetch(API_BASE);
-    const json = await res.json();
-    if (!json.success) return;
-    plans = json.data.map(p => ({
-      ...p,
-      features: typeof p.features === 'string' ? JSON.parse(p.features) : (p.features || [])
-    }));
-    renderPlans();
-  } catch (_) {}
-}
-
-async function fetchSubscription() {
-  const token = getToken();
-  if (!token) return;
-  try {
-    const res  = await fetch(`${API_BASE}/my-subscription`, { headers: { Authorization: `Bearer ${token}` } });
-    const json = await res.json();
-    if (json.success && json.data) {
-      subscription = json.data;
-      renderBanner();
-      renderPlans();
-    }
-  } catch (_) {}
-
-  // Also fetch WhatsApp connection status from profile
-  try {
-    const res  = await fetch(`${BASE_URL}/api/v1/auth/profile`, { headers: { Authorization: `Bearer ${token}` } });
-    const json = await res.json();
-    if (json.success && json.data?.whatsapp) {
-      waConnected = json.data.whatsapp.connected;
-      waPhone     = json.data.whatsapp.phone_number;
-    }
-  } catch (_) {}
-
-  renderConnectSection();
-}
-
-// ── Render connect section ─────────────────────────────────────────────────────
-function renderConnectSection() {
-  const wrap = document.getElementById('connectWrap');
-  const isActive = subscription?.status === 'active';
-
-  if (!isActive) { wrap.classList.remove('show'); return; }
-
-  wrap.classList.add('show');
-
-  // Update step indicators
-  document.getElementById('step1').classList.add('done');
-  document.getElementById('step1').classList.remove('active');
-  document.getElementById('stepSep1').classList.add('done');
-  document.getElementById('step2').classList.add('done');
-  document.getElementById('stepSep2').classList[waConnected ? 'add' : 'remove']('done');
-
-  if (waConnected) {
-    // Already connected — show confirmation state
-    document.getElementById('step3').classList.add('done');
-    document.getElementById('connectTitle').textContent = 'WhatsApp Number Connected';
-    document.getElementById('connectDesc').textContent  =
-      'Your AI Sales Agent is live and responding to customers on your WhatsApp number.';
-    document.getElementById('connectActions').innerHTML = `
-      <div class="connect-num-badge">
-        <div class="wa-dot"></div>
-        ${esc(waPhone || 'Connected')}
-      </div>
-      <button class="connect-btn connect-btn-outline" onclick="startWhatsAppConnect()">Change Number</button>
-    `;
-  } else {
-    document.getElementById('step3').classList.add('active');
-  }
-}
-
-// ── Render plans ───────────────────────────────────────────────────────────────
-function renderPlans() {
-  const grid      = document.getElementById('plansGrid');
-  const currentId = subscription?.plan?.id;
-
-  grid.innerHTML = plans.map(p => {
-    const icon      = ICONS[p.slug] || { e: '📦', c: '' };
-    const isPopular = p.slug === POPULAR;
-    const isCurrent = p.id === currentId;
-    const isCustom  = p.is_custom;
-
-    let priceHtml;
-    if (isCustom) {
-      priceHtml = `<div class="plan-price"><span class="p-custom">Custom</span></div><div class="p-period">Contact for pricing</div>`;
-    } else {
-      const monthly  = p.price_ngn;
-      const total    = calcPrice(monthly);
-      const disc     = DISC[selectedMonths] || 0;
-      const totalFmt = total >= 1000 ? (total / 1000).toFixed(total % 1000 === 0 ? 0 : 1) + 'k' : total.toLocaleString('en-NG');
-      const periodLabel = selectedMonths === 1 ? 'per month'
-                        : selectedMonths === 12 ? 'per year'
-                        : `for ${selectedMonths} months`;
-      const savingHtml = disc > 0
-        ? `<div style="font-size:11px;color:#16A34A;font-weight:700;margin-bottom:2px">Save ${fmtNgn(monthly * selectedMonths - total)}</div>`
-        : '';
-      priceHtml = `
-        <div class="plan-price"><span class="p-symbol">₦</span><span class="p-amount">${totalFmt}</span></div>
-        <div class="p-period">${periodLabel}</div>
-        ${savingHtml}
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">${fmtNgn(monthly)}/month</div>`;
-    }
-
-    const numFmt = v => v != null ? Number(v).toLocaleString('en-NG') : null;
-    const limitsHtml = `
-      <div class="limits">
-        <div class="limit-row">
-          <div class="lico">👥</div>
-          <span class="l-label">Monthly customers</span>
-          <span class="l-val ${p.max_customers == null ? 'l-unlimited' : ''}">${p.max_customers != null ? numFmt(p.max_customers) : 'Unlimited'}</span>
+    <div class="frames">
+      <!-- Web -->
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url">mycroshop.com/whatsapp-plans</div></div>
+          <div class="b-body" style="background:var(--bg)">
+            <div class="ui-hdr">
+              <div class="ui-hi">
+                <div class="ui-logo"><div class="ui-logo-mk">M</div><div class="ui-logo-tx">Mycro<span>shop</span></div></div>
+                <div class="ui-badge-pill">✏️ AI Sales Agent</div>
+                <div class="ui-h1">Automate Sales on <em>WhatsApp</em><br>with Mycroshop AI</div>
+                <div class="ui-p">Your AI-powered assistant handles customer follow-ups, order updates, and conversations 24/7. Pick the plan that fits your volume.</div>
+              </div>
+            </div>
+            <div class="steps-wrap">
+              <div class="steps-bar">
+                <div class="stp active"><div class="stp-n">1</div><div class="stp-l">Choose Plan</div></div>
+                <div class="stp-sep"></div>
+                <div class="stp"><div class="stp-n">2</div><div class="stp-l">Pay Securely</div></div>
+                <div class="stp-sep"></div>
+                <div class="stp"><div class="stp-n">3</div><div class="stp-l">Connect WhatsApp</div></div>
+              </div>
+            </div>
+            <div style="max-width:1060px;margin:32px auto 0;padding:0 20px 40px">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--mc-blue);text-align:center;margin-bottom:5px">Pricing</div>
+              <div style="font-size:18px;font-weight:800;text-align:center;margin-bottom:20px">Choose the Plan That Fits Your Business</div>
+              <div class="bill-card">
+                <div class="bill-hdr">
+                  <div class="bill-hdr-l"><div class="bill-ico">📅</div><div><div class="bill-title">Billing Period</div><div class="bill-sub">Pay upfront for up to 12 months and save</div></div></div>
+                </div>
+                <div class="seg-outer"><div class="seg">
+                  <div class="bs on"><span class="bs-n">1</span><span class="bs-l">mo.</span><span class="bs-d">&nbsp;</span></div>
+                  <div class="bs"><span class="bs-n">2</span><span class="bs-l">mo.</span><span class="bs-d">&nbsp;</span></div>
+                  <div class="bs"><span class="bs-n">3</span><span class="bs-l">mo.</span><span class="bs-d">5% off</span></div>
+                  <div class="bs"><span class="bs-n">4</span><span class="bs-l">mo.</span><span class="bs-d">5% off</span></div>
+                  <div class="bs"><span class="bs-n">5</span><span class="bs-l">mo.</span><span class="bs-d">5% off</span></div>
+                  <div class="bs"><span class="bs-n">6</span><span class="bs-l">mo.</span><span class="bs-d">10% off</span></div>
+                  <div class="bs"><span class="bs-n">7</span><span class="bs-l">mo.</span><span class="bs-d">10% off</span></div>
+                  <div class="bs"><span class="bs-n">8</span><span class="bs-l">mo.</span><span class="bs-d">10% off</span></div>
+                  <div class="bs"><span class="bs-n">9</span><span class="bs-l">mo.</span><span class="bs-d">15% off</span></div>
+                  <div class="bs"><span class="bs-n">10</span><span class="bs-l">mo.</span><span class="bs-d">15% off</span></div>
+                  <div class="bs"><span class="bs-n">11</span><span class="bs-l">mo.</span><span class="bs-d">15% off</span></div>
+                  <div class="bs"><span class="bs-n">12</span><span class="bs-l">mo.</span><span class="bs-d">20% off</span></div>
+                </div></div>
+                <div class="sum-bar"><div class="sum-l">Billed <strong>monthly</strong> — change or cancel anytime.</div></div>
+              </div>
+              <div class="plans-grid">
+                <div class="pc"><div class="pi ic1">🚀</div><div class="pn">Starter</div><div class="pf">Small businesses just getting started</div><div class="pp"><span class="pp-s">₦</span><span class="pp-a">50k</span></div><div class="pp-per">per month</div><div class="dv"></div><div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Monthly customers</span><span class="lv">300</span></div><div class="lr"><div class="lic">📱</div><span class="ll">WhatsApp numbers</span><span class="lv">1</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups / month</span><span class="lv">500</span></div></div><ul class="feats"><li><span class="chk">✓</span>Basic AI follow-up messages</li><li><span class="chk">✓</span>Order confirmations &amp; updates</li><li><span class="chk">✓</span>Standard response templates</li></ul><button class="pb pb-outline">Get Started</button></div>
+                <div class="pc pop"><div class="pop-b">⭐ Most Popular</div><div class="pi ic2">📈</div><div class="pn">Growth</div><div class="pf">Growing businesses ready to scale</div><div class="pp"><span class="pp-s">₦</span><span class="pp-a">120k</span></div><div class="pp-per">per month</div><div class="dv"></div><div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Monthly customers</span><span class="lv">1,000</span></div><div class="lr"><div class="lic">📱</div><span class="ll">WhatsApp numbers</span><span class="lv">1</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups / month</span><span class="lv">2,000</span></div></div><ul class="feats"><li><span class="chk">✓</span>Smarter personalised follow-ups</li><li><span class="chk">✓</span>Abandoned order recovery</li><li><span class="chk">✓</span>Multi-product recommendations</li></ul><button class="pb pb-primary">Get Started</button></div>
+                <div class="pc"><div class="pi ic3">⚡</div><div class="pn">Scale</div><div class="pf">High-volume sellers and brands</div><div class="pp"><span class="pp-s">₦</span><span class="pp-a">250k</span></div><div class="pp-per">per month</div><div class="dv"></div><div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Monthly customers</span><span class="lv">3,000</span></div><div class="lr"><div class="lic">📱</div><span class="ll">WhatsApp numbers</span><span class="lv">2</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups / month</span><span class="lv">5,000</span></div></div><ul class="feats"><li><span class="chk">✓</span>Advanced multi-step flows</li><li><span class="chk">✓</span>Custom greeting messages</li><li><span class="chk">✓</span>Dedicated account support</li></ul><button class="pb pb-outline">Get Started</button></div>
+                <div class="pc"><div class="pi ic4">🏢</div><div class="pn">Enterprise</div><div class="pf">Large businesses with complex needs</div><div class="pp"><span class="pp-c">Custom</span></div><div class="pp-per">Contact for pricing</div><div class="dv"></div><div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Monthly customers</span><span class="lv ul">Unlimited</span></div><div class="lr"><div class="lic">📱</div><span class="ll">WhatsApp numbers</span><span class="lv ul">Multiple</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups / month</span><span class="lv ul">Unlimited</span></div></div><ul class="feats"><li><span class="chk">✓</span>Custom AI integrations</li><li><span class="chk">✓</span>SLA-backed uptime</li><li><span class="chk">✓</span>Dedicated success manager</li></ul><button class="pb pb-dark">Contact Sales</button></div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="limit-row">
-          <div class="lico">📱</div>
-          <span class="l-label">WhatsApp numbers</span>
-          <span class="l-val ${p.max_whatsapp_numbers == null ? 'l-unlimited' : ''}">${p.max_whatsapp_numbers != null ? (p.max_whatsapp_numbers === 0 ? 'Multiple' : p.max_whatsapp_numbers) : 'Unlimited'}</span>
+      </div>
+      <!-- Mobile -->
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div style="background:var(--bg)">
+            <div class="ui-hdr" style="padding:50px 16px 60px;text-align:center">
+              <div class="ui-hi">
+                <div class="ui-logo"><div class="ui-logo-mk">M</div><div class="ui-logo-tx" style="font-size:14px">Mycro<span>shop</span></div></div>
+                <div class="ui-badge-pill" style="font-size:9px">✏️ AI Sales Agent</div>
+                <div class="ui-h1" style="font-size:18px">Automate Sales on <em>WhatsApp</em></div>
+                <div class="ui-p" style="font-size:11px">Your AI assistant handles follow-ups 24/7.</div>
+              </div>
+            </div>
+            <div style="padding:0 12px;margin-top:-16px;position:relative;z-index:10">
+              <div class="steps-bar" style="padding:11px 14px">
+                <div class="stp active"><div class="stp-n">1</div></div><div class="stp-sep"></div>
+                <div class="stp"><div class="stp-n">2</div></div><div class="stp-sep"></div>
+                <div class="stp"><div class="stp-n">3</div></div>
+              </div>
+            </div>
+            <div style="padding:14px">
+              <div style="font-size:14px;font-weight:800;text-align:center;margin-bottom:14px">Choose Your Plan</div>
+              <div class="bill-card" style="padding:13px 13px 11px;margin-bottom:14px">
+                <div class="bill-hdr" style="margin-bottom:10px"><div class="bill-hdr-l"><div class="bill-ico" style="width:24px;height:24px;font-size:12px">📅</div><div class="bill-title" style="font-size:12px">Billing Period</div></div></div>
+                <div class="seg-outer"><div class="seg" style="padding:2px">
+                  <div class="bs on" style="min-width:34px;padding:5px 4px"><span class="bs-n" style="font-size:11px">1</span><span class="bs-l">mo.</span></div>
+                  <div class="bs" style="min-width:34px;padding:5px 4px"><span class="bs-n" style="font-size:11px">3</span><span class="bs-l">mo.</span><span class="bs-d">5%</span></div>
+                  <div class="bs" style="min-width:34px;padding:5px 4px"><span class="bs-n" style="font-size:11px">6</span><span class="bs-l">mo.</span><span class="bs-d">10%</span></div>
+                  <div class="bs" style="min-width:34px;padding:5px 4px"><span class="bs-n" style="font-size:11px">9</span><span class="bs-l">mo.</span><span class="bs-d">15%</span></div>
+                  <div class="bs" style="min-width:34px;padding:5px 4px"><span class="bs-n" style="font-size:11px">12</span><span class="bs-l">mo.</span><span class="bs-d">20%</span></div>
+                </div></div>
+                <div class="sum-bar" style="font-size:10px;padding:6px 9px"><div class="sum-l">Billed <strong>monthly</strong></div></div>
+              </div>
+              <div class="plans-grid two" style="gap:9px">
+                <div class="pc" style="padding:14px 11px 12px"><div class="pi ic1" style="width:32px;height:32px;font-size:15px;margin-bottom:8px">🚀</div><div class="pn" style="font-size:13px">Starter</div><div class="pp" style="margin-top:5px"><span class="pp-s" style="font-size:12px">₦</span><span class="pp-a" style="font-size:22px">50k</span></div><div class="pp-per">/month</div><button class="pb pb-outline" style="font-size:10px;padding:7px">Get Started</button></div>
+                <div class="pc pop" style="padding:14px 11px 12px;transform:translateY(-3px)"><div class="pop-b" style="font-size:8px">⭐ Popular</div><div class="pi ic2" style="width:32px;height:32px;font-size:15px;margin-bottom:8px">📈</div><div class="pn" style="font-size:13px">Growth</div><div class="pp" style="margin-top:5px"><span class="pp-s" style="font-size:12px">₦</span><span class="pp-a" style="font-size:22px">120k</span></div><div class="pp-per">/month</div><button class="pb pb-primary" style="font-size:10px;padding:7px">Get Started</button></div>
+                <div class="pc" style="padding:14px 11px 12px"><div class="pi ic3" style="width:32px;height:32px;font-size:15px;margin-bottom:8px">⚡</div><div class="pn" style="font-size:13px">Scale</div><div class="pp" style="margin-top:5px"><span class="pp-s" style="font-size:12px">₦</span><span class="pp-a" style="font-size:22px">250k</span></div><div class="pp-per">/month</div><button class="pb pb-outline" style="font-size:10px;padding:7px">Get Started</button></div>
+                <div class="pc" style="padding:14px 11px 12px"><div class="pi ic4" style="width:32px;height:32px;font-size:15px;margin-bottom:8px">🏢</div><div class="pn" style="font-size:13px">Enterprise</div><div class="pp" style="margin-top:5px"><span class="pp-c" style="font-size:17px">Custom</span></div><div class="pp-per">Contact us</div><button class="pb pb-dark" style="font-size:10px;padding:7px">Contact</button></div>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 2 — Subscribe Modal                          -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">2</div>
+      <div><div class="g-sec-title">Subscribe Modal</div><div class="g-sec-sub">User clicks "Get Started" on Growth (6 months selected — 10% discount). Modal opens over the plans page.</div></div>
+      <div class="g-line"></div>
+    </div>
+    <div class="frames">
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop — modal overlay</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url">mycroshop.com/whatsapp-plans</div></div>
+          <div class="b-body">
+            <div class="modal-bg" style="min-height:460px;background:rgba(0,0,0,.5)">
+              <div class="modal">
+                <div class="m-ico">💳</div>
+                <div class="m-h2">Subscribe to Growth</div>
+                <div class="m-p">You'll be redirected to a secure Paystack checkout to complete payment.</div>
+                <div class="bk">
+                  <div class="bk-row"><span>₦120,000 × 6 months</span><span>₦720,000</span></div>
+                  <div class="bk-row grn"><span>10% multi-month discount</span><span>−₦72,000</span></div>
+                  <div class="bk-total"><span>Total charge</span><span>₦648,000</span></div>
+                </div>
+                <input class="m-input" type="email" value="comfort1234@gmail.com" readonly />
+                <div class="m-row">
+                  <button class="pb pb-ghost">Cancel</button>
+                  <button class="pb pb-primary">Pay &amp; Subscribe</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="limit-row">
-          <div class="lico">✉️</div>
-          <span class="l-label">Follow-ups / month</span>
-          <span class="l-val ${p.follow_up_limit == null ? 'l-unlimited' : ''}">${p.follow_up_limit != null ? numFmt(p.follow_up_limit) : 'Unlimited'}</span>
+      </div>
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile — bottom sheet</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div class="modal-bg bottom" style="min-height:660px;background:rgba(0,0,0,.55);align-items:flex-end">
+            <div class="modal sheet" style="padding:22px 20px">
+              <div style="width:36px;height:4px;background:#E5E7EB;border-radius:4px;margin:0 auto 18px"></div>
+              <div class="m-ico" style="width:40px;height:40px;font-size:19px">💳</div>
+              <div class="m-h2" style="font-size:16px">Subscribe to Growth</div>
+              <div class="m-p">Secure Paystack checkout.</div>
+              <div class="bk" style="font-size:11px">
+                <div class="bk-row"><span>₦120k × 6 months</span><span>₦720,000</span></div>
+                <div class="bk-row grn"><span>10% discount</span><span>−₦72,000</span></div>
+                <div class="bk-total"><span>Total</span><span>₦648,000</span></div>
+              </div>
+              <input class="m-input" type="email" value="comfort1234@gmail.com" readonly style="font-size:12px;padding:9px 11px" />
+              <div class="m-row">
+                <button class="pb pb-ghost" style="font-size:11px">Cancel</button>
+                <button class="pb pb-primary" style="font-size:11px">Pay &amp; Subscribe</button>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────── FLOW DIVIDER ─────────────────────── -->
+  <div class="flow-label">
+    <div class="flow-label-line"></div>
+    <div class="flow-label-text">Step 2 of 3 — Paystack Payment</div>
+    <div class="flow-label-line"></div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 3 — Paystack Checkout Page                   -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">3</div>
+      <div><div class="g-sec-title">Paystack Checkout — External Payment Page</div><div class="g-sec-sub">Browser redirects to Paystack. User enters card details and pays.</div></div>
+      <div class="g-line"></div>
+    </div>
+    <div class="frames">
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop — Paystack redirect</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url" style="color:#22C55E">🔒 checkout.paystack.com/pay/xxxxxxxx</div></div>
+          <div class="b-body">
+            <div class="pst-page">
+              <div class="pst-bar">
+                <div class="pst-logo">Paystack</div>
+                <div style="flex:1"></div>
+                <div class="pst-lock">🔒 Secured by Paystack</div>
+              </div>
+              <div class="pst-body">
+                <div class="pst-merch">
+                  <div class="pst-merch-logo">M</div>
+                  <div class="pst-merch-name">Mycroshop — AI Sales Agent</div>
+                  <div class="pst-merch-amt">₦648,000</div>
+                  <div class="pst-merch-desc">Growth Plan · 6 months · 10% discount applied</div>
+                </div>
+                <div class="pst-email-disp"><span>comfort1234@gmail.com</span><span style="color:#00A651;font-size:11px;font-weight:700">Change</span></div>
+                <div class="pst-tabs">
+                  <div class="pst-tab on">💳 Card</div>
+                  <div class="pst-tab">🏦 Bank Transfer</div>
+                  <div class="pst-tab">📱 USSD</div>
+                </div>
+                <div class="pst-field-label">Card Number</div>
+                <input class="pst-field" type="text" placeholder="0000  0000  0000  0000" readonly />
+                <div class="pst-2col">
+                  <div><div class="pst-field-label">Expiry</div><input class="pst-field" type="text" placeholder="MM / YY" readonly /></div>
+                  <div><div class="pst-field-label">CVV</div><input class="pst-field" type="text" placeholder="•••" readonly /></div>
+                </div>
+                <button class="pst-pay-btn">Pay ₦648,000</button>
+                <div class="pst-secure">🔒 Your card information is encrypted and secured</div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>`;
+      </div>
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div class="pst-page" style="padding-top:0">
+            <div class="pst-bar" style="padding:36px 14px 10px"><div class="pst-logo" style="font-size:13px">Paystack</div><div style="flex:1"></div><div class="pst-lock" style="font-size:10px">🔒 Secured</div></div>
+            <div style="padding:18px 16px">
+              <div class="pst-merch" style="margin-bottom:16px">
+                <div class="pst-merch-logo" style="width:44px;height:44px;font-size:20px;border-radius:12px">M</div>
+                <div class="pst-merch-name" style="font-size:11px">Mycroshop — AI Sales Agent</div>
+                <div class="pst-merch-amt" style="font-size:22px">₦648,000</div>
+                <div class="pst-merch-desc">Growth Plan · 6 months</div>
+              </div>
+              <div class="pst-email-disp" style="font-size:11px;margin-bottom:13px"><span>comfort1234@gmail.com</span><span style="color:#00A651;font-size:10px;font-weight:700">Change</span></div>
+              <div class="pst-tabs" style="margin-bottom:14px">
+                <div class="pst-tab on" style="padding:7px 12px;font-size:11px">💳 Card</div>
+                <div class="pst-tab" style="padding:7px 10px;font-size:11px">🏦 Bank</div>
+              </div>
+              <div class="pst-field-label">Card Number</div>
+              <input class="pst-field" type="text" placeholder="0000  0000  0000  0000" readonly style="font-size:12px;padding:9px 11px;margin-bottom:10px" />
+              <div class="pst-2col" style="gap:8px;margin-bottom:10px">
+                <div><div class="pst-field-label">Expiry</div><input class="pst-field" type="text" placeholder="MM / YY" readonly style="font-size:12px;padding:9px 10px;margin-bottom:0" /></div>
+                <div><div class="pst-field-label">CVV</div><input class="pst-field" type="text" placeholder="•••" readonly style="font-size:12px;padding:9px 10px;margin-bottom:0" /></div>
+              </div>
+              <button class="pst-pay-btn" style="font-size:13px;padding:11px">Pay ₦648,000</button>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
 
-    const feats = (Array.isArray(p.features) ? p.features : []).map(f =>
-      `<li><span class="chk"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>${esc(f)}</li>`
-    ).join('');
+  <!-- ─────────────────────────── FLOW DIVIDER ─────────────────────── -->
+  <div class="flow-label">
+    <div class="flow-label-line"></div>
+    <div class="flow-label-text">Step 3 of 3 — Connect WhatsApp</div>
+    <div class="flow-label-line"></div>
+  </div>
 
-    const btnLabel = isCurrent ? '✓ Current Plan' : isCustom ? 'Contact Sales' : subscription?.status === 'active' ? 'Switch Plan' : 'Get Started';
-    const btnCls   = isCurrent ? 'btn-disabled' : isCustom ? 'btn-dark' : isPopular ? 'btn-primary' : 'btn-outline';
-    const btnClick = isCurrent ? '' : isCustom ? 'openEntModal()' : `openSubModal(${p.id})`;
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 4 — Post-Payment Return                      -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">4</div>
+      <div><div class="g-sec-title">Post-Payment Return — Plan Active, Connect WhatsApp</div><div class="g-sec-sub">Paystack redirects back. Success toast fires. Step 3 is now active. Plans still visible below with updated buttons.</div></div>
+      <div class="g-line"></div>
+    </div>
+    <div class="frames">
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop — scrolled to top after redirect</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url">mycroshop.com/whatsapp-plans?payment=active</div></div>
+          <div class="b-body" style="background:var(--bg);position:relative">
+            <!-- Success toast -->
+            <div style="position:relative">
+              <div class="toast">
+                <div class="toast-dot"></div>
+                Payment successful! Your AI Sales Agent is now active.
+              </div>
+            </div>
+            <div class="ui-hdr" style="padding-bottom:60px">
+              <div class="ui-hi">
+                <div class="ui-logo"><div class="ui-logo-mk">M</div><div class="ui-logo-tx">Mycro<span>shop</span></div></div>
+                <div class="ui-h1">Automate Sales on <em>WhatsApp</em></div>
+              </div>
+            </div>
+            <!-- Steps — 1 & 2 done, 3 active -->
+            <div class="steps-wrap">
+              <div class="steps-bar">
+                <div class="stp done"><div class="stp-n">✓</div><div class="stp-l">Choose Plan</div></div>
+                <div class="stp-sep done"></div>
+                <div class="stp done"><div class="stp-n">✓</div><div class="stp-l">Pay Securely</div></div>
+                <div class="stp-sep"></div>
+                <div class="stp active"><div class="stp-n">3</div><div class="stp-l">Connect WhatsApp</div></div>
+              </div>
+            </div>
+            <!-- Sub banner -->
+            <div style="max-width:900px;margin:14px auto 0;padding:0 20px">
+              <div class="sub-banner">
+                <div class="sb-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+                <div class="sb-info"><strong>You're on the Growth Plan</strong><span>Active until 13 November 2026 (6 months)</span><div class="sb-bar-wrap"><div class="sb-bar-label">Follow-ups: 0 / 2,000</div><div class="sb-bar"><div class="sb-fill" style="width:0%"></div></div></div></div>
+                <span class="status-p sp-active">Active</span>
+              </div>
+            </div>
+            <!-- Connect CTA -->
+            <div style="max-width:680px;margin:16px auto 0;padding:0 20px">
+              <div class="conn-card">
+                <div class="conn-ico">📱</div>
+                <div class="conn-body">
+                  <div class="conn-step">Step 3 — Action Required</div>
+                  <div class="conn-title">Connect Your WhatsApp Number</div>
+                  <div class="conn-desc">Your plan is active. Now link your WhatsApp Business number so Mycroshop AI can start responding to customers automatically.</div>
+                  <div class="conn-acts">
+                    <button class="cbt cbt-p">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/></svg>
+                      Connect WhatsApp
+                    </button>
+                    <button class="cbt cbt-o">How it works</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- Plans grid BELOW — with updated buttons -->
+            <div style="max-width:1060px;margin:24px auto 0;padding:0 20px 32px">
+              <div style="font-size:11px;font-weight:700;text-align:center;color:var(--text-2);margin-bottom:14px;text-transform:uppercase;letter-spacing:.5px">Your Subscription · Upgrade Anytime</div>
+              <div class="plans-grid">
+                <div class="pc">
+                  <div class="pi ic1">🚀</div><div class="pn">Starter</div><div class="pf">Small businesses just getting started</div>
+                  <div class="pp"><span class="pp-s">₦</span><span class="pp-a">50k</span></div><div class="pp-per">per month</div>
+                  <div class="dv"></div>
+                  <div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Monthly customers</span><span class="lv">300</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups / mo</span><span class="lv">500</span></div></div>
+                  <div class="upgrade-note">⚠️ Downgrading is only available at the end of your current billing period.</div>
+                  <button class="pb pb-down" disabled>↓ Downgrade</button>
+                </div>
+                <div class="pc curr">
+                  <div class="curr-b">Active</div>
+                  <div class="pi ic2">📈</div><div class="pn">Growth</div><div class="pf">Growing businesses ready to scale</div>
+                  <div class="pp"><span class="pp-s">₦</span><span class="pp-a">120k</span></div><div class="pp-per">per month</div>
+                  <div class="dv"></div>
+                  <div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Monthly customers</span><span class="lv">1,000</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups / mo</span><span class="lv">2,000</span></div></div>
+                  <button class="pb pb-disabled" disabled>✓ Current Plan</button>
+                </div>
+                <div class="pc">
+                  <div class="pi ic3">⚡</div><div class="pn">Scale</div><div class="pf">High-volume sellers and brands</div>
+                  <div class="pp"><span class="pp-s">₦</span><span class="pp-a">250k</span></div><div class="pp-per">per month</div>
+                  <div class="dv"></div>
+                  <div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Monthly customers</span><span class="lv">3,000</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups / mo</span><span class="lv">5,000</span></div></div>
+                  <button class="pb pb-upgrade">↑ Upgrade to Scale</button>
+                </div>
+                <div class="pc">
+                  <div class="pi ic4">🏢</div><div class="pn">Enterprise</div><div class="pf">Large businesses with complex needs</div>
+                  <div class="pp"><span class="pp-c">Custom</span></div><div class="pp-per">Contact for pricing</div>
+                  <div class="dv"></div>
+                  <div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Monthly customers</span><span class="lv ul">Unlimited</span></div></div>
+                  <button class="pb pb-dark">Contact Sales</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Mobile -->
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile — after payment redirect</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div style="background:var(--bg)">
+            <div class="ui-hdr" style="padding:50px 16px 52px">
+              <div class="ui-hi">
+                <div class="ui-logo"><div class="ui-logo-mk">M</div><div class="ui-logo-tx" style="font-size:14px">Mycro<span>shop</span></div></div>
+                <div class="ui-h1" style="font-size:17px">Automate Sales on <em>WhatsApp</em></div>
+              </div>
+            </div>
+            <div style="padding:0 12px;margin-top:-14px;position:relative;z-index:10">
+              <div class="steps-bar" style="padding:10px 12px">
+                <div class="stp done"><div class="stp-n">✓</div></div><div class="stp-sep done"></div>
+                <div class="stp done"><div class="stp-n">✓</div></div><div class="stp-sep"></div>
+                <div class="stp active"><div class="stp-n">3</div></div>
+              </div>
+            </div>
+            <div style="padding:12px">
+              <!-- toast -->
+              <div style="background:#0F4C1E;border:1px solid #22C55E;color:#fff;padding:9px 12px;border-radius:8px;font-size:11px;font-weight:600;display:flex;gap:7px;align-items:center;margin-bottom:12px"><div style="width:6px;height:6px;background:#22C55E;border-radius:50%;flex-shrink:0"></div>Payment successful! Plan is now active.</div>
+              <div class="sub-banner" style="margin-bottom:12px">
+                <div class="sb-icon" style="width:36px;height:36px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+                <div class="sb-info"><strong style="font-size:12px">Growth Plan — Active</strong><span style="font-size:10px">Until 13 Nov 2026</span></div>
+                <span class="status-p sp-active" style="font-size:9px">Active</span>
+              </div>
+              <div class="conn-card stacked" style="margin-bottom:14px">
+                <div style="display:flex;gap:12px;align-items:center">
+                  <div class="conn-ico" style="width:46px;height:46px;font-size:22px">📱</div>
+                  <div><div class="conn-step" style="font-size:9px">Step 3 — Action Required</div><div class="conn-title" style="font-size:15px">Connect WhatsApp</div></div>
+                </div>
+                <div class="conn-desc" style="font-size:11px;margin-bottom:10px">Link your WhatsApp Business number so Mycroshop AI can start responding automatically.</div>
+                <button class="cbt cbt-p" style="font-size:12px;justify-content:center;width:100%">Connect WhatsApp</button>
+              </div>
+              <!-- Plans below -->
+              <div style="font-size:10px;font-weight:700;text-align:center;color:var(--text-2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.4px">Upgrade Anytime</div>
+              <div class="plans-grid two" style="gap:8px">
+                <div class="pc" style="padding:12px 10px 10px"><div class="pi ic2 curr-b" style="display:none"></div><div class="pn" style="font-size:12px">Starter</div><div class="pp" style="margin-top:4px"><span class="pp-s" style="font-size:11px">₦</span><span class="pp-a" style="font-size:18px">50k</span></div><button class="pb pb-down" style="font-size:9px;padding:6px;margin-top:8px">↓ Downgrade</button></div>
+                <div class="pc curr" style="padding:12px 10px 10px"><div class="curr-b" style="font-size:8px;top:7px;right:7px">Active</div><div class="pn" style="font-size:12px">Growth</div><div class="pp" style="margin-top:4px"><span class="pp-s" style="font-size:11px">₦</span><span class="pp-a" style="font-size:18px">120k</span></div><button class="pb pb-disabled" style="font-size:9px;padding:6px;margin-top:8px">✓ Current</button></div>
+                <div class="pc" style="padding:12px 10px 10px"><div class="pn" style="font-size:12px">Scale</div><div class="pp" style="margin-top:4px"><span class="pp-s" style="font-size:11px">₦</span><span class="pp-a" style="font-size:18px">250k</span></div><button class="pb pb-upgrade" style="font-size:9px;padding:6px;margin-top:8px">↑ Upgrade</button></div>
+                <div class="pc" style="padding:12px 10px 10px"><div class="pn" style="font-size:12px">Enterprise</div><div class="pp" style="margin-top:4px"><span class="pp-c" style="font-size:15px">Custom</span></div><button class="pb pb-dark" style="font-size:9px;padding:6px;margin-top:8px">Contact</button></div>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
 
-    return `
-      <div class="plan-card ${isPopular ? 'popular' : ''} ${isCurrent ? 'is-current' : ''}">
-        ${isPopular ? `<div class="pop-badge">⭐ Most Popular</div>` : ''}
-        ${isCurrent ? `<div class="curr-badge">Active</div>` : ''}
-        <div class="plan-icon ${icon.c}">${icon.e}</div>
-        <div class="plan-name">${esc(p.name)}</div>
-        <div class="plan-for">${esc(p.best_for || '')}</div>
-        ${priceHtml}
-        <div class="divider"></div>
-        ${limitsHtml}
-        <ul class="feat-list">${feats}</ul>
-        <button class="plan-btn ${btnCls}" ${btnClick ? `onclick="${btnClick}"` : 'disabled'}>${btnLabel}</button>
-      </div>`;
-  }).join('');
-}
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 5 — WhatsApp Embedded Signup Popup           -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">5</div>
+      <div><div class="g-sec-title">WhatsApp Embedded Signup Popup</div><div class="g-sec-sub">Clicking "Connect WhatsApp" opens the Meta/Facebook Embedded Signup in a popup window. User logs into Facebook, selects their WhatsApp Business Account and phone number.</div></div>
+      <div class="g-line"></div>
+    </div>
+    <div class="frames">
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop — FB popup over the plans page</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url">mycroshop.com/whatsapp-plans</div></div>
+          <div class="b-body" style="position:relative">
+            <!-- dimmed background page -->
+            <div style="background:var(--bg);filter:brightness(.45);padding:20px;min-height:300px">
+              <div class="conn-card" style="max-width:600px;margin:0 auto;opacity:.4"><div class="conn-ico">📱</div><div class="conn-body"><div class="conn-title">Connect Your WhatsApp Number</div></div></div>
+            </div>
+            <!-- Popup window -->
+            <div style="position:absolute;inset:0;display:grid;place-items:center;padding:20px">
+              <div style="background:#fff;border-radius:12px;width:100%;max-width:400px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.4)">
+                <!-- popup chrome -->
+                <div style="background:#1877F2;padding:12px 16px;display:flex;align-items:center;gap:10px">
+                  <div style="font-size:20px;font-weight:900;color:#fff">f</div>
+                  <div style="flex:1;font-size:12px;color:rgba(255,255,255,.85)">Meta Business — WhatsApp Setup</div>
+                  <div style="font-size:16px;color:rgba(255,255,255,.7);cursor:pointer">✕</div>
+                </div>
+                <div style="padding:22px">
+                  <div style="font-size:14px;font-weight:800;margin-bottom:4px">Connect to WhatsApp Business</div>
+                  <div style="font-size:12px;color:var(--text-2);margin-bottom:18px">Mycroshop is requesting access to manage your WhatsApp Business Account.</div>
+                  <!-- Steps inside popup -->
+                  <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+                    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#F0F4FA;border-radius:8px;border-left:3px solid var(--mc-blue)">
+                      <div style="width:28px;height:28px;background:var(--mc-blue);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:800;flex-shrink:0">1</div>
+                      <div><div style="font-size:12px;font-weight:700">Log in with Facebook</div><div style="font-size:10px;color:var(--text-2)">Use your Facebook business account</div></div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#F9FAFB;border-radius:8px">
+                      <div style="width:28px;height:28px;background:#E5E7EB;border-radius:50%;display:grid;place-items:center;color:var(--text-2);font-size:11px;font-weight:800;flex-shrink:0">2</div>
+                      <div><div style="font-size:12px;font-weight:700;color:var(--text-2)">Select or create WABA</div><div style="font-size:10px;color:var(--text-3)">WhatsApp Business Account</div></div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#F9FAFB;border-radius:8px">
+                      <div style="width:28px;height:28px;background:#E5E7EB;border-radius:50%;display:grid;place-items:center;color:var(--text-2);font-size:11px;font-weight:800;flex-shrink:0">3</div>
+                      <div><div style="font-size:12px;font-weight:700;color:var(--text-2)">Choose phone number</div><div style="font-size:10px;color:var(--text-3)">The number Mycroshop will use</div></div>
+                    </div>
+                  </div>
+                  <button style="width:100%;padding:11px;background:#1877F2;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Continue with Facebook</button>
+                  <div style="text-align:center;font-size:10px;color:var(--text-3);margin-top:10px">By continuing you agree to Meta's Terms of Service</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile — full screen Meta flow</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div style="background:#1877F2;min-height:660px;padding-top:38px">
+            <!-- FB header -->
+            <div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(255,255,255,.15)">
+              <div style="font-size:22px;font-weight:900;color:#fff">f</div>
+              <div style="flex:1;font-size:12px;color:rgba(255,255,255,.85);font-weight:600">Meta Business</div>
+              <div style="font-size:14px;color:rgba(255,255,255,.7)">✕</div>
+            </div>
+            <div style="background:#fff;margin:0;padding:20px">
+              <div style="font-size:14px;font-weight:800;margin-bottom:3px">Connect to WhatsApp Business</div>
+              <div style="font-size:11px;color:var(--text-2);margin-bottom:16px">Mycroshop wants to manage your WhatsApp Business Account.</div>
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+                <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;background:#F0F4FA;border-radius:7px;border-left:3px solid var(--mc-blue)">
+                  <div style="width:24px;height:24px;background:var(--mc-blue);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:800;flex-shrink:0">1</div>
+                  <div><div style="font-size:11px;font-weight:700">Log in with Facebook</div></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;background:#F9FAFB;border-radius:7px">
+                  <div style="width:24px;height:24px;background:#E5E7EB;border-radius:50%;display:grid;place-items:center;color:var(--text-2);font-size:10px;font-weight:800;flex-shrink:0">2</div>
+                  <div><div style="font-size:11px;font-weight:700;color:var(--text-2)">Select WABA</div></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;background:#F9FAFB;border-radius:7px">
+                  <div style="width:24px;height:24px;background:#E5E7EB;border-radius:50%;display:grid;place-items:center;color:var(--text-2);font-size:10px;font-weight:800;flex-shrink:0">3</div>
+                  <div><div style="font-size:11px;font-weight:700;color:var(--text-2)">Choose phone number</div></div>
+                </div>
+              </div>
+              <button style="width:100%;padding:10px;background:#1877F2;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700">Continue with Facebook</button>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
 
-// ── Subscription banner ────────────────────────────────────────────────────────
-function renderBanner() {
-  if (!subscription) return;
-  const b = document.getElementById('subBanner');
-  b.classList.add('show');
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 6 — WhatsApp Connected (All Steps Complete)  -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">6</div>
+      <div><div class="g-sec-title">WhatsApp Connected — AI Agent is Live</div><div class="g-sec-sub">Signup completes. All 3 steps checked. Green connected card with live phone number. Plans grid below shows upgrade options.</div></div>
+      <div class="g-line"></div>
+    </div>
+    <div class="frames">
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop — final state</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url">mycroshop.com/whatsapp-plans</div></div>
+          <div class="b-body" style="background:var(--bg)">
+            <div class="ui-hdr" style="padding-bottom:60px">
+              <div class="ui-hi">
+                <div class="ui-logo"><div class="ui-logo-mk">M</div><div class="ui-logo-tx">Mycro<span>shop</span></div></div>
+                <div class="ui-h1">Automate Sales on <em>WhatsApp</em></div>
+              </div>
+            </div>
+            <div class="steps-wrap">
+              <div class="steps-bar">
+                <div class="stp done"><div class="stp-n">✓</div><div class="stp-l">Choose Plan</div></div>
+                <div class="stp-sep done"></div>
+                <div class="stp done"><div class="stp-n">✓</div><div class="stp-l">Pay Securely</div></div>
+                <div class="stp-sep done"></div>
+                <div class="stp done"><div class="stp-n">✓</div><div class="stp-l">Connect WhatsApp</div></div>
+              </div>
+            </div>
+            <div style="max-width:900px;margin:14px auto 0;padding:0 20px">
+              <div class="sub-banner">
+                <div class="sb-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+                <div class="sb-info"><strong>You're on the Growth Plan</strong><span>Active until 13 November 2026</span><div class="sb-bar-wrap"><div class="sb-bar-label">Follow-ups: 340 / 2,000</div><div class="sb-bar"><div class="sb-fill" style="width:17%"></div></div></div></div>
+                <span class="status-p sp-active">Active</span>
+              </div>
+            </div>
+            <div style="max-width:680px;margin:16px auto 0;padding:0 20px">
+              <div class="conn-card green">
+                <div class="conn-ico green-bg">📱</div>
+                <div class="conn-body">
+                  <div class="conn-step green">All done — You're live!</div>
+                  <div class="conn-title">WhatsApp Number Connected</div>
+                  <div class="conn-desc">Your AI Sales Agent is live and responding to customers on your WhatsApp number.</div>
+                  <div class="conn-acts">
+                    <div class="num-badge"><div class="wa-dot"></div>+234 812 345 6789</div>
+                    <button class="cbt cbt-o">Change Number</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- Plans below — connected + active state -->
+            <div style="max-width:1060px;margin:24px auto 0;padding:0 20px 32px">
+              <div style="font-size:11px;font-weight:700;text-align:center;color:var(--text-2);margin-bottom:14px;text-transform:uppercase;letter-spacing:.5px">Your Subscription · Upgrade Anytime</div>
+              <div class="plans-grid">
+                <div class="pc"><div class="pi ic1">🚀</div><div class="pn">Starter</div><div class="pf">Small businesses just getting started</div><div class="pp"><span class="pp-s">₦</span><span class="pp-a">50k</span></div><div class="pp-per">per month</div><div class="dv"></div><div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Customers</span><span class="lv">300</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups</span><span class="lv">500</span></div></div><div class="upgrade-note" style="font-size:10px">⚠️ Downgrade available at period end.</div><button class="pb pb-down" disabled>↓ Downgrade</button></div>
+                <div class="pc curr"><div class="curr-b">Active</div><div class="pi ic2">📈</div><div class="pn">Growth</div><div class="pf">Growing businesses ready to scale</div><div class="pp"><span class="pp-s">₦</span><span class="pp-a">120k</span></div><div class="pp-per">per month</div><div class="dv"></div><div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Customers</span><span class="lv">1,000</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups</span><span class="lv">2,000</span></div></div><button class="pb pb-disabled" disabled>✓ Current Plan</button></div>
+                <div class="pc"><div class="pi ic3">⚡</div><div class="pn">Scale</div><div class="pf">High-volume sellers and brands</div><div class="pp"><span class="pp-s">₦</span><span class="pp-a">250k</span></div><div class="pp-per">per month</div><div class="dv"></div><div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Customers</span><span class="lv">3,000</span></div><div class="lr"><div class="lic">✉️</div><span class="ll">Follow-ups</span><span class="lv">5,000</span></div></div><button class="pb pb-upgrade">↑ Upgrade to Scale</button></div>
+                <div class="pc"><div class="pi ic4">🏢</div><div class="pn">Enterprise</div><div class="pf">Large businesses with complex needs</div><div class="pp"><span class="pp-c">Custom</span></div><div class="pp-per">Contact for pricing</div><div class="dv"></div><div class="lims"><div class="lr"><div class="lic">👥</div><span class="ll">Customers</span><span class="lv ul">Unlimited</span></div></div><button class="pb pb-dark">Contact Sales</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Mobile -->
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile — fully live</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div style="background:var(--bg)">
+            <div class="ui-hdr" style="padding:50px 16px 52px">
+              <div class="ui-hi">
+                <div class="ui-logo"><div class="ui-logo-mk">M</div><div class="ui-logo-tx" style="font-size:14px">Mycro<span>shop</span></div></div>
+                <div class="ui-h1" style="font-size:17px">Automate Sales on <em>WhatsApp</em></div>
+              </div>
+            </div>
+            <div style="padding:0 12px;margin-top:-14px;position:relative;z-index:10">
+              <div class="steps-bar" style="padding:10px 12px">
+                <div class="stp done"><div class="stp-n">✓</div></div><div class="stp-sep done"></div>
+                <div class="stp done"><div class="stp-n">✓</div></div><div class="stp-sep done"></div>
+                <div class="stp done"><div class="stp-n">✓</div></div>
+              </div>
+            </div>
+            <div style="padding:12px">
+              <div class="sub-banner" style="margin-bottom:12px">
+                <div class="sb-icon" style="width:36px;height:36px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+                <div class="sb-info"><strong style="font-size:12px">Growth Plan — Active</strong><span style="font-size:10px">Until 13 Nov 2026</span><div class="sb-bar-wrap"><div class="sb-bar-label" style="font-size:9px">340 / 2,000 follow-ups</div><div class="sb-bar"><div class="sb-fill" style="width:17%"></div></div></div></div>
+                <span class="status-p sp-active" style="font-size:9px">Active</span>
+              </div>
+              <div class="conn-card green stacked" style="margin-bottom:14px">
+                <div style="display:flex;gap:12px;align-items:center">
+                  <div class="conn-ico green-bg" style="width:46px;height:46px;font-size:22px">📱</div>
+                  <div><div class="conn-step green" style="font-size:9px">All done — You're live!</div><div class="conn-title" style="font-size:15px">WhatsApp Connected</div></div>
+                </div>
+                <div class="num-badge" style="font-size:11px;align-self:flex-start"><div class="wa-dot"></div>+234 812 345 6789</div>
+                <button class="cbt cbt-o" style="font-size:11px;justify-content:center">Change Number</button>
+              </div>
+              <div style="font-size:10px;font-weight:700;text-align:center;color:var(--text-2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.4px">Upgrade Anytime</div>
+              <div class="plans-grid two" style="gap:8px">
+                <div class="pc" style="padding:12px 10px 10px"><div class="pn" style="font-size:12px">Starter</div><div class="pp" style="margin-top:4px"><span class="pp-s" style="font-size:11px">₦</span><span class="pp-a" style="font-size:18px">50k</span></div><button class="pb pb-down" style="font-size:9px;padding:5px;margin-top:7px">↓ Downgrade</button></div>
+                <div class="pc curr" style="padding:12px 10px 10px"><div class="curr-b" style="font-size:8px;top:7px;right:7px">Active</div><div class="pn" style="font-size:12px">Growth</div><div class="pp" style="margin-top:4px"><span class="pp-s" style="font-size:11px">₦</span><span class="pp-a" style="font-size:18px">120k</span></div><button class="pb pb-disabled" style="font-size:9px;padding:5px;margin-top:7px">✓ Current</button></div>
+                <div class="pc" style="padding:12px 10px 10px"><div class="pn" style="font-size:12px">Scale</div><div class="pp" style="margin-top:4px"><span class="pp-s" style="font-size:11px">₦</span><span class="pp-a" style="font-size:18px">250k</span></div><button class="pb pb-upgrade" style="font-size:9px;padding:5px;margin-top:7px">↑ Upgrade</button></div>
+                <div class="pc" style="padding:12px 10px 10px"><div class="pn" style="font-size:12px">Enterprise</div><div class="pp" style="margin-top:4px"><span class="pp-c" style="font-size:15px">Custom</span></div><button class="pb pb-dark" style="font-size:9px;padding:5px;margin-top:7px">Contact</button></div>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
 
-  document.getElementById('bannerName').textContent =
-    subscription.plan?.name ? `You're on the ${subscription.plan.name} Plan` : 'AI Sales Agent Subscription';
+  <!-- ─────────────────────────── FLOW DIVIDER ─────────────────────── -->
+  <div class="flow-label">
+    <div class="flow-label-line"></div>
+    <div class="flow-label-text">Modals</div>
+    <div class="flow-label-line"></div>
+  </div>
 
-  const end = subscription.current_period_end
-    ? new Date(subscription.current_period_end).toLocaleDateString('en-NG', { day:'numeric', month:'long', year:'numeric' })
-    : null;
-  document.getElementById('bannerExpiry').textContent = end ? `Renews ${end}` : '';
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 7 — Upgrade Modal                            -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">7</div>
+      <div><div class="g-sec-title">Upgrade Modal — Pro-rated Billing</div><div class="g-sec-sub">User clicks "Upgrade to Scale" while on Growth. Modal shows how much they pay today (pro-rated remaining days only).</div></div>
+      <div class="g-line"></div>
+    </div>
+    <div class="frames">
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url">mycroshop.com/whatsapp-plans</div></div>
+          <div class="b-body">
+            <div class="modal-bg" style="min-height:480px;background:rgba(0,0,0,.5)">
+              <div class="modal">
+                <div class="m-ico">⚡</div>
+                <div class="m-h2">Upgrade to Scale</div>
+                <div class="m-p">You're upgrading mid-cycle. You only pay the pro-rated difference for the remaining days of your current period.</div>
+                <div class="bk">
+                  <div class="bk-row"><span style="color:var(--text-1);font-weight:700">Scale Plan · 1 month</span><span style="font-weight:700">₦250,000</span></div>
+                  <div class="bk-row"><span>You've already paid (Growth, 18 days left)</span><span>−₦72,000</span></div>
+                  <div class="bk-row" style="color:var(--text-3);font-size:11px"><span>Pro-rated calculation · 18/30 days</span><span></span></div>
+                  <div class="bk-total"><span>Pay today</span><span>₦178,000</span></div>
+                </div>
+                <div style="background:var(--mc-tint);border:1px solid var(--mc-light);border-radius:var(--r-sm);padding:10px 13px;font-size:11px;color:var(--mc-darker);margin-bottom:13px">
+                  ✅ Your follow-ups and billing period carry over — only the plan limits change immediately.
+                </div>
+                <input class="m-input" type="email" value="comfort1234@gmail.com" readonly />
+                <div class="m-row">
+                  <button class="pb pb-ghost">Cancel</button>
+                  <button class="pb pb-upgrade">Pay &amp; Upgrade</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile — bottom sheet</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div class="modal-bg bottom" style="min-height:660px;background:rgba(0,0,0,.55);align-items:flex-end">
+            <div class="modal sheet" style="padding:20px 18px">
+              <div style="width:36px;height:4px;background:#E5E7EB;border-radius:4px;margin:0 auto 16px"></div>
+              <div class="m-ico" style="width:40px;height:40px;font-size:19px">⚡</div>
+              <div class="m-h2" style="font-size:16px">Upgrade to Scale</div>
+              <div class="m-p" style="font-size:11px">You only pay the pro-rated difference for remaining days in your current period.</div>
+              <div class="bk" style="font-size:11px">
+                <div class="bk-row"><span style="font-weight:700">Scale Plan</span><span style="font-weight:700">₦250,000</span></div>
+                <div class="bk-row"><span>Already paid (18 days left)</span><span>−₦72,000</span></div>
+                <div class="bk-total"><span>Pay today</span><span>₦178,000</span></div>
+              </div>
+              <div style="background:var(--mc-tint);border:1px solid var(--mc-light);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--mc-darker);margin-bottom:11px">
+                ✅ Follow-ups and period carry over — limits change immediately.
+              </div>
+              <input class="m-input" type="email" value="comfort1234@gmail.com" readonly style="font-size:12px;padding:9px 11px" />
+              <div class="m-row">
+                <button class="pb pb-ghost" style="font-size:11px">Cancel</button>
+                <button class="pb pb-upgrade" style="font-size:11px">Pay &amp; Upgrade</button>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
 
-  const st = document.getElementById('bannerStatus');
-  const s  = subscription.status;
-  st.textContent = s.charAt(0).toUpperCase() + s.slice(1);
-  st.className   = `status-pill s-${s}`;
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 8 — Enterprise Modal                         -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">8</div>
+      <div><div class="g-sec-title">Enterprise Contact Modal</div><div class="g-sec-sub">Shown when user clicks "Contact Sales" on the Enterprise plan card.</div></div>
+      <div class="g-line"></div>
+    </div>
+    <div class="frames">
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url">mycroshop.com/whatsapp-plans</div></div>
+          <div class="b-body"><div class="modal-bg" style="min-height:420px;background:rgba(0,0,0,.5)">
+            <div class="modal">
+              <div class="m-ico">🏢</div>
+              <div class="m-h2">Enterprise Plan</div>
+              <div class="m-p">This plan is custom-quoted for your business. Reach our sales team and we'll build the right solution for you.</div>
+              <div class="contact-b"><div class="cl">📧 Email</div><a href="#">sales@mycroshop.com</a></div>
+              <div class="contact-b"><div class="cl">💬 WhatsApp</div><a href="#">Chat with Sales →</a></div>
+              <button class="pb pb-ghost" style="width:100%;margin-top:4px">Close</button>
+            </div>
+          </div></div>
+        </div>
+      </div>
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div class="modal-bg bottom" style="min-height:660px;background:rgba(0,0,0,.55);align-items:flex-end">
+            <div class="modal sheet" style="padding:20px 18px">
+              <div style="width:36px;height:4px;background:#E5E7EB;border-radius:4px;margin:0 auto 16px"></div>
+              <div class="m-ico" style="width:40px;height:40px;font-size:19px">🏢</div>
+              <div class="m-h2" style="font-size:16px">Enterprise Plan</div>
+              <div class="m-p" style="font-size:11px">Custom-quoted for your business. Our sales team will build the right solution for you.</div>
+              <div class="contact-b" style="margin-bottom:9px"><div class="cl">📧 Email</div><a href="#" style="font-size:12px">sales@mycroshop.com</a></div>
+              <div class="contact-b" style="margin-bottom:9px"><div class="cl">💬 WhatsApp</div><a href="#" style="font-size:12px">Chat with Sales →</a></div>
+              <button class="pb pb-ghost" style="width:100%;font-size:12px;margin-top:4px">Close</button>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
 
-  if (subscription.follow_up_limit != null) {
-    const used  = subscription.follow_ups_used || 0;
-    const limit = subscription.follow_up_limit;
-    const pct   = Math.min(100, Math.round(used / limit * 100));
-    const uBlock = document.getElementById('bannerUsage');
-    uBlock.style.display = 'block';
-    document.getElementById('bannerUsageLabel').textContent = `Follow-ups: ${used.toLocaleString()} / ${limit.toLocaleString()}`;
-    const fill = document.getElementById('bannerFill');
-    fill.style.width = pct + '%';
-    fill.className = 'sub-fill' + (pct >= 90 ? ' danger' : pct >= 70 ? ' warn' : '');
-  }
-}
+  <!-- ════════════════════════════════════════════════════ -->
+  <!-- SCREEN 9 — How It Works Modal                       -->
+  <!-- ════════════════════════════════════════════════════ -->
+  <div class="g-section">
+    <div class="g-sec-hdr">
+      <div class="g-num">9</div>
+      <div><div class="g-sec-title">"How It Works" Modal</div><div class="g-sec-sub">Shown when user clicks "How it works" on the Connect WhatsApp card. Explains the Embedded Signup flow before they start.</div></div>
+      <div class="g-line"></div>
+    </div>
+    <div class="frames">
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Web · Desktop</div>
+        <div class="browser">
+          <div class="b-chrome"><div class="b-dots"><div class="bd bd-r"></div><div class="bd bd-y"></div><div class="bd bd-g"></div></div><div class="b-url">mycroshop.com/whatsapp-plans</div></div>
+          <div class="b-body"><div class="modal-bg" style="min-height:440px;background:rgba(0,0,0,.5)">
+            <div class="modal">
+              <div class="m-ico">💡</div>
+              <div class="m-h2">How Connecting Works</div>
+              <div class="m-p">Tapping <strong>Connect WhatsApp</strong> opens the Meta/WhatsApp Business signup flow in a popup. You'll log into Facebook, select your WhatsApp Business Account, and choose the phone number to connect.</div>
+              <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:18px">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 13px;background:var(--bg);border-radius:9px">
+                  <div style="width:26px;height:26px;background:var(--mc-blue);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:800;flex-shrink:0">1</div>
+                  <div style="font-size:12px"><strong>Log in with Facebook</strong> — use your business account</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 13px;background:var(--bg);border-radius:9px">
+                  <div style="width:26px;height:26px;background:var(--mc-blue);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:800;flex-shrink:0">2</div>
+                  <div style="font-size:12px"><strong>Select your WABA</strong> — create one if you don't have it</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 13px;background:var(--bg);border-radius:9px">
+                  <div style="width:26px;height:26px;background:var(--mc-blue);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:800;flex-shrink:0">3</div>
+                  <div style="font-size:12px"><strong>Choose your phone number</strong> — Mycroshop AI takes it from there</div>
+                </div>
+              </div>
+              <button class="pb pb-primary" style="margin-bottom:8px">Get Started →</button>
+              <button class="pb pb-ghost">Maybe Later</button>
+            </div>
+          </div></div>
+        </div>
+      </div>
+      <div class="dw">
+        <div class="dlbl"><div class="dlbl-dot"></div>Mobile</div>
+        <div class="phone-out"><div class="phone-in"><div class="notch"></div>
+          <div class="modal-bg bottom" style="min-height:660px;background:rgba(0,0,0,.55);align-items:flex-end">
+            <div class="modal sheet" style="padding:20px 18px">
+              <div style="width:36px;height:4px;background:#E5E7EB;border-radius:4px;margin:0 auto 16px"></div>
+              <div class="m-ico" style="width:40px;height:40px;font-size:19px">💡</div>
+              <div class="m-h2" style="font-size:16px">How Connecting Works</div>
+              <div class="m-p" style="font-size:11px">Tapping <strong>Connect WhatsApp</strong> opens Meta's signup flow. Log in, pick your number — done.</div>
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+                <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;background:var(--bg);border-radius:8px">
+                  <div style="width:24px;height:24px;background:var(--mc-blue);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:9px;font-weight:800;flex-shrink:0">1</div>
+                  <div style="font-size:11px"><strong>Log in with Facebook</strong></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;background:var(--bg);border-radius:8px">
+                  <div style="width:24px;height:24px;background:var(--mc-blue);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:9px;font-weight:800;flex-shrink:0">2</div>
+                  <div style="font-size:11px"><strong>Select your WABA</strong></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;background:var(--bg);border-radius:8px">
+                  <div style="width:24px;height:24px;background:var(--mc-blue);border-radius:50%;display:grid;place-items:center;color:#fff;font-size:9px;font-weight:800;flex-shrink:0">3</div>
+                  <div style="font-size:11px"><strong>Choose your phone number</strong></div>
+                </div>
+              </div>
+              <button class="pb pb-primary" style="font-size:12px;margin-bottom:7px">Get Started →</button>
+              <button class="pb pb-ghost" style="font-size:12px">Maybe Later</button>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
 
-// ── Subscribe modal ────────────────────────────────────────────────────────────
-function openSubModal(planId) {
-  const p = plans.find(x => x.id === planId);
-  if (!p) return;
-  selected = p;
-
-  const monthly = p.price_ngn;
-  const total   = calcPrice(monthly);
-  const disc    = DISC[selectedMonths] || 0;
-  const saving  = Math.round(monthly * selectedMonths - total);
-  const isUpgr  = subscription?.status === 'active';
-  const label   = isUpgr ? `Upgrade to ${p.name}` : `Subscribe to ${p.name}`;
-
-  document.getElementById('mTitle').textContent = label;
-  document.getElementById('mDesc').textContent  = "You'll be redirected to a secure Paystack checkout to complete payment.";
-  document.getElementById('mEmail').value       = localStorage.getItem('userEmail') || '';
-
-  // Populate billing breakdown
-  const bk = document.getElementById('mBreakdown');
-  bk.style.display = 'block';
-  document.getElementById('mBreakMonths').textContent  = `${fmtNgn(monthly)} × ${selectedMonths} month${selectedMonths > 1 ? 's' : ''}`;
-  document.getElementById('mBreakBase').textContent    = fmtNgn(monthly * selectedMonths);
-  const discRow = document.getElementById('mBreakDiscRow');
-  if (disc > 0) {
-    discRow.style.display = 'flex';
-    document.getElementById('mBreakDiscLabel').textContent = `${disc}% discount`;
-    document.getElementById('mBreakDiscAmt').textContent   = `−${fmtNgn(saving)}`;
-  } else {
-    discRow.style.display = 'none';
-  }
-  document.getElementById('mBreakTotal').textContent = fmtNgn(total);
-
-  const btn = document.getElementById('mPayBtn');
-  btn.textContent = isUpgr ? 'Pay & Upgrade' : 'Pay & Subscribe';
-  btn.disabled    = false;
-  document.getElementById('subModal').classList.add('open');
-  setTimeout(() => document.getElementById('mEmail').focus(), 80);
-}
-function closeSubModal() { document.getElementById('subModal').classList.remove('open'); selected = null; }
-
-async function doPayment() {
-  const email = document.getElementById('mEmail').value.trim();
-  if (!email || !email.includes('@')) { toast('Please enter a valid email address.', 'error'); return; }
-  if (!selected) return;
-
-  const btn = document.getElementById('mPayBtn');
-  btn.textContent = 'Initiating…';
-  btn.disabled    = true;
-
-  try {
-    const res  = await fetch(`${API_BASE}/subscribe`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
-      body: JSON.stringify({
-        plan_id:      selected.id,
-        email,
-        months:       selectedMonths,
-        callback_url: `${BASE_URL}/api/v1/whatsapp-plans/payment-callback`
-      })
-    });
-    const json = await res.json();
-
-    if (json.success && json.data?.authorization_url) {
-      toast('Redirecting to payment…', 'info');
-      window.location.href = json.data.authorization_url;
-    } else if (json.is_custom) {
-      closeSubModal(); openEntModal();
-    } else {
-      toast(json.message || 'Payment initiation failed. Please try again.', 'error');
-      btn.textContent = 'Pay & Subscribe';
-      btn.disabled    = false;
-    }
-  } catch (_) {
-    toast('Network error. Please try again.', 'error');
-    btn.textContent = 'Pay & Subscribe';
-    btn.disabled    = false;
-  }
-}
-
-// ── Enterprise modal ───────────────────────────────────────────────────────────
-function openEntModal()  { document.getElementById('entModal').classList.add('open'); }
-function closeEntModal() { document.getElementById('entModal').classList.remove('open'); }
-
-// ── How it works modal ─────────────────────────────────────────────────────────
-function openHowItWorksModal() { document.getElementById('howModal').classList.add('open'); }
-function closeHowModal()       { document.getElementById('howModal').classList.remove('open'); }
-
-// close overlays on backdrop click
-['subModal','entModal','howModal'].forEach(id => {
-  document.getElementById(id).addEventListener('click', e => {
-    if (e.target.id === id) document.getElementById(id).classList.remove('open');
-  });
-});
-
-// ── WhatsApp Embedded Signup ───────────────────────────────────────────────────
-let _embeddedWabaId       = null;
-let _embeddedPhoneNumId   = null;
-let _embeddedCode         = null;
-
-// Listen for WABA/phone data sent from the FB popup via postMessage
-window.addEventListener('message', (event) => {
-  if (event.origin !== 'https://www.facebook.com' &&
-      event.origin !== 'https://web.facebook.com') return;
-  try {
-    const data = JSON.parse(event.data);
-    if (data.type === 'WA_EMBEDDED_SIGNUP') {
-      if (data.event === 'FINISH' && data.data) {
-        _embeddedPhoneNumId = data.data.phone_number_id || null;
-        _embeddedWabaId     = data.data.waba_id         || null;
-      } else if (data.event === 'CANCEL') {
-        toast('WhatsApp connection cancelled.', 'info');
-      } else if (data.event === 'ERROR') {
-        toast('WhatsApp signup error: ' + (data.data?.error_message || 'Unknown error'), 'error');
-      }
-    }
-  } catch (_) {}
-});
-
-function startWhatsAppConnect() {
-  const token = getToken();
-  if (!token) { toast('Please log in to connect your WhatsApp number.', 'error'); return; }
-
-  if (typeof FB === 'undefined') {
-    toast('Facebook SDK is still loading. Please try again in a moment.', 'error');
-    return;
-  }
-
-  // Reset state for this attempt
-  _embeddedWabaId     = null;
-  _embeddedPhoneNumId = null;
-  _embeddedCode       = null;
-
-  FB.login((response) => {
-    if (!response.authResponse) {
-      toast('WhatsApp connection cancelled or failed.', 'error');
-      return;
-    }
-    _embeddedCode = response.authResponse.code;
-
-    // phone_number_id and waba_id arrive via the message listener above.
-    // Give the message event a moment to fire before sending to backend.
-    setTimeout(() => _submitEmbeddedSignup(token), 300);
-  }, {
-    scope: 'whatsapp_business_management,whatsapp_business_messaging',
-    extras: {
-      feature: 'whatsapp_embedded_signup',
-      sessionInfoVersion: '3',
-      ...(window._mcMetaConfigId ? { setup: { business: {} }, featureType: '', sessionInfoVersion: '3' } : {})
-    }
-  });
-}
-
-async function _submitEmbeddedSignup(token) {
-  if (!_embeddedCode) {
-    toast('Could not retrieve authorisation code from Meta. Please try again.', 'error');
-    return;
-  }
-  if (!_embeddedPhoneNumId) {
-    toast('Could not retrieve phone number from Meta. Please try again.', 'error');
-    return;
-  }
-
-  const btn = document.getElementById('connectWrap');
-  try {
-    const res  = await fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/embedded-signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        code:            _embeddedCode,
-        waba_id:         _embeddedWabaId,
-        phone_number_id: _embeddedPhoneNumId
-      })
-    });
-    const json = await res.json();
-
-    if (json.success) {
-      waConnected = true;
-      waPhone     = json.data.phone_number || _embeddedPhoneNumId;
-      toast('WhatsApp connected successfully!', 'success');
-      renderConnectSection();
-    } else {
-      toast(json.message || 'Connection failed. Please try again.', 'error');
-    }
-  } catch (_) {
-    toast('Network error. Please try again.', 'error');
-  }
-}
-
-// ── FAQ ────────────────────────────────────────────────────────────────────────
-function faq(btn) {
-  const ans    = btn.nextElementSibling;
-  const isOpen = ans.classList.contains('open');
-  document.querySelectorAll('.faq-a.open').forEach(a => a.classList.remove('open'));
-  document.querySelectorAll('.faq-q.open').forEach(b => b.classList.remove('open'));
-  if (!isOpen) { ans.classList.add('open'); btn.classList.add('open'); }
-}
-
-// ── Toast ──────────────────────────────────────────────────────────────────────
-function toast(msg, type = 'info') {
-  const c = document.getElementById('toasts');
-  const t = document.createElement('div');
-  t.className = `toast t-${type}`;
-  t.textContent = msg;
-  c.appendChild(t);
-  setTimeout(() => t.remove(), 4000);
-}
-
-// ── Payment return ─────────────────────────────────────────────────────────────
-function checkPaymentReturn() {
-  const p = new URLSearchParams(window.location.search).get('payment');
-  if (p === 'active')  toast('Payment successful! Your AI Sales Agent is now active.', 'success');
-  if (p === 'pending') toast('Payment received — activating your plan shortly.', 'info');
-}
-
-// ── Utils ──────────────────────────────────────────────────────────────────────
-function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-</script>
+</div>
 </body>
 </html>

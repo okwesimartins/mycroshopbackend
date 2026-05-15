@@ -127,22 +127,29 @@ async function getMySubscription(req, res) {
  * POST /api/v1/whatsapp-plans/subscribe
  * Initiate a Paystack payment to subscribe to or upgrade a WhatsApp AI plan.
  *
- * Body: { plan_id, email, callback_url? }
+ * Body: { plan_id, months?, email?, callback_url? }
+ *   - plan_id      required  — ID of the plan to subscribe to
+ *   - months       optional  — 1–12, default 1. Discount tiers: 3-5=5%, 6-8=10%, 9-11=15%, 12=20%
+ *   - email        optional  — falls back to the authenticated user's email from JWT
+ *   - callback_url optional  — Paystack redirect URL after payment; defaults to backend callback
  *
  * Behaviour:
- *   - No active sub   → charge full plan price, create new subscription
- *   - Active + same plan  → 400 "already on this plan"
- *   - Active + lower plan → 400 "downgrade not allowed mid-cycle"
- *   - Active + higher plan → pro-rated charge (remaining days × price diff), preserve period end
+ *   - No active sub       → charge full plan price (× months, minus discount)
+ *   - Active + same plan  → 400 already_on_plan
+ *   - Active + lower plan → 400 downgrade_not_allowed (available after period end)
+ *   - Active + higher plan → pro-rated charge for remaining days, plan switches immediately on webhook
  */
 async function subscribeToPlan(req, res) {
   try {
     const tenantId = req.user?.tenantId;
-    const { plan_id, email, callback_url } = req.body;
+    const { plan_id, callback_url } = req.body;
+
+    // email is optional — fall back to the authenticated user's email from the JWT
+    const email = req.body.email || req.user?.email;
 
     if (!tenantId) return res.status(401).json({ success: false, message: 'Unable to identify tenant from token' });
     if (!plan_id)  return res.status(400).json({ success: false, message: 'plan_id is required' });
-    if (!email)    return res.status(400).json({ success: false, message: 'email is required' });
+    if (!email)    return res.status(400).json({ success: false, message: 'email is required — pass it in the request body or ensure your token includes an email claim' });
 
     // Months: 1–12. Discount tiers: 3-5 = 5%, 6-8 = 10%, 9-11 = 15%, 12 = 20%
     const months = Math.min(12, Math.max(1, parseInt(req.body.months || 1, 10)));
