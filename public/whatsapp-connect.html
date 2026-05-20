@@ -298,40 +298,9 @@
   const BASE_URL   = window.location.origin;
   const urlParams  = new URLSearchParams(window.location.search);
   const AUTH_TOKEN = urlParams.get('token');
-  const OAUTH_CODE = urlParams.get('code');
-  const OAUTH_STATE = urlParams.get('state');
-
-  // ─── CALLBACK MODE: Facebook redirected back here after OAuth ────────────────
-  // When opened as a popup and Facebook sends ?code=...&state=...
-  if (OAUTH_CODE && OAUTH_STATE && window.opener) {
-    document.getElementById('mainContent').style.display = 'none';
-    document.querySelector('.wa-icon').style.display = 'none';
-    document.querySelector('.logo').insertAdjacentHTML('afterend',
-      '<p style="text-align:center;padding:40px 20px;color:#475569;font-size:14px">⏳ Completing WhatsApp connection…</p>'
-    );
-
-    fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/callback?code=${encodeURIComponent(OAUTH_CODE)}&state=${encodeURIComponent(OAUTH_STATE)}`)
-      .then(r => r.json())
-      .then(data => {
-        window.opener.postMessage(JSON.stringify({
-          type:            'WHATSAPP_OAUTH_RESULT',
-          success:         data.success,
-          phone_number:    data.data?.phone_number    || null,
-          phone_number_id: data.data?.phone_number_id || null,
-          error:           data.success ? null : (data.message || 'Connection failed')
-        }), window.location.origin);
-        window.close();
-      })
-      .catch(() => {
-        window.opener.postMessage(JSON.stringify({
-          type: 'WHATSAPP_OAUTH_RESULT', success: false, error: 'Network error during connection'
-        }), window.location.origin);
-        window.close();
-      });
-  }
 
   // ─── Validate token exists ───────────────────────────────────────────────────
-  if (!AUTH_TOKEN && !(OAUTH_CODE && OAUTH_STATE)) {
+  if (!AUTH_TOKEN) {
     document.getElementById('tokenError').classList.add('show');
     document.getElementById('mainContent').style.display = 'none';
   }
@@ -532,8 +501,8 @@
   // ─── Boot ────────────────────────────────────────────────────────────────────
   document.getElementById('connectBtn').addEventListener('click', startOAuthConnect);
 
-  if (AUTH_TOKEN && !(OAUTH_CODE && OAUTH_STATE)) {
-    validateSubscription(); // just gate-check; no SDK loading needed
+  if (AUTH_TOKEN) {
+    validateSubscription();
   }
 </script>
 

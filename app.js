@@ -8,6 +8,85 @@ require('dotenv').config();
 
 const app = express();
 
+// ── OAuth callback for WhatsApp popup flow ────────────────────────────────────
+// Registered BEFORE Helmet so no CSP header is set — inline script must run freely.
+// Facebook redirects the popup here after the user authorizes.
+app.get('/connect/whatsapp/callback', (_req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Connecting WhatsApp…</title>
+  <style>
+    body { margin:0; display:flex; align-items:center; justify-content:center;
+           min-height:100vh; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+           background:#f0f4ff; }
+    .card { background:#fff; border-radius:16px; padding:36px 28px; text-align:center;
+            box-shadow:0 4px 24px rgba(0,0,0,.10); max-width:340px; width:100%; }
+    .icon { font-size:36px; margin-bottom:12px; }
+    p { color:#475569; font-size:14px; margin:0; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="icon" id="icon">⏳</div>
+  <p id="msg">Completing WhatsApp connection…</p>
+</div>
+<script>
+(function () {
+  var p     = new URLSearchParams(window.location.search);
+  var code  = p.get('code');
+  var state = p.get('state') || '';
+  var err   = p.get('error');
+
+  function notify(payload) {
+    try {
+      if (window.opener) {
+        window.opener.postMessage(JSON.stringify(payload), window.location.origin);
+      }
+    } catch (_) {}
+    setTimeout(function () { window.close(); }, 800);
+  }
+
+  if (err || !code) {
+    document.getElementById('icon').textContent = '❌';
+    document.getElementById('msg').textContent  = 'Authorization was cancelled or denied.';
+    notify({ type: 'WHATSAPP_OAUTH_RESULT', success: false,
+             error: err || 'No authorization code received' });
+    return;
+  }
+
+  fetch('/api/v1/meta-connection/whatsapp/callback'
+    + '?code='  + encodeURIComponent(code)
+    + '&state=' + encodeURIComponent(state))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.success) {
+        document.getElementById('icon').textContent = '✅';
+        document.getElementById('msg').textContent  = 'WhatsApp connected! This window will close.';
+      } else {
+        document.getElementById('icon').textContent = '❌';
+        document.getElementById('msg').textContent  = data.message || 'Connection failed.';
+      }
+      notify({
+        type:            'WHATSAPP_OAUTH_RESULT',
+        success:         !!data.success,
+        phone_number:    (data.data && data.data.phone_number)    || null,
+        phone_number_id: (data.data && data.data.phone_number_id) || null,
+        error:           data.success ? null : (data.message || 'Connection failed')
+      });
+    })
+    .catch(function () {
+      document.getElementById('icon').textContent = '❌';
+      document.getElementById('msg').textContent  = 'Network error. Please try again.';
+      notify({ type: 'WHATSAPP_OAUTH_RESULT', success: false, error: 'Network error' });
+    });
+}());
+</script>
+</body>
+</html>`);
+});
+
 // Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" } // Allow serving images cross-origin

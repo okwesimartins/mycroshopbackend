@@ -101,10 +101,10 @@ async function initiateWhatsAppConnection(req, res) {
     const state = crypto.randomBytes(32).toString('hex');
     const stateWithTenant = `${state}:${req.user.tenantId}`;
     
-    // Meta OAuth redirect (must match Meta dashboard: Valid OAuth Redirect URIs)
-    const redirectUri = process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
+    // WhatsApp OAuth redirect URI — use dedicated var if set, else fall back to generic
+    const redirectUri = process.env.META_WHATSAPP_REDIRECT_URI || process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
     const appId = process.env.META_APP_ID;
-    
+
     // OAuth URL with business_management permission (required for WABA discovery)
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
       `client_id=${appId}` +
@@ -337,7 +337,7 @@ async function handleWhatsAppCallback(req, res) {
       }
     
     // Exchange code for access token (redirect_uri must match Meta dashboard exactly)
-      const redirectUri = process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
+      const redirectUri = process.env.META_WHATSAPP_REDIRECT_URI || process.env.META_OAUTH_REDIRECT_URI || 'https://mycroshop.com/';
       
       let tokenResponse;
       try {
