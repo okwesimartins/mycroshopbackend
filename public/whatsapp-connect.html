@@ -362,11 +362,11 @@
         initFBSDK();
       } else {
         showStatus('error', '⚠️', 'Configuration Error', 'Meta configuration is missing. Please contact support.');
-        disableButton();
+        blockButton();
       }
     } catch (err) {
       showStatus('error', '⚠️', 'Connection Error', 'Could not load configuration. Please check your internet connection and try again.');
-      disableButton();
+      blockButton();
     }
   }
 
@@ -442,6 +442,7 @@
       config_id:                       META_CONFIG_ID,
       response_type:                   'code',
       override_default_response_type:  true,
+      redirect_uri:                    `${BASE_URL}/connect/whatsapp`,
       extras: {
         setup:              {},
         featureType:        '',
@@ -559,6 +560,14 @@
     btn.disabled   = true;
     btn.style.background = '#10b981';
     btn.innerHTML  = `✓ ${label}`;
+  }
+
+  // Disables button in grey — used when config is missing (not a success state)
+  function blockButton() {
+    const btn = document.getElementById('connectBtn');
+    btn.disabled = true;
+    btn.style.background = '#94a3b8';
+    btn.innerHTML = 'Unavailable';
   }
 
   // ─── Boot ────────────────────────────────────────────────────────────────────
