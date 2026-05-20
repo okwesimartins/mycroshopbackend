@@ -31,11 +31,11 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 app.get('/connect/whatsapp', (_req, res) => {
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://connect.facebook.net",
+    "script-src 'self' 'unsafe-inline' https://connect.facebook.net https://web.facebook.com",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https://mycroshop.com",
-    "frame-src https://www.facebook.com",
-    "connect-src 'self' https://graph.facebook.com https://www.facebook.com",
+    "img-src 'self' data: https://mycroshop.com https://web.facebook.com https://www.facebook.com",
+    "frame-src https://www.facebook.com https://web.facebook.com",
+    "connect-src 'self' https://graph.facebook.com https://www.facebook.com https://web.facebook.com",
   ].join('; '));
   res.sendFile(path.join(__dirname, 'public', 'whatsapp-connect.html'));
 });
