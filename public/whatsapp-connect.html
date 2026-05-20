@@ -446,55 +446,83 @@
       resetButton();
     });
 
-    // ── Listen for result posted back by the popup ───────────────────────────────
+    // ── Listen for result using multiple channels ────────────────────────────────
     let resultReceived = false;
     let broadcastCh    = null;
+    let statusPoller   = null;
+    let closedPoller;
 
-    function processOAuthResult(msg) {
-      if (!msg || msg.type !== 'WHATSAPP_OAUTH_RESULT') return;
-      if (resultReceived) return;
-      resultReceived = true;
+    function cleanup() {
+      clearInterval(statusPoller);
       clearInterval(closedPoller);
       window.removeEventListener('message', handleOAuthResult);
       try { if (broadcastCh) { broadcastCh.close(); broadcastCh = null; } } catch (_) {}
-
-      if (msg.success) {
-        showStatus('success', '✅', 'WhatsApp Connected!',
-          'Your AI Sales Agent is now active. Customers can reach you on WhatsApp.');
-        if (msg.phone_number) {
-          document.getElementById('connectedPhone').textContent = `📱 ${msg.phone_number}`;
-        }
-        disableButton('Connected ✓');
-        notifyApp({ success: true, phone_number: msg.phone_number,
-                    phone_number_id: msg.phone_number_id });
-      } else {
-        showStatus('error', '❌', 'Connection Failed',
-          msg.error || 'Please try again.');
-        resetButton();
-      }
     }
 
-    // BroadcastChannel — primary channel; works when window.opener is severed by Facebook's COOP
+    function onSuccess(phone_number, phone_number_id) {
+      if (resultReceived) return;
+      resultReceived = true;
+      cleanup();
+      try { if (!popup.closed) popup.close(); } catch (_) {}
+      showStatus('success', '✅', 'WhatsApp Connected!',
+        'Your AI Sales Agent is now active. Customers can reach you on WhatsApp.');
+      if (phone_number) {
+        document.getElementById('connectedPhone').textContent = `📱 ${phone_number}`;
+      }
+      disableButton('Connected ✓');
+      notifyApp({ success: true, phone_number, phone_number_id });
+    }
+
+    function onFailure(errorMsg) {
+      if (resultReceived) return;
+      resultReceived = true;
+      cleanup();
+      showStatus('error', '❌', 'Connection Failed', errorMsg || 'Please try again.');
+      resetButton();
+    }
+
+    // Channel 1: Poll the backend status — most reliable, no cross-window messaging needed
+    statusPoller = setInterval(async () => {
+      try {
+        const r    = await fetch(`${BASE_URL}/api/v1/meta-connection/status`, {
+          headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+        });
+        const data = await r.json();
+        if (data.success && data.data?.whatsapp?.connected) {
+          onSuccess(data.data.whatsapp.phoneNumber, data.data.whatsapp.phoneNumberId);
+        }
+      } catch (_) {}
+    }, 2500);
+
+    // Channel 2: BroadcastChannel — works when window.opener is severed by Facebook's COOP
     try {
       broadcastCh = new BroadcastChannel('wa_oauth_result');
       broadcastCh.onmessage = function (ev) {
-        try { processOAuthResult(typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data); } catch (_) {}
+        try {
+          const msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+          if (!msg || msg.type !== 'WHATSAPP_OAUTH_RESULT') return;
+          if (msg.success) onSuccess(msg.phone_number, msg.phone_number_id);
+          else onFailure(msg.error);
+        } catch (_) {}
       };
     } catch (_) {}
 
-    // window.opener postMessage — fallback for older browsers / WebViews
+    // Channel 3: window.opener postMessage — fallback for older browsers / WebViews
     function handleOAuthResult(event) {
       if (event.origin !== BASE_URL) return;
-      try { processOAuthResult(JSON.parse(event.data)); } catch (_) {}
+      try {
+        const msg = JSON.parse(event.data);
+        if (!msg || msg.type !== 'WHATSAPP_OAUTH_RESULT') return;
+        if (msg.success) onSuccess(msg.phone_number, msg.phone_number_id);
+        else onFailure(msg.error);
+      } catch (_) {}
     }
     window.addEventListener('message', handleOAuthResult);
 
     // Detect if user closed the popup without completing
-    const closedPoller = setInterval(() => {
+    closedPoller = setInterval(() => {
       if (popup.closed && !resultReceived) {
-        clearInterval(closedPoller);
-        window.removeEventListener('message', handleOAuthResult);
-        try { if (broadcastCh) { broadcastCh.close(); broadcastCh = null; } } catch (_) {}
+        cleanup();
         showStatus('error', '❌', 'Connection Cancelled',
           'You closed the window before completing. Please try again.');
         resetButton();
