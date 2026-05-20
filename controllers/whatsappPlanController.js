@@ -739,9 +739,43 @@ async function useFollowUp(req, res) {
   }
 }
 
+/**
+ * GET /api/v1/whatsapp-plans/connect-link
+ * Returns the hosted WhatsApp embedded signup URL for the authenticated tenant.
+ * Requires an active subscription — returns 403 otherwise.
+ */
+async function getConnectLink(req, res) {
+  try {
+    const tenantId = req.user?.tenantId;
+    const sub = await getActiveSubscription(tenantId);
+    const now = new Date();
+    const isActive = sub && sub.status === 'active' &&
+      (!sub.current_period_end || new Date(sub.current_period_end) > now);
+
+    if (!isActive) {
+      return res.status(403).json({
+        success: false,
+        message: sub
+          ? 'Your WhatsApp AI Sales Agent plan has expired. Please renew your subscription.'
+          : 'An active WhatsApp AI Sales Agent subscription is required to connect WhatsApp.'
+      });
+    }
+
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    const backendUrl = (process.env.BACKEND_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+    const url = `${backendUrl}/connect/whatsapp?token=${encodeURIComponent(token)}`;
+
+    return res.json({ success: true, data: { url } });
+  } catch (err) {
+    console.error('getConnectLink error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to generate connect link' });
+  }
+}
+
 module.exports = {
   getPlans,
   getMySubscription,
+  getConnectLink,
   subscribeToPlan,
   cancelSubscription,
   handleWebhook,

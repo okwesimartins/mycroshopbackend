@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getPlans,
   getMySubscription,
+  getConnectLink,
   subscribeToPlan,
   cancelSubscription,
   handleWebhook,
@@ -25,6 +26,7 @@ router.post('/agent/use-followup', useFollowUp);
 
 // Authenticated routes (merchant dashboard)
 router.get('/my-subscription', authenticate, getMySubscription);
+router.get('/connect-link', authenticate, getConnectLink);
 router.post('/subscribe', authenticate, subscribeToPlan);
 router.post('/cancel', authenticate, cancelSubscription);
 

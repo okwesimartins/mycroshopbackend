@@ -202,6 +202,10 @@
     .already-connected {
       display: none;
     }
+
+    /* No subscription gate */
+    .sub-error { display: none; }
+    .sub-error.show { display: block; }
   </style>
 </head>
 <body>
@@ -227,6 +231,15 @@
       <span class="status-icon">🔒</span>
       <div class="status-title">Invalid or Missing Session</div>
       <div class="status-msg">This link is invalid or has expired. Please go back to the MycroShop app and try again.</div>
+    </div>
+  </div>
+
+  <!-- No Subscription State -->
+  <div class="sub-error" id="subError">
+    <div class="status error">
+      <span class="status-icon">📋</span>
+      <div class="status-title">No Active Plan</div>
+      <div class="status-msg" id="subErrorMsg">You need an active WhatsApp AI Sales Agent subscription to connect WhatsApp. Please subscribe from the MycroShop app.</div>
     </div>
   </div>
 
@@ -301,6 +314,41 @@
   if (!AUTH_TOKEN) {
     document.getElementById('tokenError').classList.add('show');
     document.getElementById('mainContent').style.display = 'none';
+  }
+
+  // ─── Check active WhatsApp subscription ──────────────────────────────────────
+  async function validateSubscription() {
+    try {
+      const res  = await fetch(`${BASE_URL}/api/v1/whatsapp-plans/my-subscription`, {
+        headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+      });
+      const json = await res.json();
+
+      if (!res.ok || !json.success) {
+        // Token invalid / expired
+        document.getElementById('tokenError').classList.add('show');
+        document.getElementById('mainContent').style.display = 'none';
+        return false;
+      }
+
+      const sub = json.data;
+      if (!sub || sub.status !== 'active') {
+        const msg = sub && sub.status === 'expired'
+          ? 'Your WhatsApp AI Sales Agent plan has expired. Please renew your subscription from the MycroShop app.'
+          : 'You need an active WhatsApp AI Sales Agent subscription to connect WhatsApp. Please subscribe from the MycroShop app.';
+        document.getElementById('subErrorMsg').textContent = msg;
+        document.getElementById('subError').classList.add('show');
+        document.getElementById('mainContent').style.display = 'none';
+        return false;
+      }
+
+      return true;
+    } catch (_) {
+      document.getElementById('subErrorMsg').textContent = 'Could not verify your subscription. Please check your connection and try again.';
+      document.getElementById('subError').classList.add('show');
+      document.getElementById('mainContent').style.display = 'none';
+      return false;
+    }
   }
 
   // ─── Load public Meta config (app_id + config_id) ───────────────────────────
@@ -515,7 +563,9 @@
 
   // ─── Boot ────────────────────────────────────────────────────────────────────
   if (AUTH_TOKEN) {
-    loadMetaConfig();
+    validateSubscription().then(valid => {
+      if (valid) loadMetaConfig();
+    });
   }
 </script>
 
