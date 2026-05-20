@@ -27,7 +27,16 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
 // WhatsApp connect page — short URL alias
+// Sets its own relaxed CSP: needs inline scripts, FB SDK, and external image
 app.get('/connect/whatsapp', (_req, res) => {
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://connect.facebook.net",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https://mycroshop.com",
+    "frame-src https://www.facebook.com",
+    "connect-src 'self' https://graph.facebook.com https://www.facebook.com",
+  ].join('; '));
   res.sendFile(path.join(__dirname, 'public', 'whatsapp-connect.html'));
 });
 
