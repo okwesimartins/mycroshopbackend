@@ -106,12 +106,15 @@ async function initiateWhatsAppConnection(req, res) {
     const appId = process.env.META_APP_ID;
 
     // OAuth URL with business_management permission (required for WABA discovery)
+    // display=popup tells Facebook to render the consent dialog (not redirect to the news feed)
+    // This is critical for mobile browsers where Facebook otherwise lands on the main site
     const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
       `client_id=${appId}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&state=${stateWithTenant}` +
       `&scope=business_management,whatsapp_business_management,whatsapp_business_messaging` +
-      `&response_type=code`;
+      `&response_type=code` +
+      `&display=popup`;
     
     res.json({
       success: true,

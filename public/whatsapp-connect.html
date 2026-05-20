@@ -519,15 +519,25 @@
     }
     window.addEventListener('message', handleOAuthResult);
 
-    // Detect if user closed the popup without completing
+    // Detect if user closed the tab/popup without completing.
+    // On mobile, window.open() opens a new tab. After OAuth the tab auto-closes,
+    // so we wait a few extra seconds for polling/BroadcastChannel to fire before
+    // declaring the connection cancelled.
     closedPoller = setInterval(() => {
       if (popup.closed && !resultReceived) {
-        cleanup();
-        showStatus('error', '❌', 'Connection Cancelled',
-          'You closed the window before completing. Please try again.');
-        resetButton();
+        clearInterval(closedPoller);
+        // Grace period: give status polling time to detect success
+        // (important on mobile where the tab closes right after the redirect)
+        setTimeout(() => {
+          if (!resultReceived) {
+            cleanup();
+            showStatus('error', '❌', 'Connection Cancelled',
+              'You closed the window before completing. Please try again.');
+            resetButton();
+          }
+        }, 6000);
       }
-    }, 600);
+    }, 800);
   }
 
   // ─── Notify the mobile app / WebView on completion ───────────────────────────
