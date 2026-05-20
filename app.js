@@ -23,6 +23,14 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files (uploads)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Serve public pages (e.g. WhatsApp embedded signup)
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
+// WhatsApp connect page — short URL alias
+app.get('/connect/whatsapp', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'whatsapp-connect.html'));
+});
+
 // Create upload directories if they don't exist
 const uploadDirs = ['uploads/logos', 'uploads/stores', 'uploads/services'];
 uploadDirs.forEach(dir => {
