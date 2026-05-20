@@ -40,12 +40,10 @@ app.get('/connect/whatsapp/callback', (_req, res) => {
   var err   = p.get('error');
 
   function notify(payload) {
-    try {
-      if (window.opener) {
-        window.opener.postMessage(JSON.stringify(payload), window.location.origin);
-      }
-    } catch (_) {}
-    setTimeout(function () { window.close(); }, 800);
+    var str = JSON.stringify(payload);
+    try { var bc = new BroadcastChannel('wa_oauth_result'); bc.postMessage(str); bc.close(); } catch (_) {}
+    try { if (window.opener) { window.opener.postMessage(str, window.location.origin); } } catch (_) {}
+    setTimeout(function () { window.close(); }, 1200);
   }
 
   if (err || !code) {
