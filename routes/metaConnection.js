@@ -13,6 +13,10 @@ router.get('/refresh-tokens', metaConnectionController.refreshExpiringTokensHand
 // Public config — returns META_APP_ID and META_CONFIG_ID for FB SDK init (no auth needed)
 router.get('/public-config', metaConnectionController.getPublicMetaConfig);
 
+// WhatsApp OAuth callback — public because Facebook redirects here without a JWT.
+// Tenant is identified from the state param (tenantId embedded by /whatsapp/connect).
+router.get('/whatsapp/callback', metaConnectionController.handleWhatsAppCallback);
+
 // All other routes require authentication
 router.use(authenticate);
 router.use(attachTenantDb);
@@ -23,9 +27,6 @@ router.get('/status', metaConnectionController.getConnectionStatus);
 
 // Initiate WhatsApp connection
 router.get('/whatsapp/connect', metaConnectionController.initiateWhatsAppConnection);
-
-// WhatsApp OAuth callback
-router.get('/whatsapp/callback', metaConnectionController.handleWhatsAppCallback);
 
 // Initiate Instagram connection
 router.get('/instagram/connect', metaConnectionController.initiateInstagramConnection);

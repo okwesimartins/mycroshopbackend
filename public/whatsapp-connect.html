@@ -293,25 +293,45 @@
 
 </div>
 
-<!-- FB SDK -->
 <script>
   // ─── Config ─────────────────────────────────────────────────────────────────
-  const BASE_URL = window.location.origin; // e.g. https://backend.mycroshop.com
-
-  // Read token from ?token= query param
+  const BASE_URL   = window.location.origin;
   const urlParams  = new URLSearchParams(window.location.search);
   const AUTH_TOKEN = urlParams.get('token');
+  const OAUTH_CODE = urlParams.get('code');
+  const OAUTH_STATE = urlParams.get('state');
 
-  // These are loaded from the public config endpoint at page load
-  let META_APP_ID    = null;
-  let META_CONFIG_ID = null;
+  // ─── CALLBACK MODE: Facebook redirected back here after OAuth ────────────────
+  // When opened as a popup and Facebook sends ?code=...&state=...
+  if (OAUTH_CODE && OAUTH_STATE && window.opener) {
+    document.getElementById('mainContent').style.display = 'none';
+    document.querySelector('.wa-icon').style.display = 'none';
+    document.querySelector('.logo').insertAdjacentHTML('afterend',
+      '<p style="text-align:center;padding:40px 20px;color:#475569;font-size:14px">⏳ Completing WhatsApp connection…</p>'
+    );
 
-  // Captured from FB SDK session listener
-  let capturedWabaId        = null;
-  let capturedPhoneNumberId = null;
+    fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/callback?code=${encodeURIComponent(OAUTH_CODE)}&state=${encodeURIComponent(OAUTH_STATE)}`)
+      .then(r => r.json())
+      .then(data => {
+        window.opener.postMessage(JSON.stringify({
+          type:            'WHATSAPP_OAUTH_RESULT',
+          success:         data.success,
+          phone_number:    data.data?.phone_number    || null,
+          phone_number_id: data.data?.phone_number_id || null,
+          error:           data.success ? null : (data.message || 'Connection failed')
+        }), window.location.origin);
+        window.close();
+      })
+      .catch(() => {
+        window.opener.postMessage(JSON.stringify({
+          type: 'WHATSAPP_OAUTH_RESULT', success: false, error: 'Network error during connection'
+        }), window.location.origin);
+        window.close();
+      });
+  }
 
   // ─── Validate token exists ───────────────────────────────────────────────────
-  if (!AUTH_TOKEN) {
+  if (!AUTH_TOKEN && !(OAUTH_CODE && OAUTH_STATE)) {
     document.getElementById('tokenError').classList.add('show');
     document.getElementById('mainContent').style.display = 'none';
   }
@@ -351,151 +371,90 @@
     }
   }
 
-  // ─── Load public Meta config (app_id + config_id) ───────────────────────────
-  async function loadMetaConfig() {
-    try {
-      const res  = await fetch(`${BASE_URL}/api/v1/meta-connection/public-config`);
-      const data = await res.json();
-      if (data.success && data.data.app_id && data.data.config_id) {
-        META_APP_ID    = data.data.app_id;
-        META_CONFIG_ID = data.data.config_id;
-        initFBSDK();
-      } else {
-        showStatus('error', '⚠️', 'Configuration Error', 'Meta configuration is missing. Please contact support.');
-        blockButton();
-      }
-    } catch (err) {
-      showStatus('error', '⚠️', 'Connection Error', 'Could not load configuration. Please check your internet connection and try again.');
-      blockButton();
-    }
-  }
+  // ─── Start OAuth popup flow ──────────────────────────────────────────────────
+  // window.open() is called synchronously so the browser won't block the popup.
+  // The async authUrl fetch happens after, then we navigate the already-open popup.
+  function startOAuthConnect() {
+    // Open blank popup immediately (sync — no popup blocker)
+    const popup = window.open('', 'WhatsApp Connect',
+      'width=620,height=720,scrollbars=yes,resizable=yes,toolbar=no,menubar=no');
 
-  // ─── Initialize FB JS SDK ───────────────────────────────────────────────────
-  function initFBSDK() {
-    window.fbAsyncInit = function () {
-      FB.init({
-        appId:   META_APP_ID,
-        cookie:  true,
-        xfbml:   true,
-        version: 'v18.0'
-      });
-    };
-
-    // Load the SDK script
-    (function (d, s, id) {
-      if (d.getElementById(id)) return;
-      var js = d.createElement(s);
-      js.id  = id;
-      js.src = 'https://connect.facebook.net/en_US/sdk.js';
-      d.getElementsByTagName('head')[0].appendChild(js);
-    }(document, 'script', 'facebook-jssdk'));
-  }
-
-  // ─── Session info listener — captures WABA ID + phone number ID ─────────────
-  // This must be registered BEFORE FB.login() is called
-  function registerSessionListener() {
-    window.addEventListener('message', function (event) {
-      if (event.origin !== 'https://www.facebook.com') return;
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'WA_EMBEDDED_SIGNUP') {
-          if (data.event === 'FINISH') {
-            capturedWabaId        = data.data?.waba_id        || null;
-            capturedPhoneNumberId = data.data?.phone_number_id || null;
-          }
-          if (data.event === 'CANCEL') {
-            showStatus('error', '❌', 'Connection Cancelled', 'You closed the WhatsApp setup window. Click the button to try again.');
-            resetButton();
-          }
-          if (data.event === 'ERROR') {
-            showStatus('error', '❌', 'Setup Error', data.data?.error_message || 'An error occurred during setup. Please try again.');
-            resetButton();
-          }
-        }
-      } catch (_) {}
-    });
-  }
-
-  // ─── Main: Start embedded signup ─────────────────────────────────────────────
-  // Called directly on button click — NO async before FB.login()
-  function startEmbeddedSignup() {
-    if (!META_CONFIG_ID || !META_APP_ID) {
-      showStatus('error', '⚠️', 'Not Ready', 'Configuration is still loading. Please wait a moment and try again.');
+    if (!popup) {
+      showStatus('error', '❌', 'Popup Blocked',
+        'Please allow popups for this site in your browser, then try again.');
       return;
     }
 
     setButtonLoading(true);
-    registerSessionListener();
+    popup.document.write(
+      '<html><body style="display:flex;align-items:center;justify-content:center;' +
+      'height:100vh;font-family:sans-serif;color:#475569">' +
+      '<p>⏳ Loading WhatsApp connection…</p></body></html>'
+    );
 
-    // FB.login MUST be the first thing called after user clicks
-    FB.login(function (response) {
-      if (response.authResponse && response.authResponse.code) {
-        const code = response.authResponse.code;
-        // Now do the async work after we have the code
-        completeSignup(code);
+    // Fetch the OAuth URL (requires auth)
+    fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/connect`, {
+      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success && data.data?.authUrl) {
+        popup.location.href = data.data.authUrl;
       } else {
-        // User closed popup without completing
-        showStatus('error', '❌', 'Connection Cancelled', 'You closed the window before completing. Please try again.');
+        popup.close();
+        showStatus('error', '❌', 'Failed to Start',
+          data.message || 'Could not generate the connection URL. Please try again.');
         resetButton();
       }
-    }, {
-      config_id:                       META_CONFIG_ID,
-      response_type:                   'code',
-      override_default_response_type:  true,
-      redirect_uri:                    `${BASE_URL}/connect/whatsapp`,
-      extras: {
-        setup:              {},
-        featureType:        '',
-        sessionInfoVersion: '3'
-      }
-    });
-  }
-
-  // ─── Send code + IDs to backend ──────────────────────────────────────────────
-  async function completeSignup(code) {
-    showStatus('loading', '⏳', 'Connecting...', 'Verifying your WhatsApp Business account. Please wait.');
-
-    try {
-      const res = await fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/embedded-signup`, {
-        method:  'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${AUTH_TOKEN}`
-        },
-        body: JSON.stringify({
-          code,
-          waba_id:         capturedWabaId        || undefined,
-          phone_number_id: capturedPhoneNumberId || undefined
-        })
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        const phone = data.data?.phone_number || '';
-        showStatus(
-          'success',
-          '✅',
-          'WhatsApp Connected Successfully!',
-          'Your AI Sales Agent is now active. Customers can reach you on WhatsApp and the AI will handle their queries automatically.'
-        );
-        if (phone) {
-          document.getElementById('connectedPhone').textContent = `📱 ${phone}`;
-        }
-        disableButton('Connected ✓');
-
-        // Notify mobile app via URL scheme / postMessage if opened in WebView
-        notifyApp({ success: true, phone_number: phone, phone_number_id: capturedPhoneNumberId });
-
-      } else {
-        const errMsg = data.message || 'Connection failed. Please try again.';
-        showStatus('error', '❌', 'Connection Failed', errMsg);
-        resetButton();
-      }
-    } catch (err) {
-      showStatus('error', '❌', 'Network Error', 'Could not reach the server. Please check your internet connection and try again.');
+    })
+    .catch(() => {
+      popup.close();
+      showStatus('error', '❌', 'Network Error', 'Could not reach the server. Please try again.');
       resetButton();
+    });
+
+    // ── Listen for result posted back by the popup (callback mode) ──
+    let resultReceived = false;
+
+    function handleOAuthResult(event) {
+      if (event.origin !== BASE_URL) return;
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type !== 'WHATSAPP_OAUTH_RESULT') return;
+
+        resultReceived = true;
+        clearInterval(closedPoller);
+        window.removeEventListener('message', handleOAuthResult);
+
+        if (msg.success) {
+          showStatus('success', '✅', 'WhatsApp Connected!',
+            'Your AI Sales Agent is now active. Customers can reach you on WhatsApp.');
+          if (msg.phone_number) {
+            document.getElementById('connectedPhone').textContent = `📱 ${msg.phone_number}`;
+          }
+          disableButton('Connected ✓');
+          notifyApp({ success: true, phone_number: msg.phone_number,
+                      phone_number_id: msg.phone_number_id });
+        } else {
+          showStatus('error', '❌', 'Connection Failed',
+            msg.error || 'Please try again.');
+          resetButton();
+        }
+      } catch (_) {}
     }
+
+    window.addEventListener('message', handleOAuthResult);
+
+    // Fallback: user closed popup without completing
+    const closedPoller = setInterval(() => {
+      if (popup.closed && !resultReceived) {
+        clearInterval(closedPoller);
+        window.removeEventListener('message', handleOAuthResult);
+        showStatus('error', '❌', 'Connection Cancelled',
+          'You closed the window before completing. Please try again.');
+        resetButton();
+      }
+    }, 600);
   }
 
   // ─── Notify the mobile app / WebView on completion ───────────────────────────
@@ -571,12 +530,10 @@
   }
 
   // ─── Boot ────────────────────────────────────────────────────────────────────
-  document.getElementById('connectBtn').addEventListener('click', startEmbeddedSignup);
+  document.getElementById('connectBtn').addEventListener('click', startOAuthConnect);
 
-  if (AUTH_TOKEN) {
-    validateSubscription().then(valid => {
-      if (valid) loadMetaConfig();
-    });
+  if (AUTH_TOKEN && !(OAUTH_CODE && OAUTH_STATE)) {
+    validateSubscription(); // just gate-check; no SDK loading needed
   }
 </script>
 
