@@ -295,12 +295,76 @@
 
 <script>
   // ─── Config ─────────────────────────────────────────────────────────────────
-  const BASE_URL   = window.location.origin;
-  const urlParams  = new URLSearchParams(window.location.search);
+  const BASE_URL  = window.location.origin;
+  const urlParams = new URLSearchParams(window.location.search);
+
+  // ─── OAuth callback mode (Facebook redirected the popup here with ?code=) ────
+  // Handles the case where META_OAUTH_REDIRECT_URI still points to /connect/whatsapp
+  // instead of /connect/whatsapp/callback. Works as a drop-in fallback.
+  (function () {
+    var code  = urlParams.get('code');
+    var err   = urlParams.get('error');
+    var state = urlParams.get('state') || '';
+    if (!code && !err) return; // normal page load — skip callback logic
+
+    document.body.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;' +
+      'min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;background:#f0f4ff">' +
+      '<div style="background:#fff;border-radius:16px;padding:36px 28px;text-align:center;' +
+      'box-shadow:0 4px 24px rgba(0,0,0,.10);max-width:340px;width:100%">' +
+      '<div id="cbIcon" style="font-size:36px;margin-bottom:12px">⏳</div>' +
+      '<p id="cbMsg" style="color:#475569;font-size:14px;margin:0">Completing WhatsApp connection…</p>' +
+      '</div></div>';
+
+    function notifyOpener(payload) {
+      try {
+        if (window.opener) {
+          window.opener.postMessage(JSON.stringify(payload), window.location.origin);
+        }
+      } catch (_) {}
+      setTimeout(function () { window.close(); }, 800);
+    }
+
+    if (err || !code) {
+      document.getElementById('cbIcon').textContent = '❌';
+      document.getElementById('cbMsg').textContent  = 'Authorization was cancelled or denied.';
+      notifyOpener({ type: 'WHATSAPP_OAUTH_RESULT', success: false,
+                     error: err || 'No authorization code received' });
+      return;
+    }
+
+    fetch('/api/v1/meta-connection/whatsapp/callback'
+      + '?code='  + encodeURIComponent(code)
+      + '&state=' + encodeURIComponent(state))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success) {
+          document.getElementById('cbIcon').textContent = '✅';
+          document.getElementById('cbMsg').textContent  = 'WhatsApp connected! This window will close.';
+        } else {
+          document.getElementById('cbIcon').textContent = '❌';
+          document.getElementById('cbMsg').textContent  = data.message || 'Connection failed.';
+        }
+        notifyOpener({
+          type:            'WHATSAPP_OAUTH_RESULT',
+          success:         !!data.success,
+          phone_number:    (data.data && data.data.phone_number)    || null,
+          phone_number_id: (data.data && data.data.phone_number_id) || null,
+          error:           data.success ? null : (data.message || 'Connection failed')
+        });
+      })
+      .catch(function () {
+        document.getElementById('cbIcon').textContent = '❌';
+        document.getElementById('cbMsg').textContent  = 'Network error. Please try again.';
+        notifyOpener({ type: 'WHATSAPP_OAUTH_RESULT', success: false, error: 'Network error' });
+      });
+  })();
+
+  // ─── Normal page mode — only runs when ?code= / ?error= are absent ───────────
   const AUTH_TOKEN = urlParams.get('token');
 
   // ─── Validate token exists ───────────────────────────────────────────────────
-  if (!AUTH_TOKEN) {
+  if (!AUTH_TOKEN && !urlParams.get('code') && !urlParams.get('error')) {
     document.getElementById('tokenError').classList.add('show');
     document.getElementById('mainContent').style.display = 'none';
   }
