@@ -27,16 +27,17 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
 // WhatsApp connect page — short URL alias
-// Sets its own relaxed CSP: needs inline scripts, FB SDK, and external image
+// removeHeader clears Helmet's CSP first — Apache throws 500 on duplicate CSP headers
 app.get('/connect/whatsapp', (_req, res) => {
-  res.setHeader('Content-Security-Policy', [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://connect.facebook.net",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https://mycroshop.com",
-    "frame-src https://www.facebook.com",
-    "connect-src 'self' https://graph.facebook.com https://www.facebook.com",
-  ].join('; '));
+  res.removeHeader('Content-Security-Policy');
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' https://connect.facebook.net https://web.facebook.com; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: https://mycroshop.com https://www.facebook.com https://web.facebook.com; " +
+    "frame-src https://www.facebook.com https://web.facebook.com; " +
+    "connect-src 'self' https://graph.facebook.com https://www.facebook.com https://web.facebook.com"
+  );
   res.sendFile(path.join(__dirname, 'public', 'whatsapp-connect.html'));
 });
 
