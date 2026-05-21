@@ -338,6 +338,7 @@ async function checkoutDomain(req, res) {
       years: years,
       online_store_id: online_store_id || null,
       purchase_type: 'domain',
+      tenant_id: tenantId,
       registrant_info: {
         firstName,
         lastName,

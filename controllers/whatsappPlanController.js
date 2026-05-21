@@ -2,6 +2,10 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { WhatsAppPlan, WhatsAppSubscription } = require('../config/tenant');
 const { getPlatformSettingValue } = require('./platformSettingsController');
+const { completeDomainPurchase } = require('./domainController');
+const { getTenantConnection } = require('../config/database');
+const { getTenantById } = require('../config/tenant');
+const initializeModels = require('../models');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -142,7 +146,7 @@ async function getMySubscription(req, res) {
 async function subscribeToPlan(req, res) {
   try {
     const tenantId = req.user?.tenantId;
-    const { plan_id, callback_url } = req.body;
+    const { plan_id, redirect_url } = req.body;
 
     // email is optional — fall back to the authenticated user's email from the JWT
     const email = req.body.email || req.user?.email;
@@ -267,9 +271,13 @@ async function subscribeToPlan(req, res) {
     }
 
     const reference  = generateRef(tenantId, plan.slug);
-    const callbackUrl = callback_url ||
-      process.env.WHATSAPP_PLAN_CALLBACK_URL ||
-      `${process.env.BASE_URL || 'https://backend.mycroshop.com'}/api/v1/whatsapp-plans/payment-callback`;
+    // Always route through our backend callback so we can track status.
+    // Append redirect_to so paymentCallback knows where to send the user afterwards.
+    const backendBase   = (process.env.BASE_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+    const backendCb     = `${backendBase}/api/v1/whatsapp-plans/payment-callback`;
+    const callbackUrl   = redirect_url
+      ? `${backendCb}?redirect_to=${encodeURIComponent(redirect_url)}`
+      : (process.env.WHATSAPP_PLAN_CALLBACK_URL || backendCb);
 
     // ── Upsert subscription record ────────────────────────────────────────────
     // For upgrades: only update the reference — keep plan_id/status unchanged until payment confirmed.
@@ -393,7 +401,8 @@ async function cancelSubscription(req, res) {
  */
 async function handleWebhook(req, res) {
   try {
-    const secretKey = await getPlatformSettingValue('paystack_secret_key');
+    let secretKey = await getPlatformSettingValue('paystack_secret_key');
+    if (!secretKey) secretKey = process.env.PAYSTACK_SECRET_KEY;
     if (!secretKey) {
       return res.status(500).send('Webhook configuration error');
     }
@@ -417,13 +426,75 @@ async function handleWebhook(req, res) {
 
     const data = event.data || {};
     const metadata = data.metadata || {};
+    const reference = data.reference;
 
-    // Only handle whatsapp_plan payments
-    if (metadata.payment_type !== 'whatsapp_plan') return;
+    const isWhatsAppPlan = ['whatsapp_plan', 'whatsapp_plan_upgrade'].includes(metadata.payment_type);
+    const isDomainPurchase = metadata.purchase_type === 'domain';
 
+    if (!isWhatsAppPlan && !isDomainPurchase) return;
+
+    // ── Domain purchase handler ───────────────────────────────────────────────
+    if (isDomainPurchase) {
+      const tenantId = parseInt(metadata.tenant_id, 10);
+      if (!tenantId || !metadata.domain_id || !reference) {
+        console.warn('Domain purchase webhook: missing metadata', metadata);
+        return;
+      }
+
+      const domainData = {
+        domain_id:       metadata.domain_id,
+        domain_name:     metadata.domain_name,
+        years:           metadata.years || 1,
+        online_store_id: metadata.online_store_id || null,
+        registrant_info: metadata.registrant_info || {}
+      };
+
+      let tenantSequelize;
+      let models;
+      try {
+        const tenant = await getTenantById(tenantId);
+        if (!tenant) {
+          console.warn(`Domain purchase webhook: tenant not found: ${tenantId}`);
+          return;
+        }
+        tenantSequelize = await getTenantConnection(tenantId, tenant.subscription_plan || 'enterprise');
+        models = initializeModels(tenantSequelize);
+      } catch (connErr) {
+        console.error(`Domain purchase webhook: failed to get tenant DB for tenant ${tenantId}:`, connErr.message);
+        return;
+      }
+
+      const txn = await tenantSequelize.transaction();
+      try {
+        await completeDomainPurchase(domainData, models, txn);
+
+        if (models.PaymentTransaction) {
+          await models.PaymentTransaction.update(
+            { status: 'completed' },
+            { where: { transaction_reference: reference }, transaction: txn }
+          );
+        }
+
+        await txn.commit();
+        console.log(`✅ Domain purchase activated via webhook: ${domainData.domain_name} (tenant: ${tenantId}, ref: ${reference})`);
+      } catch (domainErr) {
+        await txn.rollback();
+        console.error(`❌ Domain purchase webhook failed for ${domainData.domain_name}:`, domainErr.message);
+        try {
+          if (models.PaymentTransaction) {
+            await models.PaymentTransaction.update(
+              { status: 'failed' },
+              { where: { transaction_reference: reference } }
+            );
+          }
+        } catch (_) {}
+      }
+      return;
+    }
+
+    // ── WhatsApp plan handler ─────────────────────────────────────────────────
     const tenantId = parseInt(metadata.tenant_id, 10);
     const planId = parseInt(metadata.plan_id, 10);
-    const reference = data.reference;
 
     if (!tenantId || !planId || !reference) {
       console.warn('WhatsApp plan webhook: missing metadata', metadata);
@@ -502,22 +573,29 @@ async function handleWebhook(req, res) {
  * Paystack redirects here after payment. Redirects the user to the dashboard.
  */
 async function paymentCallback(req, res) {
-  const { reference, trxref } = req.query;
+  const { reference, trxref, redirect_to } = req.query;
   const ref = reference || trxref || '';
 
-  // Find subscription for this reference to determine status
   let status = 'unknown';
   try {
     if (ref) {
       const sub = await WhatsAppSubscription.findOne({ where: { paystack_reference: ref } });
       if (sub) status = sub.status;
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (_) {}
 
-  const frontendUrl = process.env.FRONTEND_URL || 'https://app.mycroshop.com';
-  return res.redirect(`${frontendUrl}/dashboard/whatsapp-ai?payment=${status}&ref=${encodeURIComponent(ref)}`);
+  // Build final redirect URL — custom redirect_to takes priority over FRONTEND_URL default
+  const base = redirect_to || `${process.env.FRONTEND_URL || 'https://app.mycroshop.com'}/dashboard/whatsapp-ai`;
+  try {
+    const url = new URL(base);
+    url.searchParams.set('payment', status);
+    url.searchParams.set('ref', ref);
+    return res.redirect(url.toString());
+  } catch (_) {
+    // base is a relative path — prepend frontend origin
+    const origin = process.env.FRONTEND_URL || 'https://app.mycroshop.com';
+    return res.redirect(`${origin}${base}?payment=${status}&ref=${encodeURIComponent(ref)}`);
+  }
 }
 
 // ─── Follow-up Usage Tracking ─────────────────────────────────────────────────
