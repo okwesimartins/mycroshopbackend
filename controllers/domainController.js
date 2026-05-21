@@ -421,16 +421,13 @@ async function checkoutDomain(req, res) {
       // Use MycroShop's Paystack secret key directly (from .env)
       const secretKey = paystackSecretKey;
       
-      // Build final callback URL
-      const defaultCallbackUrl = callback_url 
-        || process.env.FRONTEND_URL 
-        || process.env.BASE_URL 
-        || 'https://backend.mycroshop.com';
-      const finalCallbackUrl = callback_url 
-        ? callback_url 
-        : (defaultCallbackUrl.includes('/payment/callback') 
-            ? defaultCallbackUrl 
-            : `${defaultCallbackUrl}/payment/callback`);
+      // Route through backend callback so status/ref params are appended before redirect.
+      // callback_url (from request body) is treated as the final frontend destination.
+      const backendBase = (process.env.BASE_URL || 'https://backend.mycroshop.com').replace(/\/$/, '');
+      const backendCb = `${backendBase}/api/v1/whatsapp-plans/payment-callback?tenant_id=${tenantId}`;
+      const finalCallbackUrl = callback_url
+        ? `${backendCb}&redirect_to=${encodeURIComponent(callback_url)}`
+        : backendCb;
 
       // Import payment functions from paymentController
       const paymentController = require('./paymentController');

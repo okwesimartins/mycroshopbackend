@@ -573,12 +573,29 @@ async function handleWebhook(req, res) {
  * Paystack redirects here after payment. Redirects the user to the dashboard.
  */
 async function paymentCallback(req, res) {
-  const { reference, trxref, redirect_to } = req.query;
+  const { reference, trxref, redirect_to, tenant_id } = req.query;
   const ref = reference || trxref || '';
 
   let status = 'unknown';
   try {
-    if (ref) {
+    if (ref && tenant_id) {
+      // Domain purchase — look up PaymentTransaction in the tenant DB
+      const tenantIdInt = parseInt(tenant_id, 10);
+      if (tenantIdInt) {
+        const tenant = await getTenantById(tenantIdInt);
+        if (tenant) {
+          const seq = await getTenantConnection(tenantIdInt, tenant.subscription_plan || 'enterprise');
+          const models = initializeModels(seq);
+          if (models.PaymentTransaction) {
+            const txn = await models.PaymentTransaction.findOne({
+              where: { transaction_reference: ref }
+            });
+            if (txn) status = txn.status;
+          }
+        }
+      }
+    } else if (ref) {
+      // WhatsApp plan — look up subscription
       const sub = await WhatsAppSubscription.findOne({ where: { paystack_reference: ref } });
       if (sub) status = sub.status;
     }
