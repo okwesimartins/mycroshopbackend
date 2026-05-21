@@ -318,11 +318,28 @@
 
     function notifyOpener(payload) {
       var str = JSON.stringify(payload);
-      // BroadcastChannel works even when window.opener is severed by Facebook's COOP headers
       try { var bc = new BroadcastChannel('wa_oauth_result'); bc.postMessage(str); bc.close(); } catch (_) {}
-      // Keep postMessage as fallback for older browsers / WebViews
       try { if (window.opener) { window.opener.postMessage(str, window.location.origin); } } catch (_) {}
-      setTimeout(function () { window.close(); }, 1200);
+
+      if (window.opener) {
+        // Desktop popup: close after message is delivered
+        setTimeout(function () { window.close(); }, 1200);
+      } else {
+        // Mobile full-page flow: redirect back to connect page with stored token
+        var token = '';
+        try {
+          token = localStorage.getItem('wa_oauth_return_token') || '';
+          if (token) localStorage.removeItem('wa_oauth_return_token');
+        } catch (_) {}
+        setTimeout(function () {
+          if (token) {
+            window.location.href = '/connect/whatsapp?token=' + encodeURIComponent(token);
+          } else {
+            var m = document.getElementById('cbMsg');
+            if (m) m.textContent = 'Done! You can close this tab.';
+          }
+        }, 1500);
+      }
     }
 
     if (err || !code) {
@@ -404,11 +421,40 @@
     }
   }
 
-  // ─── Start OAuth popup flow ──────────────────────────────────────────────────
-  // window.open() is called synchronously so the browser won't block the popup.
-  // The async authUrl fetch happens after, then we navigate the already-open popup.
+  // ─── OAuth flow — desktop uses popup, mobile uses full-page redirect ─────────
+  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   function startOAuthConnect() {
-    // Open blank popup immediately (sync — no popup blocker)
+    if (isMobile) { startOAuthMobile(); } else { startOAuthDesktop(); }
+  }
+
+  // Mobile: navigate the current tab directly to Facebook.
+  // window.open() on mobile opens a detached tab with no referrer, causing Facebook
+  // to land on the news feed instead of the OAuth dialog. Direct navigation fixes this.
+  function startOAuthMobile() {
+    setButtonLoading(true);
+    fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/connect`, {
+      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success && data.data?.authUrl) {
+        try { localStorage.setItem('wa_oauth_return_token', AUTH_TOKEN); } catch (_) {}
+        window.location.href = data.data.authUrl;  // leave current tab for Facebook
+      } else {
+        showStatus('error', '❌', 'Failed to Start',
+          data.message || 'Could not generate the connection URL. Please try again.');
+        resetButton();
+      }
+    })
+    .catch(() => {
+      showStatus('error', '❌', 'Network Error', 'Could not reach the server. Please try again.');
+      resetButton();
+    });
+  }
+
+  // Desktop: popup window (opened synchronously to avoid popup blockers)
+  function startOAuthDesktop() {
     const popup = window.open('', 'WhatsApp Connect',
       'width=620,height=720,scrollbars=yes,resizable=yes,toolbar=no,menubar=no');
 
@@ -425,7 +471,6 @@
       '<p>⏳ Loading WhatsApp connection…</p></body></html>'
     );
 
-    // Fetch the OAuth URL (requires auth)
     fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/connect`, {
       headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
     })
