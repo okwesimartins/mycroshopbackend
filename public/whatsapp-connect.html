@@ -198,14 +198,35 @@
       gap: 5px;
     }
 
-    /* Already connected state */
-    .already-connected {
-      display: none;
-    }
-
     /* No subscription gate */
     .sub-error { display: none; }
     .sub-error.show { display: block; }
+
+    /* Already-connected action buttons */
+    .action-btn {
+      width: 100%;
+      padding: 14px 24px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.2s, transform 0.1s;
+      margin-bottom: 10px;
+    }
+    .action-btn.primary { background: #25D366; color: #fff; }
+    .action-btn.primary:hover { background: #1ebe5a; }
+    .action-btn.secondary {
+      background: #fff;
+      color: #0f172a;
+      border: 2px solid #e2e8f0;
+    }
+    .action-btn.secondary:hover { background: #f8fafc; }
+    .action-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
   </style>
 </head>
 <body>
@@ -243,8 +264,21 @@
     </div>
   </div>
 
+  <!-- Already Connected State -->
+  <div id="alreadyConnectedState" style="display:none">
+    <div class="status success" style="display:block;margin-bottom:20px">
+      <span class="status-icon">✅</span>
+      <div class="status-title">WhatsApp Connected</div>
+      <div class="status-msg">Your AI Sales Agent is active on this number.</div>
+      <div class="connected-phone" id="currentConnectedPhone" style="margin-top:6px"></div>
+    </div>
+    <button id="reconnectBtn" class="action-btn primary">🔄 Reconnect WhatsApp</button>
+    <button id="changeNumberBtn" class="action-btn secondary">📱 Change WhatsApp Number</button>
+    <p class="security-note" style="margin-top:16px">🔒 Secured connection · Your data stays private</p>
+  </div>
+
   <!-- Main Content (shown when token is valid) -->
-  <div id="mainContent">
+  <div id="mainContent" style="display:none">
     <h1>Connect WhatsApp Business</h1>
     <p class="subtitle">
       Link your WhatsApp Business number to MycroShop to enable your AI Sales Agent and receive orders directly via WhatsApp.
@@ -421,6 +455,36 @@
     }
   }
 
+  // ─── Check current connection status and show correct UI ────────────────────
+  async function checkConnectionStatus() {
+    try {
+      const r    = await fetch(`${BASE_URL}/api/v1/meta-connection/status`, {
+        headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+      });
+      const data = await r.json();
+      if (data.success && data.data?.whatsapp?.connected) {
+        // Show the "already connected" panel instead of the connect form
+        document.getElementById('mainContent').style.display        = 'none';
+        document.getElementById('alreadyConnectedState').style.display = 'block';
+        const phone = data.data.whatsapp.phoneNumber;
+        if (phone) {
+          document.getElementById('currentConnectedPhone').textContent = `📱 ${phone}`;
+        }
+      } else {
+        document.getElementById('mainContent').style.display = 'block';
+      }
+    } catch (_) {
+      document.getElementById('mainContent').style.display = 'block';
+    }
+  }
+
+  // ─── Switch from "already connected" panel to the OAuth connect form ─────────
+  function switchToOAuthFlow() {
+    document.getElementById('alreadyConnectedState').style.display = 'none';
+    document.getElementById('mainContent').style.display           = 'block';
+    startOAuthConnect();
+  }
+
   // ─── OAuth flow — desktop uses popup, mobile uses full-page redirect ─────────
   const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -526,15 +590,30 @@
       resetButton();
     }
 
-    // Channel 1: Poll the backend status — most reliable, no cross-window messaging needed
+    // Channel 1: Poll the backend status.
+    // Only fires success when the phoneNumberId CHANGES — prevents detecting a
+    // pre-existing connection as a new one when the user clicks Reconnect.
+    let initialPhoneNumberId = undefined; // undefined = still fetching
+    fetch(`${BASE_URL}/api/v1/meta-connection/status`, {
+      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+    })
+    .then(r => r.json())
+    .then(d => { initialPhoneNumberId = d.data?.whatsapp?.phoneNumberId || null; })
+    .catch(() => { initialPhoneNumberId = null; });
+
     statusPoller = setInterval(async () => {
+      if (initialPhoneNumberId === undefined) return; // wait for initial state fetch
       try {
         const r    = await fetch(`${BASE_URL}/api/v1/meta-connection/status`, {
           headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
         });
         const data = await r.json();
         if (data.success && data.data?.whatsapp?.connected) {
-          onSuccess(data.data.whatsapp.phoneNumber, data.data.whatsapp.phoneNumberId);
+          const newId = data.data.whatsapp.phoneNumberId;
+          if (newId !== initialPhoneNumberId) {
+            // phoneNumberId changed — a genuine new/changed connection
+            onSuccess(data.data.whatsapp.phoneNumber, newId);
+          }
         }
       } catch (_) {}
     }, 2500);
@@ -659,9 +738,13 @@
 
   // ─── Boot ────────────────────────────────────────────────────────────────────
   document.getElementById('connectBtn').addEventListener('click', startOAuthConnect);
+  document.getElementById('reconnectBtn').addEventListener('click', switchToOAuthFlow);
+  document.getElementById('changeNumberBtn').addEventListener('click', switchToOAuthFlow);
 
   if (AUTH_TOKEN) {
-    validateSubscription();
+    validateSubscription().then(valid => {
+      if (valid) checkConnectionStatus();
+    });
   }
 </script>
 
