@@ -439,10 +439,16 @@
     .then(data => {
       if (data.success && data.data?.authUrl) {
         try { localStorage.setItem('wa_oauth_return_token', AUTH_TOKEN); } catch (_) {}
-        var mobileUrl = prepareFacebookUrl(data.data.authUrl, 'touch');
-        // rerequest forces Facebook to show a dialog instead of auto-approving through the news feed.
-        // On mobile direct navigation this works correctly (unlike desktop popup where it breaks).
-        try { var mu = new URL(mobileUrl); mu.searchParams.set('auth_type', 'rerequest'); mobileUrl = mu.toString(); } catch (_) {}
+        // Navigate directly to m.facebook.com — bypasses the www→m redirect which encrypts
+        // all parameters into encrypted_query_string, causing auth_type/display to be ignored.
+        var mobileUrl = data.data.authUrl
+          .replace(/https?:\/\/(www|web)\.facebook\.com\//g, 'https://m.facebook.com/');
+        try {
+          var mu = new URL(mobileUrl);
+          mu.searchParams.set('display', 'touch');
+          mu.searchParams.set('auth_type', 'rerequest');
+          mobileUrl = mu.toString();
+        } catch (_) {}
         window.location.href = mobileUrl;
       } else {
         showStatus('error', '❌', 'Failed to Start',
