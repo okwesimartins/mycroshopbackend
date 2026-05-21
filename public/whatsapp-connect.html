@@ -439,7 +439,11 @@
     .then(data => {
       if (data.success && data.data?.authUrl) {
         try { localStorage.setItem('wa_oauth_return_token', AUTH_TOKEN); } catch (_) {}
-        window.location.href = prepareFacebookUrl(data.data.authUrl, 'touch');
+        var mobileUrl = prepareFacebookUrl(data.data.authUrl, 'touch');
+        // rerequest forces Facebook to show a dialog instead of auto-approving through the news feed.
+        // On mobile direct navigation this works correctly (unlike desktop popup where it breaks).
+        try { var mu = new URL(mobileUrl); mu.searchParams.set('auth_type', 'rerequest'); mobileUrl = mu.toString(); } catch (_) {}
+        window.location.href = mobileUrl;
       } else {
         showStatus('error', '❌', 'Failed to Start',
           data.message || 'Could not generate the connection URL. Please try again.');
