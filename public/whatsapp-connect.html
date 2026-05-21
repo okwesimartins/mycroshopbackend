@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Connect WhatsApp — MycroShop</title>
+
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -27,7 +28,6 @@
       text-align: center;
     }
 
-    /* Logo */
     .logo {
       display: flex;
       align-items: center;
@@ -35,6 +35,7 @@
       gap: 10px;
       margin-bottom: 28px;
     }
+
     .logo-text {
       font-size: 22px;
       font-weight: 800;
@@ -42,7 +43,6 @@
       letter-spacing: -0.5px;
     }
 
-    /* WhatsApp icon circle */
     .wa-icon {
       width: 72px;
       height: 72px;
@@ -53,7 +53,12 @@
       justify-content: center;
       margin: 0 auto 20px;
     }
-    .wa-icon svg { width: 40px; height: 40px; fill: #fff; }
+
+    .wa-icon svg {
+      width: 40px;
+      height: 40px;
+      fill: #fff;
+    }
 
     h1 {
       font-size: 20px;
@@ -61,6 +66,7 @@
       color: #0f172a;
       margin-bottom: 10px;
     }
+
     p.subtitle {
       font-size: 14px;
       color: #64748b;
@@ -68,7 +74,6 @@
       margin-bottom: 28px;
     }
 
-    /* Steps */
     .steps {
       background: #f8fafc;
       border-radius: 12px;
@@ -76,6 +81,7 @@
       margin-bottom: 28px;
       text-align: left;
     }
+
     .step {
       display: flex;
       align-items: flex-start;
@@ -85,7 +91,9 @@
       font-size: 13px;
       color: #475569;
     }
+
     .step:last-child { border-bottom: none; }
+
     .step-num {
       width: 22px;
       height: 22px;
@@ -101,7 +109,6 @@
       margin-top: 1px;
     }
 
-    /* Connect Button */
     #connectBtn {
       width: 100%;
       padding: 15px 24px;
@@ -119,16 +126,23 @@
       transition: background 0.2s, transform 0.1s;
       margin-bottom: 12px;
     }
+
     #connectBtn:hover { background: #1ebe5a; }
     #connectBtn:active { transform: scale(0.98); }
+
     #connectBtn:disabled {
       background: #94a3b8;
       cursor: not-allowed;
       transform: none;
     }
-    #connectBtn svg { width: 22px; height: 22px; fill: #fff; flex-shrink: 0; }
 
-    /* Spinner inside button */
+    #connectBtn svg {
+      width: 22px;
+      height: 22px;
+      fill: #fff;
+      flex-shrink: 0;
+    }
+
     .spinner {
       width: 18px;
       height: 18px;
@@ -136,11 +150,10 @@
       border-top-color: #fff;
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
-      display: none;
     }
+
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Status messages */
     .status {
       display: none;
       border-radius: 12px;
@@ -149,18 +162,21 @@
       font-size: 14px;
       text-align: left;
     }
+
     .status.success {
       background: #f0fdf4;
       border: 1px solid #bbf7d0;
       color: #15803d;
       display: block;
     }
+
     .status.error {
       background: #fff1f2;
       border: 1px solid #fecdd3;
       color: #be123c;
       display: block;
     }
+
     .status.loading {
       background: #eff6ff;
       border: 1px solid #bfdbfe;
@@ -168,26 +184,30 @@
       display: block;
     }
 
-    .status-icon { font-size: 20px; margin-bottom: 6px; display: block; }
-    .status-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
-    .status-msg { font-size: 13px; opacity: 0.85; line-height: 1.5; }
-
-    /* Token error (shown if no token in URL) */
-    .token-error {
-      display: none;
-    }
-    .token-error.show {
+    .status-icon {
+      font-size: 20px;
+      margin-bottom: 6px;
       display: block;
     }
 
-    /* Success phone display */
+    .status-title {
+      font-weight: 700;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+
+    .status-msg {
+      font-size: 13px;
+      opacity: 0.85;
+      line-height: 1.5;
+    }
+
     .connected-phone {
       font-weight: 700;
       font-size: 16px;
       margin-top: 6px;
     }
 
-    /* Security note */
     .security-note {
       font-size: 12px;
       color: #94a3b8;
@@ -198,55 +218,32 @@
       gap: 5px;
     }
 
-    /* No subscription gate */
-    .sub-error { display: none; }
-    .sub-error.show { display: block; }
+    .token-error,
+    .sub-error {
+      display: none;
+    }
 
-    /* Already-connected action buttons */
-    .action-btn {
-      width: 100%;
-      padding: 14px 24px;
-      border: none;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 700;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: background 0.2s, transform 0.1s;
-      margin-bottom: 10px;
+    .token-error.show,
+    .sub-error.show {
+      display: block;
     }
-    .action-btn.primary { background: #25D366; color: #fff; }
-    .action-btn.primary:hover { background: #1ebe5a; }
-    .action-btn.secondary {
-      background: #fff;
-      color: #0f172a;
-      border: 2px solid #e2e8f0;
-    }
-    .action-btn.secondary:hover { background: #f8fafc; }
-    .action-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
   </style>
 </head>
+
 <body>
 
 <div class="card">
-
-  <!-- Logo -->
   <div class="logo">
     <img src="https://mycroshop.com/mlogo.png" alt="MycroShop" width="36" height="36" style="object-fit:contain;">
     <span class="logo-text">MycroShop</span>
   </div>
 
-  <!-- WhatsApp Icon -->
   <div class="wa-icon">
     <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
       <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
     </svg>
   </div>
 
-  <!-- Token Error State -->
   <div class="token-error" id="tokenError">
     <div class="status error">
       <span class="status-icon">🔒</span>
@@ -255,36 +252,21 @@
     </div>
   </div>
 
-  <!-- No Subscription State -->
   <div class="sub-error" id="subError">
     <div class="status error">
       <span class="status-icon">📋</span>
       <div class="status-title">No Active Plan</div>
-      <div class="status-msg" id="subErrorMsg">You need an active WhatsApp AI Sales Agent subscription to connect WhatsApp. Please subscribe from the MycroShop app.</div>
+      <div class="status-msg" id="subErrorMsg">You need an active WhatsApp AI Sales Agent subscription to connect WhatsApp.</div>
     </div>
   </div>
 
-  <!-- Already Connected State -->
-  <div id="alreadyConnectedState" style="display:none">
-    <div class="status success" style="display:block;margin-bottom:20px">
-      <span class="status-icon">✅</span>
-      <div class="status-title">WhatsApp Connected</div>
-      <div class="status-msg">Your AI Sales Agent is active on this number.</div>
-      <div class="connected-phone" id="currentConnectedPhone" style="margin-top:6px"></div>
-    </div>
-    <button id="reconnectBtn" class="action-btn primary">🔄 Reconnect WhatsApp</button>
-    <button id="changeNumberBtn" class="action-btn secondary">📱 Change WhatsApp Number</button>
-    <p class="security-note" style="margin-top:16px">🔒 Secured connection · Your data stays private</p>
-  </div>
-
-  <!-- Main Content (shown when token is valid) -->
   <div id="mainContent">
-    <h1>Connect WhatsApp Business</h1>
-    <p class="subtitle">
-      Link your WhatsApp Business number to MycroShop to enable your AI Sales Agent and receive orders directly via WhatsApp.
+    <h1 id="pageTitle">Connect WhatsApp Business</h1>
+
+    <p class="subtitle" id="pageSubtitle">
+      Link or change your WhatsApp Business number to enable your AI Sales Agent and receive orders directly via WhatsApp.
     </p>
 
-    <!-- Steps -->
     <div class="steps">
       <div class="step">
         <span class="step-num">1</span>
@@ -296,23 +278,21 @@
       </div>
       <div class="step">
         <span class="step-num">3</span>
-        <span>Select your WhatsApp Business Account and phone number</span>
+        <span>Select the WhatsApp Business Account and phone number you want to connect</span>
       </div>
       <div class="step">
         <span class="step-num">4</span>
-        <span>Done — your AI Sales Agent will be active immediately</span>
+        <span>Done — your selected WhatsApp number becomes active on MycroShop</span>
       </div>
     </div>
 
-    <!-- Connect Button -->
     <button id="connectBtn">
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
       </svg>
-      Connect WhatsApp Business
+      Connect / Change WhatsApp Number
     </button>
 
-    <!-- Status Area -->
     <div class="status" id="statusBox">
       <span class="status-icon" id="statusIcon"></span>
       <div class="status-title" id="statusTitle"></div>
@@ -324,122 +304,192 @@
       🔒 Secured connection · Your data stays private
     </p>
   </div>
-
 </div>
 
 <script>
-  // ─── Config ─────────────────────────────────────────────────────────────────
-  const BASE_URL  = window.location.origin;
+  /*
+  |--------------------------------------------------------------------------
+  | IMPORTANT
+  |--------------------------------------------------------------------------
+  | This file expects your backend /connect endpoint to return:
+  |
+  | {
+  |   "success": true,
+  |   "data": {
+  |     "authUrl": "https://www.facebook.com/v18.0/dialog/oauth?...",
+  |     "state": "fresh_unique_state"
+  |   }
+  | }
+  |
+  | The state is important. It prevents old WhatsApp connections from closing the
+  | popup and showing "connected" when the user is trying to connect another number.
+  */
+
+  const CANONICAL_BASE_URL = 'https://mycroshop.com';
   const urlParams = new URLSearchParams(window.location.search);
 
-  // ─── OAuth callback mode (Facebook redirected the popup here with ?code=) ────
-  // Handles the case where META_OAUTH_REDIRECT_URI still points to /connect/whatsapp
-  // instead of /connect/whatsapp/callback. Works as a drop-in fallback.
-  (function () {
-    var code  = urlParams.get('code');
-    var err   = urlParams.get('error');
-    var state = urlParams.get('state') || '';
-    if (!code && !err) return; // normal page load — skip callback logic
+  const IS_CALLBACK = urlParams.has('code') || urlParams.has('error');
 
-    document.body.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:center;' +
-      'min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;background:#f0f4ff">' +
-      '<div style="background:#fff;border-radius:16px;padding:36px 28px;text-align:center;' +
-      'box-shadow:0 4px 24px rgba(0,0,0,.10);max-width:340px;width:100%">' +
-      '<div id="cbIcon" style="font-size:36px;margin-bottom:12px">⏳</div>' +
-      '<p id="cbMsg" style="color:#475569;font-size:14px;margin:0">Completing WhatsApp connection…</p>' +
-      '</div></div>';
+  if (IS_CALLBACK) {
+    handleOAuthCallback();
+  } else {
+    bootConnectPage();
+  }
 
-    function notifyOpener(payload) {
-      var str = JSON.stringify(payload);
-      try { var bc = new BroadcastChannel('wa_oauth_result'); bc.postMessage(str); bc.close(); } catch (_) {}
-      try { if (window.opener) { window.opener.postMessage(str, window.location.origin); } } catch (_) {}
+  /*
+  |--------------------------------------------------------------------------
+  | CALLBACK MODE
+  |--------------------------------------------------------------------------
+  | This runs only when Facebook redirects back with ?code= or ?error=.
+  */
 
-      if (window.opener) {
-        // Desktop popup: close after message is delivered
-        setTimeout(function () { window.close(); }, 1200);
-      } else {
-        // Mobile full-page flow: redirect back to connect page with stored token
-        var token = '';
-        try {
-          token = localStorage.getItem('wa_oauth_return_token') || '';
-          if (token) localStorage.removeItem('wa_oauth_return_token');
-        } catch (_) {}
-        setTimeout(function () {
-          if (token) {
-            window.location.href = '/connect/whatsapp?token=' + encodeURIComponent(token);
-          } else {
-            var m = document.getElementById('cbMsg');
-            if (m) m.textContent = 'Done! You can close this tab.';
-          }
-        }, 1500);
-      }
+  function handleOAuthCallback() {
+    const code = urlParams.get('code');
+    const err = urlParams.get('error');
+    const state = urlParams.get('state') || '';
+
+    document.body.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4ff;padding:20px">
+        <div style="background:#fff;border-radius:16px;padding:36px 28px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.10);max-width:360px;width:100%">
+          <div id="cbIcon" style="font-size:36px;margin-bottom:12px">⏳</div>
+          <p id="cbMsg" style="color:#475569;font-size:14px;margin:0">Completing WhatsApp connection…</p>
+        </div>
+      </div>
+    `;
+
+    function notifyResult(payload) {
+      const finalPayload = {
+        type: 'WHATSAPP_OAUTH_RESULT',
+        state: state,
+        ...payload
+      };
+
+      const str = JSON.stringify(finalPayload);
+
+      try {
+        const bc = new BroadcastChannel('wa_oauth_result');
+        bc.postMessage(str);
+        bc.close();
+      } catch (_) {}
+
+      try {
+        if (window.opener) {
+          window.opener.postMessage(str, CANONICAL_BASE_URL);
+        }
+      } catch (_) {}
+
+      try {
+        localStorage.setItem('wa_oauth_last_result', str);
+      } catch (_) {}
+
+      setTimeout(function () {
+        if (window.opener) {
+          window.close();
+          return;
+        }
+
+        const token = getStoredReturnToken();
+
+        if (token) {
+          window.location.href = `${CANONICAL_BASE_URL}/connect/whatsapp?token=${encodeURIComponent(token)}&completed=1`;
+        } else {
+          const msg = document.getElementById('cbMsg');
+          if (msg) msg.textContent = 'Done. You can close this tab.';
+        }
+      }, 1200);
     }
 
     if (err || !code) {
       document.getElementById('cbIcon').textContent = '❌';
-      document.getElementById('cbMsg').textContent  = 'Authorization was cancelled or denied.';
-      notifyOpener({ type: 'WHATSAPP_OAUTH_RESULT', success: false,
-                     error: err || 'No authorization code received' });
+      document.getElementById('cbMsg').textContent = 'Authorization was cancelled or denied.';
+
+      notifyResult({
+        success: false,
+        error: err || 'No authorization code received'
+      });
+
       return;
     }
 
-    fetch('/api/v1/meta-connection/whatsapp/callback'
-      + '?code='  + encodeURIComponent(code)
-      + '&state=' + encodeURIComponent(state))
+    fetch(`${CANONICAL_BASE_URL}/api/v1/meta-connection/whatsapp/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.success) {
           document.getElementById('cbIcon').textContent = '✅';
-          document.getElementById('cbMsg').textContent  = 'WhatsApp connected! This window will close.';
+          document.getElementById('cbMsg').textContent = 'WhatsApp connected. This window will close.';
         } else {
           document.getElementById('cbIcon').textContent = '❌';
-          document.getElementById('cbMsg').textContent  = data.message || 'Connection failed.';
+          document.getElementById('cbMsg').textContent = data.message || 'Connection failed.';
         }
-        notifyOpener({
-          type:            'WHATSAPP_OAUTH_RESULT',
-          success:         !!data.success,
-          phone_number:    (data.data && data.data.phone_number)    || null,
-          phone_number_id: (data.data && data.data.phone_number_id) || null,
-          error:           data.success ? null : (data.message || 'Connection failed')
+
+        notifyResult({
+          success: !!data.success,
+          phone_number: data.data?.phone_number || null,
+          phone_number_id: data.data?.phone_number_id || null,
+          error: data.success ? null : (data.message || 'Connection failed')
         });
       })
       .catch(function () {
         document.getElementById('cbIcon').textContent = '❌';
-        document.getElementById('cbMsg').textContent  = 'Network error. Please try again.';
-        notifyOpener({ type: 'WHATSAPP_OAUTH_RESULT', success: false, error: 'Network error' });
+        document.getElementById('cbMsg').textContent = 'Network error. Please try again.';
+
+        notifyResult({
+          success: false,
+          error: 'Network error'
+        });
       });
-  })();
-
-  // ─── Normal page mode — only runs when ?code= / ?error= are absent ───────────
-  const AUTH_TOKEN = urlParams.get('token');
-
-  // ─── Validate token exists ───────────────────────────────────────────────────
-  if (!AUTH_TOKEN && !urlParams.get('code') && !urlParams.get('error')) {
-    document.getElementById('tokenError').classList.add('show');
-    document.getElementById('mainContent').style.display = 'none';
   }
 
-  // ─── Check active WhatsApp subscription ──────────────────────────────────────
-  async function validateSubscription() {
+  /*
+  |--------------------------------------------------------------------------
+  | NORMAL PAGE MODE
+  |--------------------------------------------------------------------------
+  */
+
+  function bootConnectPage() {
+    const AUTH_TOKEN = urlParams.get('token');
+
+    if (!AUTH_TOKEN) {
+      document.getElementById('tokenError').classList.add('show');
+      document.getElementById('mainContent').style.display = 'none';
+      return;
+    }
+
+    document.getElementById('connectBtn').addEventListener('click', function () {
+      startOAuthConnect(AUTH_TOKEN);
+    });
+
+    validateSubscription(AUTH_TOKEN);
+
+    if (urlParams.get('completed') === '1') {
+      showLastOAuthResultIfAvailable();
+    }
+  }
+
+  async function validateSubscription(AUTH_TOKEN) {
     try {
-      const res  = await fetch(`${BASE_URL}/api/v1/whatsapp-plans/my-subscription`, {
-        headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+      const res = await fetch(`${CANONICAL_BASE_URL}/api/v1/whatsapp-plans/my-subscription`, {
+        headers: {
+          'Authorization': `Bearer ${AUTH_TOKEN}`,
+          'Accept': 'application/json'
+        }
       });
+
       const json = await res.json();
 
       if (!res.ok || !json.success) {
-        // Token invalid / expired
         document.getElementById('tokenError').classList.add('show');
         document.getElementById('mainContent').style.display = 'none';
         return false;
       }
 
       const sub = json.data;
+
       if (!sub || sub.status !== 'active') {
         const msg = sub && sub.status === 'expired'
           ? 'Your WhatsApp AI Sales Agent plan has expired. Please renew your subscription from the MycroShop app.'
           : 'You need an active WhatsApp AI Sales Agent subscription to connect WhatsApp. Please subscribe from the MycroShop app.';
+
         document.getElementById('subErrorMsg').textContent = msg;
         document.getElementById('subError').classList.add('show');
         document.getElementById('mainContent').style.display = 'none';
@@ -455,296 +505,452 @@
     }
   }
 
-  // ─── Check current connection status and show correct UI ────────────────────
-  async function checkConnectionStatus() {
-    try {
-      const r    = await fetch(`${BASE_URL}/api/v1/meta-connection/status`, {
-        headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
-      });
-      const data = await r.json();
-      if (data.success && data.data?.whatsapp?.connected) {
-        // Show the "already connected" panel instead of the connect form
-        document.getElementById('mainContent').style.display        = 'none';
-        document.getElementById('alreadyConnectedState').style.display = 'block';
-        const phone = data.data.whatsapp.phoneNumber;
-        if (phone) {
-          document.getElementById('currentConnectedPhone').textContent = `📱 ${phone}`;
-        }
-      } else {
-        document.getElementById('mainContent').style.display = 'block';
-      }
-    } catch (_) {
-      document.getElementById('mainContent').style.display = 'block';
+  function startOAuthConnect(AUTH_TOKEN) {
+    const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      startOAuthMobile(AUTH_TOKEN);
+    } else {
+      startOAuthDesktop(AUTH_TOKEN);
     }
   }
 
-  // ─── Switch from "already connected" panel to the OAuth connect form ─────────
-  function switchToOAuthFlow() {
-    document.getElementById('alreadyConnectedState').style.display = 'none';
-    document.getElementById('mainContent').style.display           = 'block';
-    startOAuthConnect();
-  }
+  /*
+  |--------------------------------------------------------------------------
+  | MOBILE FLOW
+  |--------------------------------------------------------------------------
+  | Uses same tab redirect. This avoids mobile browsers opening Facebook home.
+  */
 
-  // ─── OAuth flow — desktop uses popup, mobile uses full-page redirect ─────────
-  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-  function startOAuthConnect() {
-    if (isMobile) { startOAuthMobile(); } else { startOAuthDesktop(); }
-  }
-
-  // Mobile: navigate the current tab directly to Facebook.
-  // window.open() on mobile opens a detached tab with no referrer, causing Facebook
-  // to land on the news feed instead of the OAuth dialog. Direct navigation fixes this.
-  function startOAuthMobile() {
+  function startOAuthMobile(AUTH_TOKEN) {
     setButtonLoading(true);
-    fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/connect`, {
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (data.success && data.data?.authUrl) {
-        try { localStorage.setItem('wa_oauth_return_token', AUTH_TOKEN); } catch (_) {}
-        window.location.href = data.data.authUrl;  // leave current tab for Facebook
-      } else {
-        showStatus('error', '❌', 'Failed to Start',
-          data.message || 'Could not generate the connection URL. Please try again.');
-        resetButton();
+    showStatus('loading', '⏳', 'Opening Facebook', 'Redirecting you to select or change your WhatsApp Business number.');
+
+    fetch(`${CANONICAL_BASE_URL}/api/v1/meta-connection/whatsapp/connect?mode=reconnect&force=1&t=${Date.now()}`, {
+      headers: {
+        'Authorization': `Bearer ${AUTH_TOKEN}`,
+        'Accept': 'application/json'
       }
     })
-    .catch(() => {
-      showStatus('error', '❌', 'Network Error', 'Could not reach the server. Please try again.');
-      resetButton();
-    });
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success && data.data?.authUrl) {
+          const state = data.data.state || '';
+          storeReturnToken(AUTH_TOKEN);
+          storeCurrentState(state);
+
+          const authUrl = normalizeFacebookAuthUrl(data.data.authUrl, state);
+
+          window.location.href = authUrl;
+          return;
+        }
+
+        showStatus('error', '❌', 'Failed to Start', data.message || 'Could not generate the connection URL. Please try again.');
+        resetButton();
+      })
+      .catch(function () {
+        showStatus('error', '❌', 'Network Error', 'Could not reach the server. Please try again.');
+        resetButton();
+      });
   }
 
-  // Desktop: popup window (opened synchronously to avoid popup blockers)
-  function startOAuthDesktop() {
-    const popup = window.open('', 'WhatsApp Connect',
-      'width=620,height=720,scrollbars=yes,resizable=yes,toolbar=no,menubar=no');
+  /*
+  |--------------------------------------------------------------------------
+  | DESKTOP FLOW
+  |--------------------------------------------------------------------------
+  | Uses popup, but does not auto-success from old WhatsApp connection.
+  | It only succeeds when:
+  | - callback postMessage/BroadcastChannel says success for this state, OR
+  | - status endpoint confirms this exact state completed.
+  */
+
+  function startOAuthDesktop(AUTH_TOKEN) {
+    const popup = window.open(
+      '',
+      'WhatsApp Connect',
+      'width=620,height=720,scrollbars=yes,resizable=yes,toolbar=no,menubar=no'
+    );
 
     if (!popup) {
-      showStatus('error', '❌', 'Popup Blocked',
-        'Please allow popups for this site in your browser, then try again.');
+      showStatus('error', '❌', 'Popup Blocked', 'Please allow popups for this site in your browser, then try again.');
       return;
     }
 
     setButtonLoading(true);
-    popup.document.write(
-      '<html><body style="display:flex;align-items:center;justify-content:center;' +
-      'height:100vh;font-family:sans-serif;color:#475569">' +
-      '<p>⏳ Loading WhatsApp connection…</p></body></html>'
-    );
+    showStatus('loading', '⏳', 'Opening WhatsApp Setup', 'Please complete the connection in the popup window.');
 
-    fetch(`${BASE_URL}/api/v1/meta-connection/whatsapp/connect`, {
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (data.success && data.data?.authUrl) {
-        popup.location.href = data.data.authUrl;
-      } else {
-        popup.close();
-        showStatus('error', '❌', 'Failed to Start',
-          data.message || 'Could not generate the connection URL. Please try again.');
-        resetButton();
-      }
-    })
-    .catch(() => {
-      popup.close();
-      showStatus('error', '❌', 'Network Error', 'Could not reach the server. Please try again.');
-      resetButton();
-    });
+    popup.document.write(`
+      <html>
+        <body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#475569">
+          <p>⏳ Loading WhatsApp connection…</p>
+        </body>
+      </html>
+    `);
 
-    // ── Listen for result using multiple channels ────────────────────────────────
     let resultReceived = false;
-    let broadcastCh    = null;
-    let statusPoller   = null;
-    let closedPoller;
+    let currentState = '';
+    let broadcastCh = null;
+    let statusPoller = null;
+    let closedPoller = null;
 
     function cleanup() {
-      clearInterval(statusPoller);
-      clearInterval(closedPoller);
+      if (statusPoller) clearInterval(statusPoller);
+      if (closedPoller) clearInterval(closedPoller);
       window.removeEventListener('message', handleOAuthResult);
-      try { if (broadcastCh) { broadcastCh.close(); broadcastCh = null; } } catch (_) {}
+      try {
+        if (broadcastCh) {
+          broadcastCh.close();
+          broadcastCh = null;
+        }
+      } catch (_) {}
     }
 
-    function onSuccess(phone_number, phone_number_id) {
+    function onSuccess(phoneNumber, phoneNumberId, resultState) {
       if (resultReceived) return;
-      resultReceived = true;
-      cleanup();
-      try { if (!popup.closed) popup.close(); } catch (_) {}
-      showStatus('success', '✅', 'WhatsApp Connected!',
-        'Your AI Sales Agent is now active. Customers can reach you on WhatsApp.');
-      if (phone_number) {
-        document.getElementById('connectedPhone').textContent = `📱 ${phone_number}`;
+
+      if (currentState && resultState && resultState !== currentState) {
+        return;
       }
-      disableButton('Connected ✓');
-      notifyApp({ success: true, phone_number, phone_number_id });
-    }
 
-    function onFailure(errorMsg) {
-      if (resultReceived) return;
       resultReceived = true;
       cleanup();
+
+      try {
+        if (!popup.closed) popup.close();
+      } catch (_) {}
+
+      showStatus(
+        'success',
+        '✅',
+        'WhatsApp Connected!',
+        'Your selected WhatsApp number is now connected to MycroShop.'
+      );
+
+      if (phoneNumber) {
+        document.getElementById('connectedPhone').textContent = `📱 ${phoneNumber}`;
+      }
+
+      resetButton('Connect / Change Another Number');
+      notifyApp({
+        success: true,
+        phone_number: phoneNumber,
+        phone_number_id: phoneNumberId
+      });
+    }
+
+    function onFailure(errorMsg, resultState) {
+      if (resultReceived) return;
+
+      if (currentState && resultState && resultState !== currentState) {
+        return;
+      }
+
+      resultReceived = true;
+      cleanup();
+
+      try {
+        if (!popup.closed) popup.close();
+      } catch (_) {}
+
       showStatus('error', '❌', 'Connection Failed', errorMsg || 'Please try again.');
       resetButton();
     }
 
-    // Channel 1: Poll the backend status.
-    // Only fires success when the phoneNumberId CHANGES — prevents detecting a
-    // pre-existing connection as a new one when the user clicks Reconnect.
-    let initialPhoneNumberId = undefined; // undefined = still fetching
-    fetch(`${BASE_URL}/api/v1/meta-connection/status`, {
-      headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+    fetch(`${CANONICAL_BASE_URL}/api/v1/meta-connection/whatsapp/connect?mode=reconnect&force=1&t=${Date.now()}`, {
+      headers: {
+        'Authorization': `Bearer ${AUTH_TOKEN}`,
+        'Accept': 'application/json'
+      }
     })
-    .then(r => r.json())
-    .then(d => { initialPhoneNumberId = d.data?.whatsapp?.phoneNumberId || null; })
-    .catch(() => { initialPhoneNumberId = null; });
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.success && data.data?.authUrl) {
+          currentState = data.data.state || '';
+          storeCurrentState(currentState);
 
-    statusPoller = setInterval(async () => {
-      if (initialPhoneNumberId === undefined) return; // wait for initial state fetch
+          const authUrl = normalizeFacebookAuthUrl(data.data.authUrl, currentState);
+
+          popup.location.href = authUrl;
+
+          startResultListeners();
+          startStatusPolling();
+          startPopupCloseWatcher();
+
+          return;
+        }
+
+        popup.close();
+        showStatus('error', '❌', 'Failed to Start', data.message || 'Could not generate the connection URL. Please try again.');
+        resetButton();
+      })
+      .catch(function () {
+        popup.close();
+        showStatus('error', '❌', 'Network Error', 'Could not reach the server. Please try again.');
+        resetButton();
+      });
+
+    function startResultListeners() {
       try {
-        const r    = await fetch(`${BASE_URL}/api/v1/meta-connection/status`, {
-          headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
-        });
-        const data = await r.json();
-        if (data.success && data.data?.whatsapp?.connected) {
-          const newId = data.data.whatsapp.phoneNumberId;
-          if (newId !== initialPhoneNumberId) {
-            // phoneNumberId changed — a genuine new/changed connection
-            onSuccess(data.data.whatsapp.phoneNumber, newId);
-          }
+        broadcastCh = new BroadcastChannel('wa_oauth_result');
+        broadcastCh.onmessage = function (ev) {
+          try {
+            const msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+
+            if (!msg || msg.type !== 'WHATSAPP_OAUTH_RESULT') return;
+
+            if (msg.success) {
+              onSuccess(msg.phone_number, msg.phone_number_id, msg.state);
+            } else {
+              onFailure(msg.error, msg.state);
+            }
+          } catch (_) {}
+        };
+      } catch (_) {}
+
+      window.addEventListener('message', handleOAuthResult);
+    }
+
+    function handleOAuthResult(event) {
+      if (event.origin !== CANONICAL_BASE_URL) return;
+
+      try {
+        const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+
+        if (!msg || msg.type !== 'WHATSAPP_OAUTH_RESULT') return;
+
+        if (msg.success) {
+          onSuccess(msg.phone_number, msg.phone_number_id, msg.state);
+        } else {
+          onFailure(msg.error, msg.state);
         }
       } catch (_) {}
-    }, 2500);
-
-    // Channel 2: BroadcastChannel — works when window.opener is severed by Facebook's COOP
-    try {
-      broadcastCh = new BroadcastChannel('wa_oauth_result');
-      broadcastCh.onmessage = function (ev) {
-        try {
-          const msg = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-          if (!msg || msg.type !== 'WHATSAPP_OAUTH_RESULT') return;
-          if (msg.success) onSuccess(msg.phone_number, msg.phone_number_id);
-          else onFailure(msg.error);
-        } catch (_) {}
-      };
-    } catch (_) {}
-
-    // Channel 3: window.opener postMessage — fallback for older browsers / WebViews
-    function handleOAuthResult(event) {
-      if (event.origin !== BASE_URL) return;
-      try {
-        const msg = JSON.parse(event.data);
-        if (!msg || msg.type !== 'WHATSAPP_OAUTH_RESULT') return;
-        if (msg.success) onSuccess(msg.phone_number, msg.phone_number_id);
-        else onFailure(msg.error);
-      } catch (_) {}
     }
-    window.addEventListener('message', handleOAuthResult);
 
-    // Detect if user closed the tab/popup without completing.
-    // On mobile, window.open() opens a new tab. After OAuth the tab auto-closes,
-    // so we wait a few extra seconds for polling/BroadcastChannel to fire before
-    // declaring the connection cancelled.
-    closedPoller = setInterval(() => {
-      if (popup.closed && !resultReceived) {
-        clearInterval(closedPoller);
-        // Grace period: give status polling time to detect success
-        // (important on mobile where the tab closes right after the redirect)
-        setTimeout(() => {
-          if (!resultReceived) {
-            cleanup();
-            showStatus('error', '❌', 'Connection Cancelled',
-              'You closed the window before completing. Please try again.');
-            resetButton();
-          }
-        }, 6000);
+    function startStatusPolling() {
+      if (!currentState) {
+        return;
       }
-    }, 800);
+
+      statusPoller = setInterval(async function () {
+        try {
+          const r = await fetch(`${CANONICAL_BASE_URL}/api/v1/meta-connection/status?state=${encodeURIComponent(currentState)}`, {
+            headers: {
+              'Authorization': `Bearer ${AUTH_TOKEN}`,
+              'Accept': 'application/json'
+            }
+          });
+
+          const data = await r.json();
+
+          const whatsapp = data.data?.whatsapp;
+
+          if (
+            data.success &&
+            whatsapp?.connected &&
+            whatsapp?.state &&
+            whatsapp.state === currentState
+          ) {
+            onSuccess(whatsapp.phoneNumber, whatsapp.phoneNumberId, whatsapp.state);
+          }
+        } catch (_) {}
+      }, 2500);
+    }
+
+    function startPopupCloseWatcher() {
+      closedPoller = setInterval(function () {
+        try {
+          if (popup.closed && !resultReceived) {
+            clearInterval(closedPoller);
+
+            setTimeout(function () {
+              if (!resultReceived) {
+                cleanup();
+                showStatus(
+                  'error',
+                  '❌',
+                  'Connection Cancelled',
+                  'The connection window was closed before the new WhatsApp number was completed.'
+                );
+                resetButton();
+              }
+            }, 6000);
+          }
+        } catch (_) {}
+      }, 800);
+    }
   }
 
-  // ─── Notify the mobile app / WebView on completion ───────────────────────────
-  // Supports: React Native WebView, Flutter WebView, Android WebView, iOS WKWebView
-  function notifyApp(payload) {
-    const msg = JSON.stringify({ type: 'WHATSAPP_CONNECT_RESULT', ...payload });
+  /*
+  |--------------------------------------------------------------------------
+  | URL NORMALIZATION
+  |--------------------------------------------------------------------------
+  */
 
-    // React Native WebView
+  function normalizeFacebookAuthUrl(authUrl, state) {
+    let url = authUrl;
+
+    url = url.replace('https://web.facebook.com/', 'https://www.facebook.com/');
+    url = url.replace('http://web.facebook.com/', 'https://www.facebook.com/');
+    url = url.replace('https://m.facebook.com/', 'https://www.facebook.com/');
+
+    try {
+      const parsed = new URL(url);
+
+      if (!parsed.searchParams.get('auth_type')) {
+        parsed.searchParams.set('auth_type', 'rerequest');
+      }
+
+      if (state && !parsed.searchParams.get('state')) {
+        parsed.searchParams.set('state', state);
+      }
+
+      return parsed.toString();
+    } catch (_) {
+      return url;
+    }
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | STORAGE HELPERS
+  |--------------------------------------------------------------------------
+  */
+
+  function storeReturnToken(token) {
+    try {
+      localStorage.setItem('wa_oauth_return_token', token);
+    } catch (_) {}
+  }
+
+  function getStoredReturnToken() {
+    try {
+      const token = localStorage.getItem('wa_oauth_return_token') || '';
+      if (token) localStorage.removeItem('wa_oauth_return_token');
+      return token;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function storeCurrentState(state) {
+    try {
+      if (state) localStorage.setItem('wa_oauth_current_state', state);
+    } catch (_) {}
+  }
+
+  function getCurrentState() {
+    try {
+      return localStorage.getItem('wa_oauth_current_state') || '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function showLastOAuthResultIfAvailable() {
+    try {
+      const raw = localStorage.getItem('wa_oauth_last_result');
+
+      if (!raw) return;
+
+      localStorage.removeItem('wa_oauth_last_result');
+
+      const msg = JSON.parse(raw);
+
+      if (msg.success) {
+        showStatus(
+          'success',
+          '✅',
+          'WhatsApp Connected!',
+          'Your selected WhatsApp number is now connected to MycroShop.'
+        );
+
+        if (msg.phone_number) {
+          document.getElementById('connectedPhone').textContent = `📱 ${msg.phone_number}`;
+        }
+
+        resetButton('Connect / Change Another Number');
+      } else {
+        showStatus('error', '❌', 'Connection Failed', msg.error || 'Please try again.');
+        resetButton();
+      }
+    } catch (_) {}
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | APP / WEBVIEW NOTIFY
+  |--------------------------------------------------------------------------
+  */
+
+  function notifyApp(payload) {
+    const msg = JSON.stringify({
+      type: 'WHATSAPP_CONNECT_RESULT',
+      ...payload
+    });
+
     if (window.ReactNativeWebView) {
       window.ReactNativeWebView.postMessage(msg);
       return;
     }
 
-    // Flutter / Android JS channel
     if (window.MycroShopChannel) {
       window.MycroShopChannel.postMessage(msg);
       return;
     }
 
-    // iOS WKWebView message handler
     if (window.webkit?.messageHandlers?.MycroShopChannel) {
       window.webkit.messageHandlers.MycroShopChannel.postMessage(msg);
       return;
     }
 
-    // Fallback: postMessage to parent if in iframe
     if (window.parent !== window) {
       window.parent.postMessage(msg, '*');
     }
   }
 
-  // ─── UI Helpers ──────────────────────────────────────────────────────────────
+  /*
+  |--------------------------------------------------------------------------
+  | UI HELPERS
+  |--------------------------------------------------------------------------
+  */
+
   function showStatus(type, icon, title, msg) {
     const box = document.getElementById('statusBox');
+
+    if (!box) return;
+
     box.className = `status ${type}`;
-    document.getElementById('statusIcon').textContent  = icon;
+
+    document.getElementById('statusIcon').textContent = icon;
     document.getElementById('statusTitle').textContent = title;
-    document.getElementById('statusMsg').textContent   = msg;
+    document.getElementById('statusMsg').textContent = msg;
   }
 
   function setButtonLoading(loading) {
-    const btn     = document.getElementById('connectBtn');
-    const spinner = btn.querySelector('.spinner');
-    btn.disabled  = loading;
+    const btn = document.getElementById('connectBtn');
+
+    if (!btn) return;
+
+    btn.disabled = loading;
+
     if (loading) {
-      btn.innerHTML = `<div class="spinner" style="display:block"></div> Connecting...`;
+      btn.innerHTML = `<div class="spinner"></div> Connecting...`;
     }
   }
 
-  function resetButton() {
+  function resetButton(label = 'Connect / Change WhatsApp Number') {
     const btn = document.getElementById('connectBtn');
-    btn.disabled  = false;
+
+    if (!btn) return;
+
+    btn.disabled = false;
+    btn.style.background = '#25D366';
+
     btn.innerHTML = `
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:22px;height:22px;fill:#fff;flex-shrink:0">
         <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
       </svg>
-      Try Again`;
-  }
-
-  function disableButton(label = 'Connected ✓') {
-    const btn = document.getElementById('connectBtn');
-    btn.disabled   = true;
-    btn.style.background = '#10b981';
-    btn.innerHTML  = `✓ ${label}`;
-  }
-
-  // Disables button in grey — used when config is missing (not a success state)
-  function blockButton() {
-    const btn = document.getElementById('connectBtn');
-    btn.disabled = true;
-    btn.style.background = '#94a3b8';
-    btn.innerHTML = 'Unavailable';
-  }
-
-  // ─── Boot ────────────────────────────────────────────────────────────────────
-  document.getElementById('connectBtn').addEventListener('click', startOAuthConnect);
-  document.getElementById('reconnectBtn').addEventListener('click', switchToOAuthFlow);
-  document.getElementById('changeNumberBtn').addEventListener('click', switchToOAuthFlow);
-
-  if (AUTH_TOKEN) {
-    validateSubscription().then(valid => {
-      if (valid) checkConnectionStatus();
-    });
+      ${label}`;
   }
 </script>
 
