@@ -40,23 +40,20 @@ app.get('/connect/whatsapp/callback', (_req, res) => {
   var err   = p.get('error');
 
   function notify(payload) {
-    // Include the echoed state so the opener can validate the result belongs to this session
-    var finalPayload = Object.assign({ type: 'WHATSAPP_OAUTH_RESULT', state: state }, payload);
-    var str = JSON.stringify(finalPayload);
+    var str = JSON.stringify(payload);
     try { var bc = new BroadcastChannel('wa_oauth_result'); bc.postMessage(str); bc.close(); } catch (_) {}
     try { if (window.opener) { window.opener.postMessage(str, window.location.origin); } } catch (_) {}
-    try { localStorage.setItem('wa_oauth_last_result', str); } catch (_) {}
 
-    // Use localStorage token presence to distinguish mobile vs desktop.
-    // window.opener is severed by Facebook's COOP headers even for desktop popups.
+    // Detect mobile vs desktop via localStorage token presence.
+    // window.opener is unreliable — Facebook COOP headers null it out even in desktop popups.
     var token = '';
     try { token = localStorage.getItem('wa_oauth_return_token') || ''; } catch (_) {}
 
     if (token) {
       try { localStorage.removeItem('wa_oauth_return_token'); } catch (_) {}
       setTimeout(function () {
-        window.location.href = '/connect/whatsapp?token=' + encodeURIComponent(token) + '&completed=1';
-      }, 1200);
+        window.location.href = '/connect/whatsapp?token=' + encodeURIComponent(token);
+      }, 1500);
     } else {
       setTimeout(function () { window.close(); }, 1200);
     }
