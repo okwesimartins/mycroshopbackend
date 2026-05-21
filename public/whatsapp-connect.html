@@ -309,7 +309,7 @@
 
     function notifyOpener(payload) {
       var str = JSON.stringify(payload);
-      try { var bc = new BroadcastChannel('wa_oauth_result'); bc.postMessage(str); bc.close(); } catch (_) {}
+      try { var bc = new BroadcastChannel('wa_oauth_result'); bc.postMessage(str); setTimeout(function() { try { bc.close(); } catch(_) {} }, 500); } catch (_) {}
       try { if (window.opener) { window.opener.postMessage(str, window.location.origin); } } catch (_) {}
 
       // Detect mobile vs desktop via localStorage token presence.
@@ -319,7 +319,8 @@
       try { token = localStorage.getItem('wa_oauth_return_token') || ''; } catch (_) {}
 
       if (token) {
-        // Mobile full-page flow: navigate back to connect page
+        // Mobile full-page flow: store result so connect page can show it after reload
+        try { localStorage.setItem('wa_oauth_result', str); } catch (_) {}
         try { localStorage.removeItem('wa_oauth_return_token'); } catch (_) {}
         setTimeout(function () {
           window.location.href = '/connect/whatsapp?token=' + encodeURIComponent(token);
@@ -408,17 +409,12 @@
   }
 
   // ─── Normalise Facebook auth URL ─────────────────────────────────────────────
-  // Forces www.facebook.com and adds auth_type=rerequest so the OAuth dialog
-  // always appears even when the user is already logged into Facebook.
+  // Ensures www.facebook.com (not m/web variants).
+  // NOTE: auth_type=rerequest is intentionally NOT added — when the user already
+  // has all permissions granted, Facebook responds to rerequest by redirecting to
+  // the news feed instead of showing the OAuth dialog.
   function prepareFacebookUrl(authUrl) {
-    try {
-      var url = authUrl.replace(/https?:\/\/(web|m)\.facebook\.com\//g, 'https://www.facebook.com/');
-      var parsed = new URL(url);
-      parsed.searchParams.set('auth_type', 'rerequest');
-      return parsed.toString();
-    } catch (_) {
-      return authUrl;
-    }
+    return authUrl.replace(/https?:\/\/(web|m)\.facebook\.com\//g, 'https://www.facebook.com/');
   }
 
   // ─── OAuth flow ───────────────────────────────────────────────────────────────
@@ -455,6 +451,10 @@
 
   // Desktop: popup window (opened synchronously to avoid popup blockers)
   function startOAuthDesktop() {
+    // Clear any stale mobile token — if a previous mobile flow was interrupted it stays in
+    // localStorage and causes the popup callback to navigate instead of close.
+    try { localStorage.removeItem('wa_oauth_return_token'); } catch (_) {}
+
     const popup = window.open('', 'WhatsApp Connect',
       'width=620,height=720,scrollbars=yes,resizable=yes,toolbar=no,menubar=no');
 
@@ -578,18 +578,32 @@
     }
     window.addEventListener('message', handleOAuthResult);
 
-    // Close watcher — gives BroadcastChannel/polling time to fire before declaring cancelled
+    // Close watcher — when popup closes, do a final status check before declaring cancelled.
+    // BroadcastChannel may arrive just after popup.closed=true, so wait 2 s then check the API.
     closedPoller = setInterval(() => {
       if (popup.closed && !resultReceived) {
         clearInterval(closedPoller);
-        setTimeout(() => {
+        setTimeout(async () => {
+          if (resultReceived) return;
+          try {
+            const r    = await fetch(`${BASE_URL}/api/v1/meta-connection/status`, {
+              headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` }
+            });
+            const data = await r.json();
+            if (data.success && data.data?.whatsapp?.connected) {
+              // No ID comparison here — popup already closed, this is a definitive check.
+              // If connected at this point the OAuth succeeded (even same number reconnect).
+              onSuccess(data.data.whatsapp.phoneNumber, data.data.whatsapp.phoneNumberId);
+              return;
+            }
+          } catch (_) {}
           if (!resultReceived) {
             cleanup();
             showStatus('error', '❌', 'Connection Cancelled',
               'You closed the window before completing. Please try again.');
             resetButton();
           }
-        }, 6000);
+        }, 2000);
       }
     }, 800);
   }
@@ -643,6 +657,25 @@
   document.getElementById('connectBtn').addEventListener('click', startOAuthConnect);
 
   if (AUTH_TOKEN) {
+    // Check if we just returned from a mobile OAuth flow
+    var mobileResult = '';
+    try { mobileResult = localStorage.getItem('wa_oauth_result') || ''; localStorage.removeItem('wa_oauth_result'); } catch (_) {}
+    if (mobileResult) {
+      try {
+        var r = JSON.parse(mobileResult);
+        if (r && r.type === 'WHATSAPP_OAUTH_RESULT') {
+          if (r.success) {
+            showStatus('success', '✅', 'WhatsApp Connected!',
+              'Your AI Sales Agent is now active. Customers can reach you on WhatsApp.');
+            if (r.phone_number) document.getElementById('connectedPhone').textContent = '📱 ' + r.phone_number;
+            disableButton('Connected ✓');
+            notifyApp({ success: true, phone_number: r.phone_number, phone_number_id: r.phone_number_id });
+          } else {
+            showStatus('error', '❌', 'Connection Failed', r.error || 'Please try again.');
+          }
+        }
+      } catch (_) {}
+    }
     validateSubscription();
   }
 </script>
