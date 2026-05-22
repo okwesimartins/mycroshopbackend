@@ -497,6 +497,7 @@ async function getTenantProfile(req, res) {
           setup_completed: store.setup_completed
         })),
         whatsapp: {
+          ai_agent_active: process.env.WHATSAPP_AI_AGENT_ACTIVE === '1',
           connected: !!(aiConfig?.whatsapp_enabled && aiConfig?.whatsapp_phone_number_id),
           phone_number: aiConfig?.whatsapp_phone_number || null,
           phone_number_id: aiConfig?.whatsapp_phone_number_id || null,
