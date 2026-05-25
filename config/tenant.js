@@ -50,7 +50,7 @@ const Tenant = mainSequelize.define('Tenant', {
     defaultValue: 'company'
   },
   business_category: {
-    type: require('sequelize').DataTypes.ENUM('supermarket', 'restaurant', 'pharmacy', 'small_business', 'other'),
+    type: require('sequelize').DataTypes.STRING(100),
     allowNull: true,
     defaultValue: 'small_business'
   },

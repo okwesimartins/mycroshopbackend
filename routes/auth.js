@@ -111,8 +111,8 @@ router.post('/register-free',
       .withMessage('business_type must be: individual, company, or partnership'),
     body('business_category')
       .optional()
-      .isIn(['supermarket', 'restaurant', 'pharmacy', 'small_business', 'other'])
-      .withMessage('business_category must be: supermarket, restaurant, pharmacy, small_business, or other'),
+      .isString().withMessage('business_category must be a string')
+      .isLength({ max: 100 }).withMessage('business_category must be 100 characters or fewer'),
     body('country').optional().isString()
   ],
   freeUserController.registerFreeUser

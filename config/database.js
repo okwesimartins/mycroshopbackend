@@ -1936,6 +1936,24 @@ async function initializeMainDatabaseTables() {
         COMMENT '1 = user has enabled biometric login on their mobile device'
     `).catch(() => {}); // ignore if column already exists (MySQL < 8 doesn't support IF NOT EXISTS on ALTER)
 
+    // ── business_category: migrate ENUM → VARCHAR(100) so users can type any category ─
+    try {
+      const [[col]] = await connection.query(`
+        SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'Tenant' AND COLUMN_NAME = 'business_category'
+      `, [dbName]);
+      if (col && col.COLUMN_TYPE && col.COLUMN_TYPE.startsWith('enum')) {
+        await connection.query(`
+          ALTER TABLE Tenant
+          MODIFY COLUMN business_category VARCHAR(100) NULL DEFAULT 'small_business'
+            COMMENT 'Free-text business category (e.g. supermarket, bakery, logistics, etc.)'
+        `);
+        console.log('✅ business_category column migrated from ENUM to VARCHAR(100) on Tenant');
+      }
+    } catch (migErr) {
+      console.warn('Could not migrate business_category column:', migErr.message);
+    }
+
     // ── Refresh Tokens ─────────────────────────────────────────────────────
     await connection.query(`
       CREATE TABLE IF NOT EXISTS refresh_tokens (
