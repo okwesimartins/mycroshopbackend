@@ -42,7 +42,56 @@ const logoUpload = multer({
 
 // ==================== PUBLIC ROUTES ====================
 
-// Register free user (no license key required)
+// ── OTP ──────────────────────────────────────────────────────────────────────
+
+// Send OTP (for signup or forgot-password)
+// Body: { email, type?: 'signup' | 'forgot_password' }
+router.post('/send-otp',
+  [body('email').isEmail().withMessage('Valid email is required')],
+  authController.sendOtp
+);
+
+// Resend OTP (alias for send-otp)
+router.post('/resend-otp',
+  [body('email').isEmail().withMessage('Valid email is required')],
+  authController.resendOtp
+);
+
+// ── Forgot / Reset password ───────────────────────────────────────────────────
+
+// Step 1 — request OTP
+router.post('/forgot-password',
+  [body('email').isEmail().withMessage('Valid email is required')],
+  authController.forgotPassword
+);
+
+// Step 2 — verify OTP only → returns reset_token → frontend navigates to reset page
+router.post('/verify-forgot-password-otp',
+  [
+    body('email').isEmail().withMessage('Valid email is required'),
+    body('otp').notEmpty().withMessage('OTP is required'),
+    body('hash').notEmpty().withMessage('Hash is required')
+  ],
+  authController.verifyForgotPasswordOtp
+);
+
+// Step 3 — submit new password using reset_token (no OTP needed here)
+router.post('/reset-password',
+  [
+    body('reset_token').notEmpty().withMessage('reset_token is required'),
+    body('newPassword')
+      .isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
+      .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+      .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+      .matches(/[0-9]/).withMessage('Password must contain at least one number')
+      .matches(/[!@#$%^&*()\-_=+\[\]{};':"\\|,.<>\/?]/).withMessage('Password must contain at least one special character')
+  ],
+  authController.resetPassword
+);
+
+// ── Registration ──────────────────────────────────────────────────────────────
+
+// ── Registration — Step 1: validate + send OTP ───────────────────────────────
 const freeUserController = require('../controllers/freeUserController');
 router.post('/register-free',
   [
@@ -50,9 +99,35 @@ router.post('/register-free',
     body('subdomain').notEmpty().withMessage('Subdomain is required'),
     body('subdomain').matches(/^[a-z0-9-]+$/).withMessage('Subdomain can only contain lowercase letters, numbers, and hyphens'),
     body('adminEmail').isEmail().withMessage('Valid email is required'),
-    body('adminPassword').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
+    body('adminPassword')
+      .isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
+      .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+      .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+      .matches(/[0-9]/).withMessage('Password must contain at least one number')
+      .matches(/[!@#$%^&*()\-_=+\[\]{};':"\\|,.<>\/?]/).withMessage('Password must contain at least one special character'),
+    body('business_type')
+      .optional()
+      .isIn(['individual', 'company', 'partnership'])
+      .withMessage('business_type must be: individual, company, or partnership'),
+    body('business_category')
+      .optional()
+      .isIn(['supermarket', 'restaurant', 'pharmacy', 'small_business', 'other'])
+      .withMessage('business_category must be: supermarket, restaurant, pharmacy, small_business, or other'),
+    body('country').optional().isString()
   ],
   freeUserController.registerFreeUser
+);
+
+// ── Registration — Step 2: verify signup OTP → create account → return tokens ─
+// Different from forgot-password OTP: this one creates the account.
+router.post('/verify-signup-otp',
+  [
+    body('email').isEmail().withMessage('Valid email is required'),
+    body('otp').notEmpty().withMessage('OTP is required'),
+    body('hash').notEmpty().withMessage('Hash is required'),
+    body('registration_token').notEmpty().withMessage('registration_token is required')
+  ],
+  freeUserController.completeSignup
 );
 
 // Register enterprise tenant (requires license key)

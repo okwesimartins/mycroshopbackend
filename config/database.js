@@ -1984,6 +1984,30 @@ async function initializeMainDatabaseTables() {
     `);
     console.log('✅ notifications_sent table created/verified in main database');
 
+    // ── Order Email Log (tracks confirmation / shipped / completed emails) ─────
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS order_email_log (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        tenant_id       INT           NULL    COMMENT 'Tenant that owns the order',
+        order_id        INT           NULL    COMMENT 'OnlineStoreOrder.id in the tenant DB',
+        email_type      ENUM('confirmation','shipped','completed') NOT NULL,
+        recipient_email VARCHAR(255)  NOT NULL,
+        from_address    VARCHAR(500)  NOT NULL,
+        subject         VARCHAR(500)  NOT NULL,
+        html_content    LONGTEXT      NOT NULL COMMENT 'Pre-rendered HTML stored for cron retry',
+        status          ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+        attempts        SMALLINT      NOT NULL DEFAULT 0,
+        last_attempted_at DATETIME    NULL,
+        error_message   TEXT          NULL,
+        created_at      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_status_attempts (status, attempts),
+        INDEX idx_tenant_id (tenant_id),
+        INDEX idx_order_id (order_id),
+        INDEX idx_created_at (created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ order_email_log table created/verified in main database');
+
     await connection.end();
     return true;
   } catch (error) {

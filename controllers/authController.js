@@ -6,6 +6,7 @@ const fs = require('fs');
 const { User, Tenant, getTenantByUserEmail, createTenant, getTenantById, getTenantBySubdomain } = require('../config/tenant');
 const { migrateFreeUserToEnterprise, createTenantDatabase, mainSequelize } = require('../config/database');
 const { validationResult } = require('express-validator');
+const { generateOtp, validateOtp, sendOtpEmail } = require('../services/authEmailService');
 
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
@@ -1328,6 +1329,219 @@ async function deleteAccount(req, res) {
   }
 }
 
+// ── OTP — Send / Resend ───────────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/auth/send-otp
+ * Body: { email, type?: 'signup' | 'forgot_password' }
+ *
+ * For 'signup'          — checks email is NOT already registered.
+ * For 'forgot_password' — checks email IS registered.
+ * Returns { encrypted_data } which the client must echo back with the OTP.
+ */
+async function sendOtp(req, res) {
+  try {
+    const { email, type = 'signup' } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (type === 'forgot_password') {
+      // Must exist
+      const user = await User.findOne({ where: { email: normalizedEmail } });
+      if (!user) {
+        // Generic message — don't reveal whether account exists
+        return res.json({ success: true, message: 'If that email is registered, an OTP has been sent.' });
+      }
+    } else {
+      // Signup — must NOT exist
+      const existing = await User.findOne({ where: { email: normalizedEmail } });
+      if (existing) {
+        return res.status(409).json({ success: false, message: 'Email already registered' });
+      }
+    }
+
+    const { otp, encrypted_data } = generateOtp(normalizedEmail);
+
+    // Awaited — user cannot proceed without the OTP
+    try {
+      await sendOtpEmail(normalizedEmail, otp, type);
+    } catch (emailErr) {
+      console.error('OTP email failed:', emailErr.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send verification email. Please try again later.',
+        error: process.env.NODE_ENV === 'development' ? emailErr.message : undefined
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'OTP sent to your email address',
+      data: { encrypted_data }
+    });
+  } catch (error) {
+    console.error('sendOtp error:', error);
+    res.status(500).json({ success: false, message: 'Failed to send OTP' });
+  }
+}
+
+/**
+ * POST /api/v1/auth/resend-otp
+ * Identical to sendOtp — provided as a convenience alias.
+ */
+const resendOtp = sendOtp;
+
+// ── Forgot Password ───────────────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/auth/forgot-password
+ * Body: { email }
+ * Shorthand — always uses type='forgot_password'.
+ */
+async function forgotPassword(req, res) {
+  req.body.type = 'forgot_password';
+  return sendOtp(req, res);
+}
+
+/**
+ * Validate password strength.
+ * Returns { valid: true } or { valid: false, message: '...' }
+ */
+function validatePasswordStrength(password) {
+  if (!password || password.length < 6) {
+    return { valid: false, message: 'Password must be at least 6 characters' };
+  }
+  if (!/[A-Z]/.test(password)) {
+    return { valid: false, message: 'Password must contain at least one uppercase letter' };
+  }
+  if (!/[a-z]/.test(password)) {
+    return { valid: false, message: 'Password must contain at least one lowercase letter' };
+  }
+  if (!/[0-9]/.test(password)) {
+    return { valid: false, message: 'Password must contain at least one number' };
+  }
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    return { valid: false, message: 'Password must contain at least one special character (e.g. @, #, !, $)' };
+  }
+  return { valid: true };
+}
+
+/**
+ * POST /api/v1/auth/verify-forgot-password-otp
+ * Body: { email, otp, hash }
+ *
+ * Verifies the OTP only. Does NOT reset the password yet.
+ * Returns a short-lived reset_token so the frontend can navigate to the
+ * "reset password" page with proof that the OTP was verified.
+ */
+async function verifyForgotPasswordOtp(req, res) {
+  try {
+    const { email, otp, hash } = req.body;
+
+    if (!email || !otp || !hash) {
+      return res.status(400).json({ success: false, message: 'email, otp, and hash are required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Validate OTP (stateless)
+    const otpCheck = validateOtp(normalizedEmail, otp, hash);
+    if (!otpCheck.valid) {
+      return res.status(400).json({ success: false, message: otpCheck.reason });
+    }
+
+    // Confirm account exists
+    const user = await User.findOne({ where: { email: normalizedEmail } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Account not found' });
+    }
+
+    // Issue a short-lived reset_token — proof that OTP was verified
+    const reset_token = jwt.sign(
+      { userId: user.id, email: normalizedEmail, purpose: 'password_reset' },
+      process.env.JWT_SECRET,
+      { expiresIn: '10m' }
+    );
+
+    return res.json({
+      success: true,
+      message: 'OTP verified. Use the reset_token to set your new password.',
+      data: { reset_token }
+    });
+  } catch (error) {
+    console.error('verifyForgotPasswordOtp error:', error);
+    res.status(500).json({ success: false, message: 'OTP verification failed' });
+  }
+}
+
+/**
+ * POST /api/v1/auth/reset-password
+ * Body: { reset_token, newPassword }
+ *
+ * Validates the reset_token (issued by /verify-forgot-password-otp),
+ * updates the password. Does NOT return auth tokens — user must log in.
+ */
+async function resetPassword(req, res) {
+  try {
+    const { reset_token, newPassword } = req.body;
+
+    if (!reset_token || !newPassword) {
+      return res.status(400).json({ success: false, message: 'reset_token and newPassword are required' });
+    }
+
+    // Password strength check
+    const pwCheck = validatePasswordStrength(newPassword);
+    if (!pwCheck.valid) {
+      return res.status(400).json({ success: false, message: pwCheck.message });
+    }
+
+    // Verify reset_token
+    let decoded;
+    try {
+      decoded = jwt.verify(reset_token, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        message: err.name === 'TokenExpiredError'
+          ? 'Reset session expired. Please restart the forgot password process.'
+          : 'Invalid reset token'
+      });
+    }
+
+    if (decoded.purpose !== 'password_reset') {
+      return res.status(400).json({ success: false, message: 'Invalid reset token' });
+    }
+
+    // Find user
+    const user = await User.findOne({ where: { id: decoded.userId, email: decoded.email } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Account not found' });
+    }
+
+    // Update password
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await user.update({ password_hash: passwordHash });
+
+    // Revoke all refresh tokens (security hygiene)
+    await mainSequelize.query(
+      'DELETE FROM refresh_tokens WHERE user_id = ?',
+      { replacements: [user.id] }
+    );
+
+    return res.json({
+      success: true,
+      message: 'Password reset successfully. Please log in with your new password.'
+    });
+  } catch (error) {
+    console.error('resetPassword error:', error);
+    res.status(500).json({ success: false, message: 'Failed to reset password' });
+  }
+}
+
 // Export with authenticate middleware attached
 const { authenticate } = require('../middleware/auth');
 getCurrentUser.authenticate = authenticate;
@@ -1354,6 +1568,12 @@ module.exports = {
   setBiometricStatus,
   registerDeviceToken,
   removeDeviceToken,
-  deleteAccount
+  deleteAccount,
+  sendOtp,
+  resendOtp,
+  forgotPassword,
+  verifyForgotPasswordOtp,
+  resetPassword,
+  validatePasswordStrength
 };
 

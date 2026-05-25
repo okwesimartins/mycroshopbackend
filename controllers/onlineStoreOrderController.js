@@ -907,53 +907,86 @@ async function createOrder(req, res) {
 
 /**
  * Update order status
+ * Sends shipped / completed emails when status transitions to 'shipped' or 'delivered'.
  */
 async function updateOrderStatus(req, res) {
   try {
     const { status, payment_status } = req.body;
-    
-    const order = await req.db.models.OnlineStoreOrder.findByPk(req.params.id);
-    
+
+    const order = await req.db.models.OnlineStoreOrder.findByPk(req.params.id, {
+      include: [
+        { model: req.db.models.OnlineStoreOrderItem },
+        { model: req.db.models.OnlineStore, attributes: ['id', 'username', 'store_name'] }
+      ]
+    });
+
     if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: 'Order not found'
-      });
+      return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
     const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'];
     const validPaymentStatuses = ['pending', 'paid', 'failed', 'refunded'];
 
     if (status && !validStatuses.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid status'
-      });
+      return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+    if (payment_status && !validPaymentStatuses.includes(payment_status)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment status' });
     }
 
-    if (payment_status && !validPaymentStatuses.includes(payment_status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid payment status'
-      });
-    }
+    const previousStatus = order.status;
 
     await order.update({
       ...(status !== undefined && { status }),
       ...(payment_status !== undefined && { payment_status })
     });
 
-    res.json({
-      success: true,
-      message: 'Order status updated successfully',
-      data: { order }
-    });
+    res.json({ success: true, message: 'Order status updated successfully', data: { order } });
+
+    // ── Fire-and-forget status emails ──────────────────────────────────────────
+    const customerEmail = order.customer_email;
+    const statusChanged = status && status !== previousStatus;
+
+    if (statusChanged && customerEmail && (status === 'shipped' || status === 'delivered')) {
+      (async () => {
+        try {
+          const { getTenantById } = require('../config/tenant');
+          const tenant = await getTenantById(req.user?.tenantId);
+          if (!tenant) return;
+
+          const orderJson = order.toJSON();
+          const items     = orderJson.OnlineStoreOrderItems || [];
+          const customerName = order.customer_name || 'Customer';
+
+          if (status === 'shipped') {
+            const { sendOrderShippedEmail } = require('../services/emailService');
+            await sendOrderShippedEmail({
+              tenant,
+              order: orderJson,
+              customerEmail,
+              customerName,
+              items,
+              deliveryDate: new Date()
+            });
+          } else if (status === 'delivered') {
+            const { sendOrderCompletedEmail } = require('../services/emailService');
+            await sendOrderCompletedEmail({
+              tenant,
+              order: orderJson,
+              customerEmail,
+              customerName,
+              deliveredDate: new Date()
+            });
+          }
+        } catch (emailErr) {
+          // Logged to order_email_log by the send function; just surface the error
+          console.error('[updateOrderStatus] Status email error:', emailErr.message);
+        }
+      })();
+    }
   } catch (error) {
     console.error('Error updating order status:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update order status'
-    });
+    res.status(500).json({ success: false, message: 'Failed to update order status' });
   }
 }
 
