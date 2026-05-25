@@ -51,9 +51,14 @@ router.post('/send-otp',
   authController.sendOtp
 );
 
-// Resend OTP (alias for send-otp)
+// Resend OTP
+// - Signup flow:         { email, registration_token } → returns { encrypted_data, registration_token }
+// - Forgot-password flow: { email }                   → returns { encrypted_data }
 router.post('/resend-otp',
-  [body('email').isEmail().withMessage('Valid email is required')],
+  [
+    body('email').isEmail().withMessage('Valid email is required'),
+    body('registration_token').optional().notEmpty().withMessage('registration_token cannot be empty if provided')
+  ],
   authController.resendOtp
 );
 

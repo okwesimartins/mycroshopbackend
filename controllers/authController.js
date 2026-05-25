@@ -1391,9 +1391,108 @@ async function sendOtp(req, res) {
 
 /**
  * POST /api/v1/auth/resend-otp
- * Identical to sendOtp — provided as a convenience alias.
+ *
+ * Two flows:
+ *
+ * 1. SIGNUP resend — body: { email, registration_token }
+ *    - Verifies the existing registration_token is still valid
+ *    - Generates a new OTP
+ *    - Issues a FRESH registration_token (resets the 10-min window)
+ *    - Returns { encrypted_data, registration_token }
+ *    Frontend must replace both tokens with the new ones.
+ *
+ * 2. FORGOT-PASSWORD resend — body: { email }  (no registration_token)
+ *    - Checks the email exists
+ *    - Generates a new OTP
+ *    - Returns { encrypted_data }
  */
-const resendOtp = sendOtp;
+async function resendOtp(req, res) {
+  try {
+    const { email, registration_token } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // ── Signup resend ─────────────────────────────────────────────────────────
+    if (registration_token) {
+      let regData;
+      try {
+        regData = jwt.verify(registration_token, process.env.JWT_SECRET);
+      } catch (err) {
+        return res.status(400).json({
+          success: false,
+          message: err.name === 'TokenExpiredError'
+            ? 'Registration session expired. Please start the signup again.'
+            : 'Invalid registration token'
+        });
+      }
+
+      if (regData.email !== normalizedEmail) {
+        return res.status(400).json({ success: false, message: 'Email does not match registration token' });
+      }
+
+      // Generate new OTP
+      const { otp, encrypted_data } = generateOtp(normalizedEmail);
+
+      try {
+        await sendOtpEmail(normalizedEmail, otp, 'signup');
+      } catch (emailErr) {
+        console.error('Resend OTP (signup) email failed:', emailErr.message);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to resend verification email. Please try again later.',
+          error: process.env.NODE_ENV === 'development' ? emailErr.message : undefined
+        });
+      }
+
+      // Issue a fresh registration_token — resets the 10-min window
+      const { passwordHash, name, subdomain, country, business_type, business_category } = regData;
+      const new_registration_token = jwt.sign(
+        { name, subdomain, email: normalizedEmail, passwordHash, country, business_type, business_category },
+        process.env.JWT_SECRET,
+        { expiresIn: '10m' }
+      );
+
+      return res.json({
+        success: true,
+        message: 'OTP resent to your email address',
+        data: { encrypted_data, registration_token: new_registration_token }
+      });
+    }
+
+    // ── Forgot-password resend ────────────────────────────────────────────────
+    const user = await User.findOne({ where: { email: normalizedEmail } });
+    if (!user) {
+      // Generic — don't reveal whether account exists
+      return res.json({ success: true, message: 'If that email is registered, an OTP has been sent.' });
+    }
+
+    const { otp, encrypted_data } = generateOtp(normalizedEmail);
+
+    try {
+      await sendOtpEmail(normalizedEmail, otp, 'forgot_password');
+    } catch (emailErr) {
+      console.error('Resend OTP (forgot-password) email failed:', emailErr.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to resend verification email. Please try again later.',
+        error: process.env.NODE_ENV === 'development' ? emailErr.message : undefined
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'OTP resent to your email address',
+      data: { encrypted_data }
+    });
+  } catch (error) {
+    console.error('resendOtp error:', error);
+    res.status(500).json({ success: false, message: 'Failed to resend OTP' });
+  }
+}
 
 // ── Forgot Password ───────────────────────────────────────────────────────────
 
