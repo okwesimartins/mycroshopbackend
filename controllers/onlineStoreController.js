@@ -5696,6 +5696,12 @@ async function getPreviewProducts(req, res) {
         productData.image_url = getFullUrl(productData.image_url);
       }
       if (productData && productData.id) productIds.push(productData.id);
+
+      // Attach store_product visibility metadata
+      productData.is_published = sp.is_published != null ? sp.is_published : false;
+      productData.featured = sp.featured != null ? sp.featured : false;
+      productData.sort_order = sp.sort_order != null ? sp.sort_order : null;
+
       return productData;
     });
 
@@ -5917,6 +5923,9 @@ async function getPreviewProduct(req, res) {
         image_url: row.image_url,
         expiry_date: row.expiry_date,
         is_active: row.is_active,
+        is_published: row['StoreProduct.is_published'] != null ? row['StoreProduct.is_published'] : false,
+        featured: row['StoreProduct.featured'] != null ? row['StoreProduct.featured'] : false,
+        sort_order: row['StoreProduct.sort_order'] != null ? row['StoreProduct.sort_order'] : null,
         created_at: row.created_at,
         updated_at: row.updated_at,
         variations: Object.values(variationsMap)
@@ -5936,7 +5945,7 @@ async function getPreviewProduct(req, res) {
               online_store_id: onlineStore.id
             },
             required: true,
-            attributes: [] // Don't include StoreProduct data in response
+            attributes: ['is_published', 'featured', 'sort_order']
           },
           {
             model: models.ProductVariation,
@@ -6044,8 +6053,17 @@ async function getPreviewProduct(req, res) {
       });
     }
 
-    // Remove StoreProducts array if it exists (not needed in response)
-    if (productData.StoreProducts) {
+    // Extract is_published / featured / sort_order from StoreProducts then remove it
+    if (productData.StoreProducts && productData.StoreProducts.length > 0) {
+      const sp = productData.StoreProducts[0];
+      productData.is_published = sp.is_published != null ? sp.is_published : false;
+      productData.featured = sp.featured != null ? sp.featured : false;
+      productData.sort_order = sp.sort_order != null ? sp.sort_order : null;
+      delete productData.StoreProducts;
+    } else if (productData.StoreProducts) {
+      productData.is_published = false;
+      productData.featured = false;
+      productData.sort_order = null;
       delete productData.StoreProducts;
     }
 
