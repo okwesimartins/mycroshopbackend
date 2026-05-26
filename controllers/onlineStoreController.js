@@ -3363,7 +3363,7 @@ async function removeOnlineStoreProduct(req, res) {
   try {
     const { QueryTypes } = require('sequelize');
     const { id: online_store_id, product_id } = req.params;
-    const { unpublish_only } = req.query; // If true, only unpublish, don't delete
+    // To hide without deleting, use PATCH /:id/products/:product_id/publish with { is_published: false }
     const tenantId = req.user?.tenantId;
 
     if (!tenantId) {
@@ -3421,27 +3421,7 @@ async function removeOnlineStoreProduct(req, res) {
 
     const product = productRows[0];
 
-    if (unpublish_only === 'true' || unpublish_only === true) {
-      // Only unpublish (set is_published to false) - keep the product
-      await req.db.query(
-        `UPDATE store_products SET is_published = 0, updated_at = NOW() WHERE product_id = :productId`,
-        {
-          replacements: { productId: product_id },
-          type: QueryTypes.UPDATE
-        }
-      );
-
-      return res.json({
-        success: true,
-        message: 'Product unpublished from online store successfully',
-        data: {
-          product_id: parseInt(product_id),
-          action: 'unpublished',
-          note: 'Product is still in your inventory but not visible in the online store'
-        }
-      });
-    } else {
-      // Delete completely: Remove from online store AND delete the product
+    // Delete completely: Remove from online store AND delete the product
       
       // First, get variation option images before deleting (for cleanup)
       const variationOptions = await req.db.query(
@@ -3509,16 +3489,15 @@ async function removeOnlineStoreProduct(req, res) {
         }
       );
 
-      return res.json({
-        success: true,
-        message: 'Product removed from online store and deleted successfully',
-        data: {
-          product_id: parseInt(product_id),
-          action: 'deleted',
-          note: 'Product and all associated data have been permanently deleted'
-        }
-      });
-    }
+    return res.json({
+      success: true,
+      message: 'Product removed from online store and deleted successfully',
+      data: {
+        product_id: parseInt(product_id),
+        action: 'deleted',
+        note: 'Product and all associated data have been permanently deleted'
+      }
+    });
   } catch (error) {
     console.error('Error removing online store product:', error);
     res.status(500).json({
@@ -3530,15 +3509,22 @@ async function removeOnlineStoreProduct(req, res) {
 }
 
 /**
- * Publish product to online store (free users only)
- * POST /api/v1/online-stores/:id/products/:product_id/publish
+ * PATCH /api/v1/online-stores/:id/products/:product_id/publish
+ * Body: { is_published: true | false, featured?, sort_order? }
+ *
+ * is_published: true  → publish (or re-publish) the product on the store
+ * is_published: false → hide the product from the store (keeps it in inventory)
  */
-async function publishOnlineStoreProduct(req, res) {
+async function setOnlineStoreProductVisibility(req, res) {
   try {
     const { QueryTypes } = require('sequelize');
     const { id: online_store_id, product_id } = req.params;
-    const { featured, sort_order } = req.body; // Optional: featured flag and sort order
+    const { is_published, featured, sort_order } = req.body;
     const tenantId = req.user?.tenantId;
+
+    if (is_published === undefined || is_published === null) {
+      return res.status(400).json({ success: false, message: 'is_published (true or false) is required' });
+    }
 
     if (!tenantId) {
       return res.status(401).json({
@@ -3590,6 +3576,20 @@ async function publishOnlineStoreProduct(req, res) {
       });
     }
 
+    // ── UNPUBLISH (hide from store, keep in inventory) ────────────────────────
+    if (is_published === false || is_published === 'false') {
+      await req.db.query(
+        `UPDATE store_products SET is_published = 0, updated_at = NOW() WHERE product_id = :productId`,
+        { replacements: { productId: product_id }, type: QueryTypes.UPDATE }
+      );
+      return res.json({
+        success: true,
+        message: 'Product hidden from online store',
+        data: { product_id: parseInt(product_id), is_published: false }
+      });
+    }
+
+    // ── PUBLISH (make visible / create store_products row if needed) ──────────
     // Check if StoreProduct already exists
     const existingStoreProduct = await req.db.query(
       `SELECT id, is_published, sort_order FROM store_products WHERE product_id = :productId`,
@@ -3835,13 +3835,13 @@ async function publishOnlineStoreProduct(req, res) {
 
     res.json({
       success: true,
-      message: 'Product published to online store successfully',
+      message: 'Product is now visible on the online store',
       data: {
         product: productData
       }
     });
   } catch (error) {
-    console.error('Error publishing product to online store:', error);
+    console.error('Error updating product visibility on online store:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to publish product to online store',
@@ -6085,7 +6085,7 @@ module.exports = {
   createOnlineStoreProduct,
   updateOnlineStoreProduct,
   removeOnlineStoreProduct,
-  publishOnlineStoreProduct,
+  setOnlineStoreProductVisibility,
   getOnlineStoreProducts,
   getOnlineStoreProductDetails,
   fetchProductVariantsStructured,

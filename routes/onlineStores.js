@@ -185,11 +185,11 @@ router.post('/:id/products', productImageMulterMiddleware, onlineStoreController
 // Update product for online store (free users only)
 router.put('/:id/products/:product_id', productImageMulterMiddleware, onlineStoreController.updateOnlineStoreProduct);
 
-// Publish product to online store (free users only)
-router.post('/:id/products/:product_id/publish', onlineStoreController.publishOnlineStoreProduct);
+// Publish or unpublish a product on the online store
+// Body: { is_published: true | false, featured?, sort_order? }
+router.patch('/:id/products/:product_id/publish', onlineStoreController.setOnlineStoreProductVisibility);
 
-// Remove/Delete product from online store (free users only)
-// Query param: ?unpublish_only=true (optional - if true, only unpublishes, doesn't delete product)
+// Permanently remove/delete product from online store and inventory
 router.delete('/:id/products/:product_id', onlineStoreController.removeOnlineStoreProduct);
 
 // Get all products uploaded to online store (not in collections)
