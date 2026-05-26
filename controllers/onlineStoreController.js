@@ -2487,7 +2487,7 @@ async function updateOnlineStoreProduct(req, res) {
   try {
     const { QueryTypes } = require('sequelize');
     const { id: online_store_id, product_id } = req.params;
-    const { name, sku, description, price, stock, category, image_url, is_active, variations, variants, featured, sort_order } = req.body;
+    const { name, sku, description, price, stock, category, image_url, is_active, is_published, variations, variants, featured, sort_order } = req.body;
     const tenantId = req.user?.tenantId;
 
     if (!tenantId) {
@@ -3150,8 +3150,8 @@ async function updateOnlineStoreProduct(req, res) {
       }
     }
 
-    // Update StoreProduct if featured or sort_order is provided
-    if (featured !== undefined || sort_order !== undefined) {
+    // Update StoreProduct if is_published, featured, or sort_order is provided
+    if (is_published !== undefined || featured !== undefined || sort_order !== undefined) {
       const storeProductRows = await req.db.query(
         `SELECT id, sort_order FROM store_products WHERE product_id = :productId`,
         {
@@ -3167,12 +3167,11 @@ async function updateOnlineStoreProduct(req, res) {
         // Handle smart sort order rearrangement
         if (sort_order !== undefined) {
           const newSortOrder = parseInt(sort_order) || 1;
-          
+
           if (oldSortOrder !== newSortOrder) {
-            // Shift existing products
             const existingProductsToShift = await req.db.query(
-              `SELECT id, sort_order FROM store_products 
-               WHERE id != :storeProductId AND sort_order >= :sortOrder 
+              `SELECT id, sort_order FROM store_products
+               WHERE id != :storeProductId AND sort_order >= :sortOrder
                ORDER BY sort_order DESC`,
               {
                 replacements: { storeProductId: storeProductId, sortOrder: newSortOrder },
@@ -3185,7 +3184,7 @@ async function updateOnlineStoreProduct(req, res) {
                 await req.db.query(
                   `UPDATE store_products SET sort_order = :newSortOrder WHERE id = :id`,
                   {
-                    replacements: { 
+                    replacements: {
                       newSortOrder: (parseInt(existingProduct.sort_order) || 0) + 1,
                       id: existingProduct.id
                     },
@@ -3195,35 +3194,31 @@ async function updateOnlineStoreProduct(req, res) {
               }
             }
           }
+        }
 
-          // Update StoreProduct
-          const storeProductUpdateFields = [];
-          const storeProductReplacements = { storeProductId: storeProductId };
+        // Build update fields dynamically for all three store_product fields
+        const storeProductUpdateFields = [];
+        const storeProductReplacements = { storeProductId: storeProductId };
 
-          if (featured !== undefined) {
-            storeProductUpdateFields.push('featured = :featured');
-            storeProductReplacements.featured = featured ? 1 : 0;
-          }
-          if (sort_order !== undefined) {
-            storeProductUpdateFields.push('sort_order = :sortOrder');
-            storeProductReplacements.sortOrder = newSortOrder;
-          }
-          storeProductUpdateFields.push('updated_at = NOW()');
+        if (is_published !== undefined) {
+          storeProductUpdateFields.push('is_published = :isPublished');
+          storeProductReplacements.isPublished = is_published !== false ? 1 : 0;
+        }
+        if (featured !== undefined) {
+          storeProductUpdateFields.push('featured = :featured');
+          storeProductReplacements.featured = featured ? 1 : 0;
+        }
+        if (sort_order !== undefined) {
+          storeProductUpdateFields.push('sort_order = :sortOrder');
+          storeProductReplacements.sortOrder = parseInt(sort_order) || 1;
+        }
+        storeProductUpdateFields.push('updated_at = NOW()');
 
-          if (storeProductUpdateFields.length > 1) {
-            await req.db.query(
-              `UPDATE store_products SET ${storeProductUpdateFields.join(', ')} WHERE id = :storeProductId`,
-              {
-                replacements: storeProductReplacements,
-                type: QueryTypes.UPDATE
-              }
-            );
-          }
-        } else if (featured !== undefined) {
+        if (storeProductUpdateFields.length > 1) {
           await req.db.query(
-            `UPDATE store_products SET featured = :featured, updated_at = NOW() WHERE id = :storeProductId`,
+            `UPDATE store_products SET ${storeProductUpdateFields.join(', ')} WHERE id = :storeProductId`,
             {
-              replacements: { storeProductId: storeProductId, featured: featured ? 1 : 0 },
+              replacements: storeProductReplacements,
               type: QueryTypes.UPDATE
             }
           );
